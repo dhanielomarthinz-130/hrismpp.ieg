@@ -10,6 +10,31 @@ require_once __DIR__ . '/master.php';
 $appVer  = htmlspecialchars(APP_VERSION, ENT_QUOTES, 'UTF-8');
 $styles  = file_get_contents(__DIR__ . '/Styles.html');
 
+// ---- Maintenance ----
+$mtKey   = strtolower((string)MAINTENANCE_KEY);
+$mtToken = hash('sha256', 'hris-mt|' . $mtKey);
+$path    = (string)parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+$base    = preg_replace('#/(maintenance/[^/]*|login(\.php)?)/?$#i', '/', $path);
+if ($base === '' || substr($base, -1) !== '/') $base .= '/';
+
+if (isset($_GET['mt'])) {
+    // /maintenance/<kunci> : bila kunci benar, buka form login saat maintenance lalu arahkan ke /login
+    if (hash_equals($mtKey, strtolower((string)$_GET['mt']))) {
+        setcookie('hris_mt', $mtToken, [
+            'expires'  => time() + 7 * 86400,
+            'path'     => $base,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+    }
+    header('Location: ' . $base . 'login');
+    exit;
+}
+
+$maintenance     = (string)get_setting('maintenance', '0') === '1';
+$mtBypass        = hash_equals($mtToken, (string)($_COOKIE['hris_mt'] ?? ''));
+$showMaintenance = $maintenance && !$mtBypass;
+
 ob_start();
 ?>
 <!DOCTYPE html>
@@ -42,8 +67,9 @@ ob_start();
             max-width: 400px;
             display: grid;
             grid-template-columns: minmax(0, 1fr);
-            background: var(--surface);
-            border: 1px solid var(--border);
+            background: var(--side-bg);
+            color: #FFFFFF;
+            border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 16px;
             overflow: hidden;
             box-shadow: var(--shadow-lg);
@@ -59,7 +85,7 @@ ob_start();
         /* Panel brand (desktop saja) */
         .auth-brand {
             display: none;
-            background: var(--side-bg);
+            background: rgba(0, 0, 0, 0.18);
             color: #FFFFFF;
             padding: 28px 28px 22px;
             flex-direction: column;
@@ -150,6 +176,120 @@ ob_start();
         .auth-main {
             position: relative;
             padding: 28px 28px 22px;
+            color: #FFFFFF;
+        }
+
+        /* Form di atas latar sidebar */
+        .auth-main .field > span {
+            color: #E0E7FF;
+        }
+
+        .auth-main input {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.14);
+            color: #FFFFFF;
+        }
+
+        .auth-main input::placeholder {
+            color: var(--side-muted);
+        }
+
+        .auth-main input:focus {
+            background: rgba(255, 255, 255, 0.09);
+            border-color: #A5B4FC;
+            box-shadow: 0 0 0 3px rgba(165, 180, 252, 0.25);
+        }
+
+        .auth-main input:-webkit-autofill {
+            -webkit-text-fill-color: #FFFFFF;
+            -webkit-box-shadow: 0 0 0 40px #1E1B4B inset;
+        }
+
+        .auth-main .input-lead-icon,
+        .auth-main .pw-eye {
+            color: var(--side-muted);
+        }
+
+        .auth-main .input-icon-wrap:focus-within .input-lead-icon {
+            color: #A5B4FC;
+        }
+
+        .auth-main .btn.ghost {
+            color: var(--side-text);
+        }
+
+        @media (hover: hover) {
+            .auth-main .btn.ghost:hover:not(:disabled) {
+                background: rgba(255, 255, 255, 0.08);
+                color: #FFFFFF;
+            }
+
+            .auth-main .pw-eye:hover {
+                color: #FFFFFF;
+            }
+        }
+
+        .auth-main .login-submit-btn {
+            background: var(--grad);
+            border-color: transparent;
+            color: #FFFFFF;
+        }
+
+        .auth-main .alert.err {
+            background: rgba(239, 68, 68, 0.16);
+            border-color: rgba(248, 113, 113, 0.4);
+            color: #FECACA;
+        }
+
+        .mt-banner {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            margin-bottom: 16px;
+            border-radius: 8px;
+            background: rgba(251, 191, 36, 0.14);
+            border: 1px solid rgba(251, 191, 36, 0.35);
+            color: #FDE68A;
+            font-size: 12.5px;
+            font-weight: 500;
+        }
+
+        .mt-banner .material-symbols-outlined {
+            font-size: 18px;
+        }
+
+        .mt-screen {
+            text-align: center;
+            padding: 12px 0 4px;
+        }
+
+        .mt-screen .mt-ico {
+            width: 56px;
+            height: 56px;
+            margin: 0 auto 16px;
+            border-radius: 14px;
+            display: grid;
+            place-items: center;
+            background: rgba(251, 191, 36, 0.14);
+            color: #FBBF24;
+        }
+
+        .mt-screen .mt-ico .material-symbols-outlined {
+            font-size: 30px;
+        }
+
+        .mt-screen h1 {
+            font-size: 19px;
+            font-weight: 700;
+            margin: 0 0 6px;
+        }
+
+        .mt-screen p {
+            margin: 0;
+            color: var(--side-text);
+            font-size: 13px;
+            line-height: 1.6;
         }
 
         @media (min-width: 860px) {
@@ -175,7 +315,7 @@ ob_start();
             margin-bottom: 20px;
         }
 
-        [data-theme="evening"] .auth-logo {
+        .auth-logo {
             background: #FFFFFF;
             padding: 5px 8px;
             border-radius: 6px;
@@ -190,7 +330,7 @@ ob_start();
         }
 
         .auth-form .lead {
-            color: var(--text-2);
+            color: var(--side-text);
             margin: 0 0 20px;
             font-size: 12.5px;
         }
@@ -216,7 +356,7 @@ ob_start();
             gap: 8px;
             margin-top: 16px;
             font-size: 11.5px;
-            color: var(--text-3);
+            color: var(--side-muted);
         }
     </style>
 </head>
@@ -270,6 +410,16 @@ ob_start();
 
                 <div class="auth-form">
                     <img class="auth-logo" src="assets/image/logo_text-BademdvM.jpg" alt="PT. Inovasi Eka Gemilang">
+<?php if ($showMaintenance): ?>
+                    <div class="mt-screen">
+                        <div class="mt-ico"><span class="material-symbols-outlined">construction</span></div>
+                        <h1>Sistem sedang maintenance</h1>
+                        <p>Kami sedang melakukan pemeliharaan sistem.<br>Silakan coba kembali beberapa saat lagi.</p>
+                    </div>
+<?php else: ?>
+<?php if ($maintenance): ?>
+                    <div class="mt-banner"><span class="material-symbols-outlined">construction</span>Mode maintenance aktif — hanya super admin yang dapat masuk.</div>
+<?php endif; ?>
                     <h1>Masuk ke akun Anda</h1>
                     <p class="lead">Gunakan akun Admin, Supervisor, atau Leader/PIC.</p>
 
@@ -300,10 +450,11 @@ ob_start();
                             <span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span>
                         </button>
                     </form>
+<?php endif; ?>
 
                     <div class="auth-meta">
-                        <span class="status-dot-online" aria-hidden="true"></span>
-                        <span>Sistem aktif · v<?= $appVer ?></span>
+                        <span class="status-dot-online" aria-hidden="true" <?= $showMaintenance ? 'style="background:#FBBF24"' : '' ?>></span>
+                        <span><?= $showMaintenance ? 'Maintenance' : 'Sistem aktif' ?> · v<?= $appVer ?></span>
                     </div>
                 </div>
         </section>
@@ -334,6 +485,9 @@ ob_start();
             document.getElementById('themeBtn').addEventListener('click', function () {
                 setTheme(document.documentElement.getAttribute('data-theme') === 'morning' ? 'evening' : 'morning');
             });
+
+            // Layar maintenance: tidak ada form login
+            if (!document.getElementById('loginForm')) return;
 
             // Toggle lihat password
             const passInput = document.getElementById('lgPass');

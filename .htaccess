@@ -24,6 +24,9 @@ Options -Indexes
     RewriteCond %{THE_REQUEST} \s/+(?:[^\s?]*/)?login\.php[\s?] [NC]
     RewriteRule ^login\.php$ %{ENV:BASE}login [R=302,L]
 
+    # 2b. /maintenance/<kunci> -> pintu masuk login saat maintenance
+    RewriteRule ^maintenance/([^/]+)/?$ login.php?mt=$1 [L,QSA]
+
     # 3. /login -> login.php
     RewriteRule ^login/?$ login.php [L,QSA]
 

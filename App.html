@@ -23,6 +23,8 @@
         operator: '<span class="material-symbols-outlined">badge</span>',
         bagian: '<span class="material-symbols-outlined">domain</span>',
         pengaturan: '<span class="material-symbols-outlined">settings</span>',
+        akses: '<span class="material-symbols-outlined">admin_panel_settings</span>',
+        maintenance: '<span class="material-symbols-outlined">construction</span>',
         menu: '<span class="material-symbols-outlined">menu</span>'
     };
 
@@ -36,7 +38,10 @@
         { id: 'rekap', label: 'Rekap MPP', short: 'Rekap', roles: ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'], bottom: true },
         { id: 'operator', label: 'Operator', roles: ['ADMIN', 'SUPERVISOR'], sec: 'Master data' },
         { id: 'bagian', label: 'Bagian & Target', roles: ['ADMIN', 'SUPERVISOR'] },
-        { id: 'pengaturan', label: 'Pengaturan', roles: ['ADMIN', 'SUPERVISOR'], sec: 'Sistem' }
+        { id: 'pengaturan', label: 'Pengaturan', roles: ['ADMIN', 'SUPERVISOR'], sec: 'Sistem' },
+        // Menu khusus super admin (tidak pernah tampil untuk user lain)
+        { id: 'akses', label: 'Control Akses', roles: [], superOnly: true, sec: 'Super admin' },
+        { id: 'maintenance', label: 'Maintenance', roles: [], superOnly: true }
     ];
 
     /* ------------------------------ util ------------------------------ */
@@ -58,8 +63,9 @@
     function bagName(k) { const b = (S.master.bagian || []).find(x => x.kode === k); return b ? b.nama : k; }
     function role() { return S.user ? S.user.role : ''; }
     function isAdmin() { return role() === 'ADMIN' || role() === 'SUPERVISOR'; }
-    function isSupervisor() { return role() === 'SUPERVISOR'; }
-    function canApprove() { return role() === 'SUPERVISOR'; }
+    function isSuper() { return !!(S.user && S.user.super); }
+    function isSupervisor() { return role() === 'SUPERVISOR' || isSuper(); }
+    function canApprove() { return role() === 'SUPERVISOR' || isSuper(); }
     function isEditor() { return role() === 'ADMIN' || role() === 'SUPERVISOR' || role() === 'LEADER'; }
     function canEdit(bag) {
         if (isAdmin() || isSupervisor()) return true;
@@ -257,7 +263,16 @@
     }
 
     /* ------------------------------ shell ------------------------------ */
-    function allowedPages() { return PAGES.filter(p => p.roles.indexOf(role()) >= 0); }
+    // Menu yang boleh dibuka: super admin = semua; selain itu ikut Control Akses (bila diatur) atau bawaan role
+    function allowedPages() {
+        const menus = S.master && S.master.menus;
+        return PAGES.filter(p => {
+            if (p.superOnly) return isSuper();
+            if (isSuper()) return true;
+            if (Array.isArray(menus)) return menus.indexOf(p.id) >= 0;
+            return p.roles.indexOf(role()) >= 0;
+        });
+    }
     function enterShell() {
         $('#login').classList.add('hidden');
         $('#shell').classList.remove('hidden');
@@ -277,6 +292,7 @@
             '<a data-page="' + p.id + '"><span class="ico">' + (ICONS[p.id] || '') + '</span>' + esc(p.short || p.label) + '</a>').join('') +
             '<a data-menu><span class="ico">' + ICONS.menu + '</span>Menu</a>';
         updateShiftChip();
+        updateMtChip();
         const allowed = allowedPages();
         const defPage = (allowed[0] || PAGES[0]).id;
         const want = (location.hash || '').replace('#', '') || store.get('hris_page') || defPage;
@@ -305,7 +321,19 @@
         const fn = RENDER[p.id];
         if (fn) fn().catch(fail);
     }
-    function refresh() { loadMaster().then(() => { updateShiftChip(); go(S.page); }).catch(fail); }
+    function refresh() { loadMaster().then(() => { updateShiftChip(); updateMtChip(); go(S.page); }).catch(fail); }
+    function updateMtChip() {
+        let c = $('#mtChip');
+        if (!(isSuper() && S.master && S.master.maintenance)) { if (c) c.remove(); return; }
+        if (!c) {
+            c = document.createElement('button');
+            c.id = 'mtChip'; c.type = 'button'; c.className = 'chip warn'; c.style.cursor = 'pointer'; c.style.border = '0';
+            c.title = 'Buka menu Maintenance';
+            c.onclick = () => go('maintenance');
+            $('.top-actions').insertBefore(c, $('#shiftNow'));
+        }
+        c.innerHTML = '<span class="material-symbols-outlined">construction</span>Maintenance aktif';
+    }
 
     /* =========================== DASHBOARD =========================== */
     function shiftSeg(cur, attr) {
@@ -2715,10 +2743,127 @@
     }
 
     /* =========================== INIT =========================== */
+    /* =========================== CONTROL AKSES (KHUSUS SUPER ADMIN) =========================== */
+    const AK_ROLES = [['ADMIN', 'Admin'], ['SUPERVISOR', 'Supervisor'], ['LEADER', 'Leader / PIC'], ['VIEWER', 'Viewer']];
+    let AK = null;
+    function akMenus() { return PAGES.filter(p => !p.superOnly); }
+    function akDefault(r) { return akMenus().filter(p => p.roles.indexOf(r) >= 0).map(p => p.id); }
+
+    async function renderAkses() {
+        $('#pageSub').textContent = 'Atur menu yang dapat diakses tiap role atau user';
+        $('#view').innerHTML = '<div id="akBody"><div class="empty">Memuat…</div></div>';
+        const d = await call('accessGet', {});
+        AK = { roles: {}, users: Object.assign({}, d.config.users || {}), userList: d.users || [], sel: '' };
+        AK_ROLES.forEach(r => { AK.roles[r[0]] = (d.config.roles && d.config.roles[r[0]]) ? d.config.roles[r[0]].slice() : akDefault(r[0]); });
+        drawAkses();
+    }
+
+    function akMenuLabel(p) {
+        return '<span style="display:inline-flex;align-items:center;gap:8px"><span style="color:var(--text-3);display:inline-flex">' + (ICONS[p.id] || '') + '</span>' + esc(p.label) + '</span>';
+    }
+
+    function drawAkses() {
+        const menus = akMenus();
+        const roleOf = u => (AK.userList.find(x => x.username === u) || {}).role || '';
+        let h = '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined">group</span>Akses per role</h2>' +
+            '<span class="small muted">Centang menu yang boleh dibuka oleh setiap role</span></div>' +
+            '<div class="table-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>Menu</th>' +
+            AK_ROLES.map(r => '<th style="text-align:center">' + r[1] + '</th>').join('') + '</tr></thead><tbody>' +
+            menus.map(p => '<tr><td>' + akMenuLabel(p) + '</td>' + AK_ROLES.map(r =>
+                '<td style="text-align:center"><input type="checkbox" aria-label="' + esc(p.label + ' untuk ' + r[1]) + '" data-akr="' + r[0] + '" data-m="' + p.id + '"' +
+                (AK.roles[r[0]].indexOf(p.id) >= 0 ? ' checked' : '') + '></td>').join('') + '</tr>').join('') +
+            '</tbody></table></div>' +
+            '<div class="row" style="margin-top:12px"><button class="btn sm ghost" id="akReset"><span class="material-symbols-outlined">restart_alt</span> Kembalikan ke bawaan</button></div></div>';
+
+        const custom = Object.keys(AK.users);
+        h += '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined">person</span>Akses khusus per user</h2>' +
+            '<span class="small muted">Bila diatur, menggantikan akses role untuk user tersebut</span></div>' +
+            (custom.length ? '<div class="row" style="gap:6px;margin-bottom:12px">' + custom.map(u => '<span class="chip pri">' + esc(u) + ' · ' + AK.users[u].length + ' menu</span>').join('') + '</div>' : '') +
+            '<label class="field" style="max-width:420px"><span>Pilih user</span><select id="akUser"><option value="">— Pilih user —</option>' +
+            AK.userList.map(u => '<option value="' + esc(u.username) + '"' + (AK.sel === u.username ? ' selected' : '') + '>' + esc(u.nama + ' (' + u.username + ') · ' + (u.role === 'LEADER' ? 'Leader / PIC' : u.role)) + (AK.users[u.username] ? ' · khusus' : '') + '</option>').join('') +
+            '</select></label><div id="akUserBox"></div></div>';
+
+        h += '<div class="savebar"><span>Perubahan berlaku saat user memuat ulang halaman.</span><span class="spacer"></span>' +
+            '<button class="btn sm primary" id="akSave"><span class="material-symbols-outlined">check_circle</span> Simpan Control Akses</button></div>';
+
+        $('#akBody').innerHTML = h;
+        $$('[data-akr]').forEach(cb => cb.onchange = () => {
+            const list = AK.roles[cb.dataset.akr];
+            const i = list.indexOf(cb.dataset.m);
+            if (cb.checked && i < 0) list.push(cb.dataset.m);
+            if (!cb.checked && i >= 0) list.splice(i, 1);
+        });
+        $('#akReset').onclick = () => { AK_ROLES.forEach(r => { AK.roles[r[0]] = akDefault(r[0]); }); drawAkses(); };
+        $('#akUser').onchange = e => { AK.sel = e.target.value; drawAkUser(roleOf); };
+        $('#akSave').onclick = async () => {
+            try {
+                await call('accessSave', { roles: AK.roles, users: AK.users });
+                toast('Control akses disimpan.', 'ok');
+            } catch (e) { fail(e); }
+        };
+        drawAkUser(roleOf);
+    }
+
+    function drawAkUser(roleOf) {
+        const box = $('#akUserBox');
+        const u = AK.sel;
+        if (!u) { box.innerHTML = ''; return; }
+        const has = !!AK.users[u];
+        const list = has ? AK.users[u] : (AK.roles[roleOf(u)] || []);
+        box.innerHTML = '<label class="check"><input type="checkbox" id="akUse"' + (has ? ' checked' : '') + '> Gunakan akses khusus untuk user ini</label>' +
+            '<div class="days-pick" style="margin-top:8px' + (has ? '' : ';opacity:.5;pointer-events:none') + '">' +
+            akMenus().map(p => '<label><input type="checkbox" data-aku="' + p.id + '"' + (list.indexOf(p.id) >= 0 ? ' checked' : '') + (has ? '' : ' disabled') + '>' + esc(p.label) + '</label>').join('') + '</div>' +
+            (has ? '' : '<p class="small muted" style="margin:8px 0 0">Saat ini mengikuti akses role ' + esc(roleOf(u)) + '.</p>');
+        $('#akUse').onchange = e => {
+            if (e.target.checked) AK.users[u] = (AK.roles[roleOf(u)] || []).slice();
+            else delete AK.users[u];
+            drawAkses();
+        };
+        $$('[data-aku]', box).forEach(cb => cb.onchange = () => {
+            AK.users[u] = $$('[data-aku]', box).filter(x => x.checked).map(x => x.dataset.aku);
+        });
+    }
+
+    /* =========================== MAINTENANCE (KHUSUS SUPER ADMIN) =========================== */
+    async function renderMaintenance() {
+        $('#pageSub').textContent = 'Mode pemeliharaan sistem';
+        $('#view').innerHTML = '<div id="mtBody"><div class="empty">Memuat…</div></div>';
+        drawMaintenance(await call('maintenance', {}));
+    }
+
+    function drawMaintenance(d) {
+        const on = !!d.aktif;
+        const key = String(d.key || '');
+        const url = location.origin + location.pathname.replace(/[^/]*$/, '') + 'maintenance/' + key.charAt(0).toUpperCase() + key.slice(1);
+        $('#mtBody').innerHTML = '<div class="card" style="max-width:760px">' +
+            '<div class="card-head"><h2><span class="material-symbols-outlined">construction</span>Mode maintenance</h2>' +
+            '<span class="chip ' + (on ? 'warn' : 'ok') + '">' + (on ? 'Aktif' : 'Nonaktif') + '</span></div>' +
+            '<p class="muted" style="margin-top:0">' + (on
+                ? 'Maintenance sedang aktif. Hanya super admin yang dapat masuk; user lain otomatis keluar dan melihat halaman maintenance.'
+                : 'Sistem berjalan normal. Saat diaktifkan, semua user selain super admin akan dikeluarkan dan tidak bisa login sampai maintenance dimatikan.') + '</p>' +
+            '<label class="field"><span>Alamat login saat maintenance</span><div class="row" style="flex-wrap:nowrap">' +
+            '<input readonly id="mtUrl" value="' + esc(url) + '"><button type="button" class="btn sm" id="mtCopy"><span class="material-symbols-outlined">content_copy</span> Salin</button></div>' +
+            '<small>Buka alamat ini untuk menampilkan form login ketika maintenance aktif.</small></label>' +
+            '<button class="btn ' + (on ? 'primary' : 'danger') + '" id="mtToggle"><span class="material-symbols-outlined">' + (on ? 'play_circle' : 'construction') + '</span> ' +
+            (on ? 'Nonaktifkan maintenance' : 'Aktifkan maintenance') + '</button></div>';
+        $('#mtCopy').onclick = async () => toast(await copyText(url) ? 'Alamat disalin.' : 'Gagal menyalin.', 'ok');
+        $('#mtToggle').onclick = async () => {
+            if (!on && !await confirmBox('Aktifkan maintenance?', 'Semua user selain super admin akan langsung dikeluarkan dan tidak bisa login.\nSimpan alamat login maintenance terlebih dahulu.', 'Aktifkan', 'danger')) return;
+            try {
+                const r = await call('setMaintenance', { aktif: !on });
+                S.master.maintenance = r.aktif;
+                updateMtChip();
+                toast(r.aktif ? 'Maintenance diaktifkan.' : 'Maintenance dinonaktifkan. Sistem kembali normal.', 'ok');
+                drawMaintenance(r);
+            } catch (e) { fail(e); }
+        };
+    }
+
     const RENDER = {
         dashboard: renderDashboard, absensi: renderAbsensi, jadwal_ieg: renderJadwalIeg, jadwal: renderJadwal,
         wa: renderWa, req_approval: renderReqApproval,
-        operator: renderOperator, bagian: renderBagian, pengaturan: renderPengaturan, rekap: renderRekap
+        operator: renderOperator, bagian: renderBagian, pengaturan: renderPengaturan, rekap: renderRekap,
+        akses: renderAkses, maintenance: renderMaintenance
     };
 
     document.addEventListener('click', e => {

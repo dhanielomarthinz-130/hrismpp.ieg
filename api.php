@@ -58,8 +58,9 @@ try {
         echo json_encode([
             'ok'   => true,
             'data' => [
-                'appName' => get_setting('app_nama', APP_NAME),
-                'version' => APP_VERSION
+                'appName'     => get_setting('app_nama', APP_NAME),
+                'version'     => APP_VERSION,
+                'maintenance' => maintenance_on()
             ]
         ]);
         exit;
@@ -67,6 +68,10 @@ try {
 
     // Aksi di bawah ini memerlukan otentikasi login
     $user = auth_check($token);
+
+    $admin = function (callable $fn) use ($user) {
+        return function () use ($fn, $user) { require_admin($user); return $fn(); };
+    };
 
     $routes = [
         // Auth
@@ -96,20 +101,38 @@ try {
         'kodeSimpan'      => fn() => kode_simpan($payload, $user),
 
         // Master Operator & Bagian
-        'saveOperator'    => fn() => save_operator($payload, $user),
-        'deleteOperator'  => fn() => delete_operator($payload, $user),
-        'importOperator'  => fn() => import_operators($payload, $user),
-        'saveBagian'      => fn() => save_bagian($payload, $user),
-        'deleteBagian'    => fn() => delete_bagian($payload, $user),
+        'saveOperator'    => $admin(fn() => save_operator($payload, $user)),
+        'deleteOperator'  => $admin(fn() => delete_operator($payload, $user)),
+        'importOperator'  => $admin(fn() => import_operators($payload, $user)),
+        'saveBagian'      => $admin(fn() => save_bagian($payload, $user)),
+        'deleteBagian'    => $admin(fn() => delete_bagian($payload, $user)),
 
         // Setting & User Management
-        'settings'        => fn() => get_settings_admin(),
-        'saveSettings'    => fn() => save_settings($payload, $user),
-        'saveShift'       => fn() => save_shift($payload, $user),
-        'users'           => fn() => list_users(),
-        'saveUser'        => fn() => save_user($payload, $user),
-        'deleteUser'      => fn() => delete_user((string)($payload['username'] ?? ''), $user),
-        'audit'           => fn() => get_audit(),
+        'settings'        => $admin(fn() => get_settings_admin()),
+        'saveSettings'    => $admin(fn() => save_settings($payload, $user)),
+        'saveShift'       => $admin(fn() => save_shift($payload, $user)),
+        'users'           => $admin(fn() => list_users()),
+        'saveUser'        => $admin(fn() => save_user($payload, $user)),
+        'deleteUser'      => $admin(fn() => delete_user((string)($payload['username'] ?? ''), $user)),
+        'audit'           => $admin(fn() => get_audit($user)),
+
+        // Maintenance (khusus super admin)
+        'maintenance'     => function () use ($user) {
+            require_super($user);
+            return ['aktif' => maintenance_on(), 'key' => MAINTENANCE_KEY];
+        },
+        'accessGet'       => function () use ($user) {
+            require_super($user);
+            return ['config' => menu_access_config(), 'users' => list_users()];
+        },
+        'accessSave'      => fn() => menu_access_save($payload, $user),
+        'setMaintenance'  => function () use ($payload, $user) {
+            require_super($user);
+            $on = !empty($payload['aktif']);
+            set_settings(['maintenance' => $on ? '1' : '0']);
+            audit_log($user['username'], 'MAINTENANCE', $on ? 'Aktif' : 'Nonaktif');
+            return ['aktif' => $on, 'key' => MAINTENANCE_KEY];
+        },
 
         // Order MPP (WhatsApp & Approval Supervisor)
         'order'           => fn() => order_get($payload, $user),
@@ -124,6 +147,7 @@ try {
         'waStatus'        => fn() => wa_status($payload, $user),
         'waLog'           => fn() => wa_log($payload, $user),
         'waAuto'          => function () use ($payload, $user) {
+            require_admin($user);
             set_settings(['wa_auto' => !empty($payload['aktif']) ? '1' : '0']);
             audit_log($user['username'], 'SET_WA_AUTO', !empty($payload['aktif']) ? 'Aktif' : 'Nonaktif');
             return true;

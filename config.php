@@ -33,6 +33,9 @@ defined('DB_NAME') || define('DB_NAME', 'hris_mpp');
 defined('DB_USER') || define('DB_USER', 'root');
 defined('DB_PASS') || define('DB_PASS', '');
 
+// Kunci URL masuk saat maintenance: /maintenance/<kunci> (tidak peka huruf besar/kecil)
+defined('MAINTENANCE_KEY') || define('MAINTENANCE_KEY', 'daniel');
+
 // Session Lifetime (detik) - default 12 jam
 define('SESSION_LIFETIME', 43200);
 

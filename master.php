@@ -215,8 +215,10 @@ function get_master(array $currentUser): array {
     $s = settings_();
 
     return [
-        'user'      => $currentUser,
-        'today'     => date('Y-m-d'),
+        'user'        => $currentUser,
+        'maintenance' => maintenance_on(),
+        'menus'       => menus_for_user($currentUser),
+        'today'       => date('Y-m-d'),
         'now'       => date('Y-m-d H:i:s'),
         'current'   => current_shift_($shifts),
         'shifts'    => $shifts,

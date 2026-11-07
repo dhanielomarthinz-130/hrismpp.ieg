@@ -4,7 +4,9 @@
  */
 require_once __DIR__ . '/db.php';
 
+// Peran yang boleh dipilih/dikelola lewat menu Pengaturan. SUPERADMIN sengaja tidak termasuk.
 const ROLES = ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'];
+const ROLE_SUPER = 'SUPERADMIN';
 
 class AuthException extends RuntimeException {
     public bool $auth = true;
@@ -14,12 +16,92 @@ function public_user(array $row): array {
     $bagianStr = trim((string)($row['bagian'] ?? ''));
     $bagianList = $bagianStr !== '' ? array_values(array_filter(array_map('trim', explode(',', strtoupper($bagianStr))))) : [];
 
+    $role = strtoupper((string)($row['role'] ?? 'VIEWER'));
+    $isSuper = $role === ROLE_SUPER;
+
+    // Super admin tampil & diperlakukan sebagai ADMIN (akses penuh) + penanda 'super'.
+    // Role aslinya tidak pernah dikirim ke browser.
     return [
         'username' => (string)$row['username'],
         'nama'     => (string)($row['nama'] ?? $row['username']),
-        'role'     => strtoupper((string)($row['role'] ?? 'VIEWER')),
-        'bagian'   => $bagianList,
+        'role'     => $isSuper ? 'ADMIN' : $role,
+        'bagian'   => $isSuper ? [] : $bagianList,
+        'super'    => $isSuper,
     ];
+}
+
+function is_super(array $user): bool {
+    return !empty($user['super']);
+}
+
+/** Hanya Admin / Supervisor (dan super admin) yang boleh mengakses fungsi pengelolaan. */
+function require_admin(array $user): void {
+    if (!is_super($user) && !in_array($user['role'], ['ADMIN', 'SUPERVISOR'], true)) {
+        throw new RuntimeException('Akses ditolak: menu ini khusus Admin / Supervisor.');
+    }
+}
+
+function require_super(array $user): void {
+    if (!is_super($user)) {
+        throw new RuntimeException('Akses ditolak.');
+    }
+}
+
+function maintenance_on(): bool {
+    return (string)db_val("SELECT value FROM settings WHERE key_name = 'maintenance'", [], '0') === '1';
+}
+
+// ---------------------------------------------------------------- Control Akses Menu
+// ID menu yang bisa diatur aksesnya (menu khusus super admin tidak termasuk).
+const MENU_IDS = ['dashboard', 'wa', 'req_approval', 'jadwal_ieg', 'absensi', 'jadwal', 'rekap', 'operator', 'bagian', 'pengaturan'];
+
+/** Konfigurasi akses: ['roles' => [ROLE => [menu...]], 'users' => [username => [menu...]]] */
+function menu_access_config(): array {
+    $raw = json_decode((string)get_setting('menu_access', ''), true);
+    $clean = fn($list) => array_values(array_intersect(MENU_IDS, is_array($list) ? $list : []));
+    $out = ['roles' => [], 'users' => []];
+    foreach ((array)($raw['roles'] ?? []) as $r => $list) {
+        $r = strtoupper((string)$r);
+        if (in_array($r, ROLES, true)) $out['roles'][$r] = $clean($list);
+    }
+    foreach ((array)($raw['users'] ?? []) as $u => $list) {
+        $out['users'][strtolower((string)$u)] = $clean($list);
+    }
+    return $out;
+}
+
+/** Daftar menu untuk user ini; null = pakai bawaan sesuai role. Super admin selalu null (semua menu). */
+function menus_for_user(array $user): ?array {
+    if (is_super($user)) return null;
+    $cfg = menu_access_config();
+    $uname = strtolower($user['username']);
+    if (array_key_exists($uname, $cfg['users'])) return $cfg['users'][$uname];
+    if (array_key_exists($user['role'], $cfg['roles'])) return $cfg['roles'][$user['role']];
+    return null;
+}
+
+function menu_access_save(array $p, array $currentUser): array {
+    require_super($currentUser);
+    $cfg = ['roles' => [], 'users' => []];
+    foreach ((array)($p['roles'] ?? []) as $r => $list) {
+        $r = strtoupper((string)$r);
+        if (in_array($r, ROLES, true)) $cfg['roles'][$r] = array_values(array_intersect(MENU_IDS, (array)$list));
+    }
+    $hide = super_usernames();
+    foreach ((array)($p['users'] ?? []) as $u => $list) {
+        $u = strtolower(trim((string)$u));
+        if ($u === '' || in_array($u, $hide, true)) continue;
+        if (!db_val("SELECT COUNT(*) FROM users WHERE LOWER(username) = ?", [$u])) continue;
+        $cfg['users'][$u] = array_values(array_intersect(MENU_IDS, (array)$list));
+    }
+    set_settings(['menu_access' => json_encode($cfg)]);
+    audit_log($currentUser['username'], 'CONTROL_AKSES', count($cfg['roles']) . ' role, ' . count($cfg['users']) . ' user khusus');
+    return $cfg;
+}
+
+/** Username semua akun super admin (untuk disembunyikan dari daftar/audit). */
+function super_usernames(): array {
+    return array_map('strtolower', array_column(db_all("SELECT username FROM users WHERE UPPER(role) = ?", [ROLE_SUPER]), 'username'));
 }
 
 function audit_log(string $username, string $aksi, string $detail): void {
@@ -35,9 +117,13 @@ function audit_log(string $username, string $aksi, string $detail): void {
     }
 }
 
-function get_audit(): array {
-    $rows = db_all("SELECT waktu, user, aksi, detail FROM audit ORDER BY id DESC LIMIT 100");
-    return $rows;
+function get_audit(array $currentUser = []): array {
+    $rows = db_all("SELECT waktu, user, aksi, detail FROM audit ORDER BY id DESC LIMIT 150");
+    if (!is_super($currentUser)) {
+        $hide = super_usernames();
+        $rows = array_values(array_filter($rows, fn($r) => !in_array(strtolower((string)$r['user']), $hide, true)));
+    }
+    return array_slice($rows, 0, 100);
 }
 
 function login(string $username, string $password): array {
@@ -50,6 +136,11 @@ function login(string $username, string $password): array {
     $row = db_row("SELECT * FROM users WHERE LOWER(username) = ?", [$username]);
     if (!$row || (int)$row['aktif'] !== 1) {
         throw new RuntimeException('Username atau password salah.');
+    }
+
+    // Saat maintenance aktif, hanya super admin yang boleh masuk
+    if (maintenance_on() && strtoupper((string)$row['role']) !== ROLE_SUPER) {
+        throw new RuntimeException('Sistem sedang dalam maintenance. Silakan coba lagi nanti.');
     }
 
     // Cek password hash
@@ -99,6 +190,11 @@ function auth_check(?string $token): array {
         throw new AuthException('Sesi berakhir, silakan login ulang.');
     }
 
+    // Maintenance aktif: sesi selain super admin langsung diakhiri
+    if (maintenance_on() && strtoupper((string)$sess['role']) !== ROLE_SUPER) {
+        throw new AuthException('Sistem sedang dalam maintenance. Silakan coba lagi nanti.');
+    }
+
     // Perpanjang masa sesi (sliding expiration)
     $newExpires = date('Y-m-d H:i:s', time() + SESSION_LIFETIME);
     db_update('user_tokens', ['expires_at' => $newExpires], 'token = ?', [$token]);
@@ -139,7 +235,8 @@ function change_password(array $currentUser, string $oldPw, string $newPw): bool
 }
 
 function list_users(): array {
-    $rows = db_all("SELECT * FROM users ORDER BY username ASC");
+    // Akun super admin tidak pernah ditampilkan di menu Pengaturan
+    $rows = db_all("SELECT * FROM users WHERE UPPER(role) <> ? ORDER BY username ASC", [ROLE_SUPER]);
     $out = [];
     foreach ($rows as $r) {
         $u = public_user($r);
@@ -165,6 +262,10 @@ function save_user(array $p, array $currentUser): bool {
     $bagianStr = implode(',', array_filter(array_map('trim', array_map('strtoupper', $bagianArr))));
 
     $row = db_row("SELECT * FROM users WHERE LOWER(username) = ?", [$username]);
+    if ($row && strtoupper((string)$row['role']) === ROLE_SUPER) {
+        // Akun super admin tidak bisa diubah dari menu Pengaturan (dan tidak diakui keberadaannya)
+        throw new RuntimeException('Username sudah dipakai.');
+    }
     $isNew = !$row;
 
     if ($isNew && isset($p['isNew']) && $p['isNew'] === false) throw new RuntimeException('Pengguna tidak ditemukan.');
@@ -215,7 +316,7 @@ function delete_user(string $username, array $currentUser): bool {
     }
 
     $row = db_row("SELECT * FROM users WHERE LOWER(username) = ?", [$username]);
-    if (!$row) throw new RuntimeException('Pengguna tidak ditemukan.');
+    if (!$row || strtoupper((string)$row['role']) === ROLE_SUPER) throw new RuntimeException('Pengguna tidak ditemukan.');
 
     db_delete('user_tokens', 'user_id = ?', [$row['id']]);
     db_delete('users', 'id = ?', [$row['id']]);
@@ -224,12 +325,12 @@ function delete_user(string $username, array $currentUser): bool {
 }
 
 function can_edit_bagian(array $currentUser, ?string $bagian): bool {
-    if (in_array($currentUser['role'], ['ADMIN', 'SUPERVISOR'], true)) return true;
+    if (is_super($currentUser) || in_array($currentUser['role'], ['ADMIN', 'SUPERVISOR'], true)) return true;
     if ($currentUser['role'] !== 'LEADER') return false;
     if (empty($currentUser['bagian'])) return true;
     return in_array(strtoupper(trim((string)$bagian)), $currentUser['bagian'], true);
 }
 
 function can_approve_mpp(array $currentUser): bool {
-    return $currentUser['role'] === 'SUPERVISOR';
+    return is_super($currentUser) || $currentUser['role'] === 'SUPERVISOR';
 }
