@@ -39,7 +39,11 @@ $counts = [];
 try {
     $pdo = db();
     $online = true;
-    $dbStatus = 'Terhubung · ' . strtoupper(DB_DRIVER);
+    $actual = strtolower($pdo->getAttribute(PDO::ATTR_DRIVER_NAME));
+    $dbStatus = 'Terhubung · ' . strtoupper($actual);
+    if ($actual !== strtolower(DB_DRIVER)) {
+        $err = $err ?: 'Koneksi ' . strtoupper(DB_DRIVER) . ' gagal — sistem sementara memakai ' . strtoupper($actual) . '. Periksa kredensial database.';
+    }
     foreach (['operator', 'bagian', 'users', 'kode_jadwal'] as $t) {
         $counts[$t] = (int)db_val("SELECT COUNT(*) FROM $t");
     }
