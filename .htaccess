@@ -1,0 +1,34 @@
+DirectoryIndex index.php
+Options -Indexes
+
+# Lindungi file sensitif
+<FilesMatch "^(config\.local(\.example)?\.php|database\.sql|README\.md|\.gitignore)$">
+    Require all denied
+</FilesMatch>
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Tentukan base path otomatis (bekerja di subfolder XAMPP maupun root domain hosting)
+    RewriteCond %{REQUEST_URI}::$1 ^(.*?/)(.*)::\2$
+    RewriteRule ^(.*)$ - [E=BASE:%1]
+
+    # 0. Blokir folder database, backup & git
+    RewriteRule ^(database|\.backup-ui|\.git)(/|$) - [F,L]
+
+    # 1. index.php / Index.html dibuka langsung -> URL bersih /
+    RewriteCond %{THE_REQUEST} \s/+(?:[^\s?]*/)?(?:index\.php|Index\.html)[\s?] [NC]
+    RewriteRule ^(?:index\.php|Index\.html)$ %{ENV:BASE} [R=302,L]
+
+    # 2. login.php dibuka langsung -> URL bersih /login
+    RewriteCond %{THE_REQUEST} \s/+(?:[^\s?]*/)?login\.php[\s?] [NC]
+    RewriteRule ^login\.php$ %{ENV:BASE}login [R=302,L]
+
+    # 3. /login -> login.php
+    RewriteRule ^login/?$ login.php [L,QSA]
+
+    # 4. Route halaman SPA -> index.php
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^(dashboard|absensi|jadwal|request-os|wa|rekap|operator|bagian|pengaturan)/?$ index.php [L,QSA]
+</IfModule>

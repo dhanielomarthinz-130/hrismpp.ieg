@@ -1,0 +1,15 @@
+# Kredensial server — jangan di-commit
+config.local.php
+
+# Database lokal SQLite (berisi data & hash password)
+database/*.sqlite
+database/*.sqlite-*
+
+# Backup UI lama
+.backup-ui/
+
+# Editor / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

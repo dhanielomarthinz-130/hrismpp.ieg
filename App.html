@@ -1,0 +1,2750 @@
+<script>
+    /* =====================================================================
+       HRIS MPP — IEG · SPA (vanilla JS, google.script.run)
+       ===================================================================== */
+    const S = {
+        token: null, user: null, master: null, page: 'dashboard', timer: null,
+        dash: {}, abs: {}, jad: {}, wa: {}, op: { q: '', bagian: '', status: 'aktif' }
+    };
+    const HARI = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    const HARI3 = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+    const BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+    const STATUS = { H: 'Hadir', T: 'Telat', S: 'Sakit', I: 'Izin', A: 'Alpa', C: 'Cuti' };
+    const GRUP_LABEL = { A: 'Rolling A', B: 'Rolling B', S1: 'Tetap Shift 1', S2: 'Tetap Shift 2', NS: 'Non Shift' };
+
+    const ICONS = {
+        dashboard: '<span class="material-symbols-outlined">dashboard</span>',
+        absensi: '<span class="material-symbols-outlined">how_to_reg</span>',
+        jadwal_ieg: '<span class="material-symbols-outlined">event_note</span>',
+        jadwal: '<span class="material-symbols-outlined">calendar_month</span>',
+        wa: '<span class="material-symbols-outlined">chat</span>',
+        req_approval: '<span class="material-symbols-outlined">fact_check</span>',
+        rekap: '<span class="material-symbols-outlined">summarize</span>',
+        operator: '<span class="material-symbols-outlined">badge</span>',
+        bagian: '<span class="material-symbols-outlined">domain</span>',
+        pengaturan: '<span class="material-symbols-outlined">settings</span>',
+        menu: '<span class="material-symbols-outlined">menu</span>'
+    };
+
+    const PAGES = [
+        { id: 'dashboard', label: 'Dashboard MPP', short: 'Dashboard', roles: ['ADMIN', 'SUPERVISOR', 'VIEWER'], bottom: true },
+        { id: 'wa', label: 'Request OS', short: 'Request OS', roles: ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'], bottom: true },
+        { id: 'req_approval', label: 'Approval Request OS', short: 'Approval OS', roles: ['SUPERVISOR'], bottom: true },
+        { id: 'jadwal_ieg', label: 'Jadwal IEG', short: 'Jadwal IEG', roles: ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'], bottom: true },
+        { id: 'absensi', label: 'Absensi Shift', short: 'Absensi', roles: ['ADMIN', 'SUPERVISOR', 'LEADER'], bottom: true },
+        { id: 'jadwal', label: 'Jadwal Mingguan', short: 'Jadwal', roles: ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'], bottom: true },
+        { id: 'rekap', label: 'Rekap MPP', short: 'Rekap', roles: ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'], bottom: true },
+        { id: 'operator', label: 'Operator', roles: ['ADMIN', 'SUPERVISOR'], sec: 'Master data' },
+        { id: 'bagian', label: 'Bagian & Target', roles: ['ADMIN', 'SUPERVISOR'] },
+        { id: 'pengaturan', label: 'Pengaturan', roles: ['ADMIN', 'SUPERVISOR'], sec: 'Sistem' }
+    ];
+
+    /* ------------------------------ util ------------------------------ */
+    const $ = (s, el) => (el || document).querySelector(s);
+    const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const store = {
+        get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+        set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) { } }
+    };
+    function utc(ymd) { const p = ymd.split('-').map(Number); return Date.UTC(p[0], p[1] - 1, p[2]); }
+    function addDays(ymd, n) { return new Date(utc(ymd) + n * 864e5).toISOString().slice(0, 10); }
+    function dow(ymd) { return new Date(utc(ymd)).getUTCDay(); }
+    function monday(ymd) { const w = dow(ymd); return addDays(ymd, w === 0 ? -6 : 1 - w); }
+    function fmtTgl(ymd) { if (!ymd) return ''; const p = ymd.split('-'); return HARI[dow(ymd)] + ', ' + p[2] + ' ' + BULAN[+p[1] - 1] + ' ' + p[0]; }
+    function fmtShort(ymd) { const p = ymd.split('-'); return p[2] + ' ' + BULAN[+p[1] - 1]; }
+    function shiftName(k) { const s = (S.master.shifts || []).find(x => x.kode === k); return s ? s.nama : k; }
+    function shiftTime(k) { const s = (S.master.shifts || []).find(x => x.kode === k); return s ? s.mulai + '–' + s.selesai : ''; }
+    function bagName(k) { const b = (S.master.bagian || []).find(x => x.kode === k); return b ? b.nama : k; }
+    function role() { return S.user ? S.user.role : ''; }
+    function isAdmin() { return role() === 'ADMIN' || role() === 'SUPERVISOR'; }
+    function isSupervisor() { return role() === 'SUPERVISOR'; }
+    function canApprove() { return role() === 'SUPERVISOR'; }
+    function isEditor() { return role() === 'ADMIN' || role() === 'SUPERVISOR' || role() === 'LEADER'; }
+    function canEdit(bag) {
+        if (isAdmin() || isSupervisor()) return true;
+        if (role() !== 'LEADER') return false;
+        return !S.user.bagian.length || S.user.bagian.indexOf(String(bag || '').toUpperCase()) >= 0;
+    }
+    function liburLabel(v) { return String(v || '').split(',').filter(String).map(n => HARI3[+n]).join(', ') || '—'; }
+
+    function call(action, payload, opt) {
+        opt = opt || {};
+        if (!opt.silent) loading(true);
+        if (window.google && window.google.script && window.google.script.run) {
+            return new Promise((resolve, reject) => {
+                google.script.run
+                    .withSuccessHandler(r => {
+                        if (!opt.silent) loading(false);
+                        if (r && r.ok) return resolve(r.data);
+                        const err = new Error(r ? r.error : 'Tidak ada respons dari server');
+                        if (r && r.auth) { doLogout(true); }
+                        reject(err);
+                    })
+                    .withFailureHandler(e => { if (!opt.silent) loading(false); reject(e instanceof Error ? e : new Error(String(e))); })
+                    .api(action, S.token, payload || {});
+            });
+        }
+        return fetch('api.php?action=' + encodeURIComponent(action), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Token': S.token || ''
+            },
+            body: JSON.stringify(payload || {})
+        })
+            .then(res => res.json())
+            .then(r => {
+                if (!opt.silent) loading(false);
+                if (r && r.ok) return r.data;
+                const err = new Error(r ? r.error : 'Tidak ada respons dari server');
+                if (r && r.auth) { doLogout(true); }
+                throw err;
+            })
+            .catch(e => {
+                if (!opt.silent) loading(false);
+                throw (e instanceof Error ? e : new Error(String(e)));
+            });
+    }
+
+    let loadingCount = 0;
+    function loading(on) {
+        loadingCount = Math.max(0, loadingCount + (on ? 1 : -1));
+        $('#loading').classList.toggle('hidden', loadingCount === 0);
+    }
+    function toast(msg, type) {
+        const el = document.createElement('div');
+        el.className = 'toast ' + (type || '');
+        el.textContent = msg;
+        $('#toasts').appendChild(el);
+        setTimeout(() => el.remove(), type === 'err' ? 6000 : 3200);
+    }
+    function fail(e) { toast(e.message || String(e), 'err'); }
+
+    /* ------------------------------ modal ------------------------------ */
+    let modalLocked = false;
+    function openModal(o) {
+        $('#modalTitle').textContent = o.title || '';
+        $('#modalBody').innerHTML = o.body || '';
+        const foot = $('#modalFoot');
+        foot.innerHTML = '';
+        (o.buttons || []).forEach(b => {
+            const btn = document.createElement('button');
+            btn.className = 'btn ' + (b.cls || '');
+            btn.textContent = b.label;
+            btn.onclick = () => b.onClick ? b.onClick(btn) : closeModal();
+            foot.appendChild(btn);
+        });
+        foot.classList.toggle('hidden', !(o.buttons || []).length);
+        modalLocked = !!o.locked;
+        $('#modal [data-close]').classList.toggle('hidden', modalLocked);
+        $('#modal').classList.remove('hidden');
+        if (o.onOpen) o.onOpen($('#modalBody'));
+        const f = $('#modalBody input:not([type=checkbox]), #modalBody select, #modalBody textarea');
+        if (f && window.innerWidth > 640) setTimeout(() => f.focus(), 50);
+    }
+    function closeModal() { if (modalLocked) return; $('#modal').classList.add('hidden'); }
+    function formData(root) {
+        const o = {};
+        $$('[name]', root).forEach(el => {
+            if (el.type === 'checkbox') {
+                if (el.dataset.multi) { (o[el.name] = o[el.name] || []); if (el.checked) o[el.name].push(el.value); }
+                else o[el.name] = el.checked;
+            } else o[el.name] = el.value;
+        });
+        return o;
+    }
+    function confirmBox(title, msg, okLabel, cls) {
+        return new Promise(res => openModal({
+            title: title, body: '<p>' + esc(msg).replace(/\n/g, '<br>') + '</p>',
+            buttons: [{ label: 'Batal', onClick: () => { closeModal(); res(false); } },
+            { label: okLabel || 'Ya', cls: cls || 'primary', onClick: () => { closeModal(); res(true); } }]
+        }));
+    }
+
+    async function copyText(text) {
+        try { await navigator.clipboard.writeText(text); return true; }
+        catch (e) {
+            const ta = document.createElement('textarea');
+            ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.select();
+            let ok = false;
+            try { ok = document.execCommand('copy'); } catch (x) { }
+            ta.remove();
+            return ok;
+        }
+    }
+
+    /* ------------------------------ tema ------------------------------ */
+    function applyTheme(t) {
+        document.documentElement.setAttribute('data-theme', t);
+        store.set('hris_theme', t);
+        $$('.theme-label').forEach(el => el.textContent = t === 'morning' ? 'Evening' : 'Morning');
+        $$('[data-theme-toggle] .theme-icon').forEach(el => el.textContent = t === 'morning' ? 'dark_mode' : 'light_mode');
+        const meta = document.querySelector('meta[name=theme-color]');
+        if (meta) meta.content = t === 'morning' ? '#F4F5F8' : '#0B0D13';
+    }
+    function toggleTheme() { applyTheme(document.documentElement.getAttribute('data-theme') === 'morning' ? 'evening' : 'morning'); }
+
+    /* ------------------------------ auth ------------------------------ */
+    async function boot() {
+        applyTheme(store.get('hris_theme') || (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'evening' : 'morning'));
+        S.token = store.get('hris_token');
+        if (S.token) {
+            try { await loadMaster(); enterShell(); return; } catch (e) { S.token = null; store.set('hris_token', null); }
+        }
+        showLogin();
+    }
+    function showLogin() {
+        const baseDir = location.pathname.replace(/\/(index\.php|Index\.html|login(\.php)?)$/i, '');
+        if (!/\/login$/i.test(location.pathname)) {
+            window.location.replace((baseDir || '') + '/login');
+            return;
+        }
+        $('#shell').classList.add('hidden');
+        $('#login').classList.remove('hidden');
+        call('publicInfo', {}, { silent: true }).then(d => { $('#loginVer').textContent = 'v' + d.version; $('#loginAppName').textContent = d.appName; }).catch(() => { });
+        setTimeout(() => $('#lgUser').focus(), 50);
+    }
+    async function doLogin(ev) {
+        ev.preventDefault();
+        const btn = $('#lgBtn');
+        $('#loginErr').classList.add('hidden');
+        btn.disabled = true; btn.textContent = 'Memeriksa…';
+        try {
+            const d = await call('login', { username: $('#lgUser').value, password: $('#lgPass').value });
+            S.token = d.token; S.user = d.user;
+            store.set('hris_token', d.token);
+            $('#lgPass').value = '';
+            await loadMaster();
+            enterShell();
+            if (d.mustChange) changePasswordModal(true);
+        } catch (e) {
+            $('#loginErr').textContent = e.message;
+            $('#loginErr').classList.remove('hidden');
+        } finally { btn.disabled = false; btn.textContent = 'Masuk'; }
+    }
+    async function doLogout(expired) {
+        if (!expired && S.token) { try { await call('logout', { token: S.token }, { silent: true }); } catch (e) { } }
+        S.token = null; S.user = null; store.set('hris_token', null);
+        clearInterval(S.timer);
+        $('#modal').classList.add('hidden'); modalLocked = false;
+        if (expired) toast('Sesi berakhir, silakan login ulang.', 'err');
+        showLogin();
+    }
+    function changePasswordModal(forced) {
+        openModal({
+            title: forced ? 'Ganti password awal' : 'Ganti password', locked: forced,
+            body: (forced ? '<div class="alert info">Demi keamanan, ganti password bawaan sebelum melanjutkan.</div>' : '') +
+                '<label class="field"><span>Password lama</span><input type="password" name="oldPassword" autocomplete="current-password"></label>' +
+                '<label class="field"><span>Password baru</span><input type="password" name="newPassword" autocomplete="new-password"><small>Minimal 6 karakter</small></label>' +
+                '<label class="field"><span>Ulangi password baru</span><input type="password" name="confirm" autocomplete="new-password"></label>',
+            buttons: (forced ? [] : [{ label: 'Batal' }]).concat([{
+                label: 'Simpan', cls: 'primary', onClick: async () => {
+                    const f = formData($('#modalBody'));
+                    if (f.newPassword !== f.confirm) return toast('Konfirmasi password tidak sama.', 'err');
+                    try { await call('changePassword', f); modalLocked = false; closeModal(); toast('Password diganti.', 'ok'); } catch (e) { fail(e); }
+                }
+            }])
+        });
+    }
+
+    async function loadMaster() {
+        S.master = await call('master', {}, { silent: true });
+        S.user = S.master.user;
+    }
+
+    /* ------------------------------ shell ------------------------------ */
+    function allowedPages() { return PAGES.filter(p => p.roles.indexOf(role()) >= 0); }
+    function enterShell() {
+        $('#login').classList.add('hidden');
+        $('#shell').classList.remove('hidden');
+        const name = S.master.settings.app_nama || 'HRIS MPP';
+        $('#sideAppName').textContent = name; document.title = name;
+        $('#sideUser').textContent = S.user.nama;
+        $('#sideRole').textContent = S.user.role + (S.user.bagian.length ? ' · ' + S.user.bagian.join(', ') : '');
+        $('#sideAvatar').textContent = (S.user.nama || 'U').charAt(0).toUpperCase();
+        let sec = '';
+        $('#sideNav').innerHTML = allowedPages().map(p => {
+            let h = '';
+            if (p.sec && p.sec !== sec) { sec = p.sec; h += '<div class="side-sec">' + esc(p.sec) + '</div>'; }
+            return h + '<a data-page="' + p.id + '"><span class="ico">' + (ICONS[p.id] || '') + '</span>' + esc(p.label) + '</a>';
+        }).join('');
+        $('#bottomNav').innerHTML = allowedPages().filter(p => p.bottom).slice(0, 4).map(p =>
+            '<a data-page="' + p.id + '"><span class="ico">' + (ICONS[p.id] || '') + '</span>' + esc(p.short || p.label) + '</a>').join('') +
+            '<a data-menu><span class="ico">' + ICONS.menu + '</span>Menu</a>';
+        updateShiftChip();
+        const allowed = allowedPages();
+        const defPage = (allowed[0] || PAGES[0]).id;
+        const want = (location.hash || '').replace('#', '') || store.get('hris_page') || defPage;
+        go(allowed.some(p => p.id === want) ? want : defPage);
+    }
+    function updateShiftChip() {
+        const c = S.master.current;
+        $('#shiftNow').innerHTML = (c.berjalan ? '<span class="shift-pulse" aria-hidden="true"></span>' : '') + esc(shiftName(c.kode)) + ' · ' + esc(shiftTime(c.kode));
+    }
+    function openSide(on) { $('#sidebar').classList.toggle('open', on); $('#scrim').classList.toggle('show', on); }
+
+    function go(page) {
+        const allowed = allowedPages();
+        const p = allowed.find(x => x.id === page) || allowed[0] || PAGES[0];
+        S.page = p.id;
+        store.set('hris_page', p.id);
+        const cleanPath = location.pathname.replace(/\/(index\.php|Index\.html|login(\.php)?)$/i, '/');
+        history.replaceState(null, '', cleanPath + '#' + p.id);
+        $$('[data-page]').forEach(a => a.classList.toggle('active', a.dataset.page === p.id));
+        $('#pageTitle').textContent = p.label;
+        $('#pageSub').textContent = '';
+        clearInterval(S.timer);
+        openSide(false);
+        $('#view').innerHTML = '';
+        $('#view').scrollTop = 0; window.scrollTo(0, 0);
+        const fn = RENDER[p.id];
+        if (fn) fn().catch(fail);
+    }
+    function refresh() { loadMaster().then(() => { updateShiftChip(); go(S.page); }).catch(fail); }
+
+    /* =========================== DASHBOARD =========================== */
+    function shiftSeg(cur, attr) {
+        return '<div class="seg" role="group">' + S.master.shifts.map(s =>
+            '<button type="button" data-' + attr + '="' + s.kode + '" class="' + (s.kode === cur ? 'on' : '') + '">' + esc(s.nama) + '</button>').join('') + '</div>';
+    }
+
+    async function renderDashboard() {
+        const c = S.master.current;
+        S.dash.tanggal = S.dash.tanggal || c.tanggal;
+        S.dash.shift = S.dash.shift || c.kode;
+        const v = $('#view');
+        v.innerHTML =
+            '<div class="toolbar">' +
+            '<input type="date" id="dTgl" value="' + S.dash.tanggal + '" aria-label="Tanggal">' +
+            shiftSeg(S.dash.shift, 'dshift') +
+            '<button class="btn sm" id="dNow"><span class="material-symbols-outlined" style="font-size:14px">play_circle</span> Shift berjalan</button>' +
+            '<span class="spacer"></span>' +
+            (isEditor() ? '<button class="btn sm" id="dAbs"><span class="material-symbols-outlined">how_to_reg</span> Clock-In Absensi</button>' : '') +
+            '<button class="btn sm grad" id="dWa"><span class="material-symbols-outlined">chat</span> Request OS</button>' +
+            '</div><div id="dBody"><div class="empty">Memuat…</div></div>';
+        $('#dTgl').onchange = e => { S.dash.tanggal = e.target.value; loadDash(); };
+        $$('[data-dshift]').forEach(b => b.onclick = () => { S.dash.shift = b.dataset.dshift; $$('[data-dshift]').forEach(x => x.classList.toggle('on', x === b)); loadDash(); });
+        $('#dNow').onclick = () => { S.dash.tanggal = null; S.dash.shift = null; refresh(); };
+        if ($('#dAbs')) $('#dAbs').onclick = () => { S.abs = { tanggal: S.dash.tanggal, shift: S.dash.shift }; go('absensi'); };
+        $('#dWa').onclick = () => { S.wa = { tanggal: S.dash.tanggal, shift: S.dash.shift }; go('wa'); };
+        await loadDash();
+        S.timer = setInterval(() => loadDash(true), 60000);
+    }
+
+    async function loadDash(silent) {
+        const d = await call('dashboard', { tanggal: S.dash.tanggal, shift: S.dash.shift }, { silent: silent });
+        if (S.page !== 'dashboard') return;
+        const t = d.total;
+        const base = t.target || t.jadwal;
+        $('#pageSub').textContent = d.tanggalLabel + ' · ' + d.shift.nama + ' ' + d.shift.mulai + '–' + d.shift.selesai;
+        const tidak = t.S + t.I + t.C + t.A;
+        let h = '<div class="kpis">' +
+            '<div class="kpi hero"><div class="lbl">Pemenuhan MPP</div><div class="val">' + t.persen + '%</div><div class="sub">' + t.hadir + ' hadir dari ' + base + (t.target ? ' target' : ' terjadwal') + '</div></div>' +
+            '<div class="kpi"><div class="lbl">Target MPP</div><div class="val">' + t.target + '</div><div class="sub">' + (t.target ? (t.gap < 0 ? 'Kurang ' + (-t.gap) : t.gap > 0 ? 'Lebih ' + t.gap : 'Pas') : 'Atur di menu Bagian') + '</div></div>' +
+            '<div class="kpi"><div class="lbl">Terjadwal</div><div class="val">' + t.jadwal + '</div><div class="sub">Libur ' + d.off + (d.cuti.length ? ' · Cuti ' + d.cuti.length : '') + '</div></div>' +
+            '<div class="kpi"><div class="lbl">Hadir</div><div class="val">' + t.hadir + '</div><div class="sub">Telat ' + t.T + '</div></div>' +
+            '<div class="kpi"><div class="lbl">Tidak hadir</div><div class="val"' + (tidak ? ' style="color:var(--err)"' : '') + '>' + tidak + '</div><div class="sub">S ' + t.S + ' · I ' + t.I + ' · C ' + t.C + ' · A ' + t.A + '</div></div>' +
+            '<div class="kpi"><div class="lbl">Belum absen</div><div class="val"' + (t.BELUM ? ' style="color:var(--warn)"' : '') + '>' + t.BELUM + '</div><div class="sub">Update s/d ' + d.generatedAt.slice(11, 16) + '</div></div>' +
+            '</div>';
+
+        if (!d.bagian.length) {
+            h += '<div class="card empty"><div class="big"><span class="material-symbols-outlined">event_busy</span></div><p>Belum ada jadwal untuk shift ini.</p>' +
+                (isAdmin() ? '<button class="btn primary" onclick="go(\'jadwal\')">Buat jadwal rolling</button>' : '') + '</div>';
+        } else {
+            h += '<div class="card"><div class="card-head"><h2>MPP per bagian</h2><span class="muted small">hadir / ' + (t.target ? 'target' : 'terjadwal') + '</span></div><div class="bars">';
+            d.bagian.forEach(g => {
+                const b = g.target || g.jadwal;
+                const pct = b ? Math.min(100, Math.round(g.hadir / b * 100)) : 0;
+                const chips = [];
+                if (g.T) chips.push('<span class="chip info">Telat ' + g.T + '</span>');
+                if (g.S) chips.push('<span class="chip warn">Sakit ' + g.S + '</span>');
+                if (g.I) chips.push('<span class="chip warn">Izin ' + g.I + '</span>');
+                if (g.C) chips.push('<span class="chip pri">Cuti ' + g.C + '</span>');
+                if (g.A) chips.push('<span class="chip err">Alpa ' + g.A + '</span>');
+                if (g.BELUM) chips.push('<span class="chip">Belum ' + g.BELUM + '</span>');
+                if (g.target && g.jadwal < g.target) chips.push('<span class="chip err">Jadwal kurang ' + (g.target - g.jadwal) + '</span>');
+                const names = [];
+                ['S', 'I', 'C', 'A', 'T', 'BELUM'].forEach(k => { if (g.list[k].length) names.push('<b>' + (STATUS[k] || 'Belum') + ':</b> ' + esc(g.list[k].join(', '))); });
+                if (g.bko.length) names.push('<b>BKO:</b> ' + esc(g.bko.join(', ')));
+                h += '<div class="bag-card"><div class="bag-top"><span class="bag-name">' + esc(g.nama) + '</span>' +
+                    '<span class="bag-num">' + g.hadir + ' <small>/ ' + b + '</small></span></div>' +
+                    '<div class="progress ' + (pct < 90 ? 'low' : '') + '"><div style="width:' + pct + '%"></div></div>' +
+                    '<div class="bag-meta"><span class="chip ' + (pct >= 100 ? 'ok' : pct >= 90 ? 'pri' : 'err') + '">' + g.persen + '%</span>' + chips.join('') + '</div>' +
+                    (names.length ? '<div class="names">' + names.join('<br>') + '</div>' : '') + '</div>';
+            });
+            h += '</div></div>';
+        }
+        $('#dBody').innerHTML = h + '<div id="dReq"></div>';
+        call('rekapMpp', { from: S.dash.tanggal, to: S.dash.tanggal }, { silent: true }).then(r => {
+            if (S.page !== 'dashboard' || !$('#dReq')) return;
+            $('#dReq').innerHTML = '<div class="card"><div class="card-head"><h2>Request MPP outsourcing · ' + fmtShort(S.dash.tanggal) + '</h2><button class="btn sm ghost" onclick="go(\'rekap\')">Rekap MPP →</button></div>' +
+                (r.rows.length ? '<div class="row">' + r.rows.map(x => '<div class="kpi" style="flex:1 1 200px"><div class="lbl">' + esc(x.shiftNama) + '</div><div class="val">' + x.request + ' <small class="muted" style="font-size:13px">Mp request</small></div>' +
+                    '<div class="sub">Terisi ' + x.terisi + (x.vacant ? ' · VACANT ' + x.vacant : '') + ' · Hadir ' + (x.hadir === null ? '—' : x.hadir) + '</div></div>').join('') + '</div>'
+                    : '<div class="muted small">Belum ada request yang disubmit untuk tanggal ini.</div>') + '</div>';
+        }).catch(() => { });
+    }
+
+    /* =========================== ABSENSI (CHECKLIST MASUK / CLOCK-IN) =========================== */
+    let absQueue = {}, absTimer = null, absData = null, absMode = 'AUTO', absBagFilter = '';
+
+    async function renderAbsensi() {
+        const c = S.master.current;
+        S.abs.tanggal = S.abs.tanggal || c.tanggal;
+        S.abs.shift = S.abs.shift || c.kode;
+        $('#view').innerHTML =
+            '<div class="toolbar">' +
+            '<input type="date" id="aTgl" value="' + S.abs.tanggal + '" aria-label="Tanggal">' +
+            shiftSeg(S.abs.shift, 'ashift') +
+            '<select id="aBag"><option value="">Semua Divisi</option>' + S.master.bagian.map(b => '<option value="' + b.kode + '"' + (absBagFilter === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') + '</select>' +
+            '<input type="search" id="aQ" placeholder="Cari nama karyawan…" class="grow" style="flex:1 1 160px">' +
+            '<button class="btn sm grad" id="aAllClockIn"><span class="material-symbols-outlined">fact_check</span> Clock-In Semua</button>' +
+            '<button class="btn sm primary" id="aAdd"><span class="material-symbols-outlined">person_add</span> Tambah</button>' +
+            '</div>' +
+            '<div id="aStats"></div>' +
+            '<div id="aBody"><div class="empty">Memuat…</div></div>';
+        $('#aTgl').onchange = e => { flushAbs(); S.abs.tanggal = e.target.value; loadAbs(); };
+        $$('[data-ashift]').forEach(b => b.onclick = () => { flushAbs(); S.abs.shift = b.dataset.ashift; $$('[data-ashift]').forEach(x => x.classList.toggle('on', x === b)); loadAbs(); });
+        $('#aBag').onchange = e => { absBagFilter = e.target.value; renderAbsList(); };
+        $('#aQ').oninput = () => renderAbsList();
+        $('#aAllClockIn').onclick = () => {
+            const visible = getFilteredAbsRows();
+            let count = 0, vacCount = 0;
+            visible.forEach(r => {
+                if (r.isVacant || /vacant/i.test(r.nama)) { vacCount++; return; }
+                if (r.canEdit && r.status !== 'H') {
+                    setStatus(r.operatorId, 'H', true);
+                    count++;
+                }
+            });
+            if (count) toast(count + ' karyawan berhasil Clock-In.', 'ok');
+            if (vacCount) {
+                toast('Ada ' + vacCount + ' slot VACANT — silakan ketik nama karyawan pengisinya pada baris Vacant.', 'warn');
+                const firstInp = $('.vac-fill-input');
+                if (firstInp) firstInp.focus();
+            }
+        };
+        $('#aAdd').onclick = addOperatorModal;
+        await loadAbs();
+    }
+
+    async function loadAbs() {
+        absData = await call('absensi', { tanggal: S.abs.tanggal, shift: S.abs.shift });
+        $('#pageSub').textContent = absData.tanggalLabel + ' · ' + shiftName(absData.shift) + ' ' + shiftTime(absData.shift);
+        renderAbsList();
+    }
+
+    function getFilteredAbsRows() {
+        if (!absData || !absData.rows) return [];
+        const q = ($('#aQ') ? $('#aQ').value : '').toLowerCase().trim();
+        const hasScheduled = absData.rows.some(r => r.terjadwal);
+        const showAll = (absMode === 'ALL') || (absMode === 'AUTO' && !hasScheduled) || !!q;
+        return absData.rows.filter(r => {
+            if (!showAll && !r.terjadwal) return false;
+            if (absBagFilter && r.bagianTugas !== absBagFilter && r.bagian !== absBagFilter) return false;
+            if (q && r.nama.toLowerCase().indexOf(q) < 0 && (r.nik || '').toLowerCase().indexOf(q) < 0) return false;
+            return true;
+        });
+    }
+
+    function updateAbsStats() {
+        const stEl = $('#aStats');
+        if (!stEl || !absData) return;
+        const hasScheduled = absData.rows.some(r => r.terjadwal);
+        const showAll = (absMode === 'ALL') || (absMode === 'AUTO' && !hasScheduled);
+        const activeRows = absData.rows.filter(r => showAll || r.terjadwal);
+        const vacSlots = activeRows.filter(r => r.isVacant || /vacant/i.test(r.nama)).length;
+        const baseList = activeRows.filter(r => !r.isVacant && !/vacant/i.test(r.nama));
+        const total = baseList.length;
+        const masuk = baseList.filter(r => r.status === 'H' || r.status === 'T').length;
+        const belum = baseList.filter(r => !r.status).length;
+        const tidakHadir = baseList.filter(r => r.status && r.status !== 'H' && r.status !== 'T').length;
+        const schedCount = absData.rows.filter(r => r.terjadwal).length;
+
+        const approvalNoteHtml = absData.approvalStatus === 'PENDING'
+            ? '<div class="alert warn" style="margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">' +
+              '<span><b>Request OS untuk Shift ini masih menunggu Approval Supervisor.</b> Jadwal &amp; daftar hadir otomatis masuk setelah di-Approve Supervisor.</span>' +
+              '<button type="button" class="btn xs primary" onclick="go(\'wa\')">Buka Request OS →</button></div>'
+            : (absData.approvalStatus === 'APPROVED'
+                ? '<div class="row" style="margin-bottom:8px;gap:6px"><span class="chip xs ok"><span class="material-symbols-outlined">check_circle</span> Request OS Approved oleh ' + esc(absData.approvedBy || 'Supervisor') + '</span></div>'
+                : '');
+
+        stEl.innerHTML =
+            approvalNoteHtml +
+            '<div class="abs-summary-bar">' +
+            '<div class="abs-kpi-group">' +
+            '<div class="abs-kpi"><span class="abs-kpi-lbl">Total Karyawan</span><b class="abs-kpi-val">' + total + '</b></div>' +
+            '<div class="abs-kpi ok"><span class="abs-kpi-lbl">Sudah Clock-In</span><b class="abs-kpi-val">' + masuk + '</b></div>' +
+            '<div class="abs-kpi warn"><span class="abs-kpi-lbl">Belum Clock-In</span><b class="abs-kpi-val">' + belum + '</b></div>' +
+            (vacSlots > 0 ? '<div class="abs-kpi warn"><span class="abs-kpi-lbl">Slot Vacant (Isi Nama)</span><b class="abs-kpi-val">' + vacSlots + '</b></div>' : '') +
+            (tidakHadir > 0 ? '<div class="abs-kpi err"><span class="abs-kpi-lbl">Izin / Sakit / Alpa</span><b class="abs-kpi-val">' + tidakHadir + '</b></div>' : '') +
+            '</div>' +
+            '<div class="seg sm">' +
+            '<button type="button" data-amode="SCHED" class="' + (!showAll ? 'on' : '') + '">Request Hari Ini (' + schedCount + ')</button>' +
+            '<button type="button" data-amode="ALL" class="' + (showAll ? 'on' : '') + '">Semua (' + absData.rows.length + ')</button>' +
+            '</div>' +
+            '</div>';
+
+        $$('[data-amode]').forEach(b => b.onclick = () => {
+            absMode = b.dataset.amode;
+            renderAbsList();
+        });
+    }
+
+    function renderAbsList() {
+        updateAbsStats();
+        const rows = getFilteredAbsRows();
+        if (!rows.length) {
+            $('#aBody').innerHTML = '<div class="card empty"><div class="big"><span class="material-symbols-outlined">inbox</span></div><p>Tidak ada karyawan pada filter ini.</p>' +
+                '<div class="row" style="justify-content:center;margin-top:10px;gap:8px">' +
+                '<button class="btn sm primary" id="aShowAllBtn">Tampilkan Semua Karyawan</button>' +
+                '<button class="btn sm ghost" onclick="go(\'wa\')">Buka Request OS →</button></div></div>';
+            if ($('#aShowAllBtn')) $('#aShowAllBtn').onclick = () => { absMode = 'ALL'; renderAbsList(); };
+            return;
+        }
+        const availDatalist = '<datalist id="vacOpSuggestions">' +
+            (absData.available || []).filter(o => !/vacant/i.test(o.nama)).map(o => '<option value="' + esc(o.nama) + '">' + esc(bagName(o.bagian)) + '</option>').join('') +
+            '</datalist>';
+
+        const groups = {};
+        rows.forEach(r => (groups[r.bagianTugas] = groups[r.bagianTugas] || []).push(r));
+        const order = S.master.bagian.map(b => b.kode).filter(k => groups[k]).concat(Object.keys(groups).filter(k => !S.master.bagian.some(b => b.kode === k)));
+        $('#aBody').innerHTML = availDatalist + order.map(k => {
+            const list = groups[k].slice().sort((a, b) => {
+                const vacA = (a.isVacant || /vacant/i.test(a.nama)) ? 0 : 1; // Tampilkan slot VACANT di paling atas divisi agar langsung terlihat & dinamai
+                const vacB = (b.isVacant || /vacant/i.test(b.nama)) ? 0 : 1;
+                if (vacA !== vacB) return vacA - vacB;
+                return (a.nama || '').localeCompare(b.nama || '');
+            });
+            const namedList = list.filter(r => !r.isVacant && !/vacant/i.test(r.nama));
+            const vacInGroup = list.length - namedList.length;
+            const hadir = namedList.filter(r => r.status === 'H' || r.status === 'T').length;
+            const editable = list.some(r => r.canEdit);
+            return '<div class="grp"><div class="grp-head">' +
+                '<span>' + esc(bagName(k)) + '</span>' +
+                '<span class="chip pri" data-cnt="' + k + '">' + hadir + ' / ' + list.length + ' Masuk</span>' +
+                (vacInGroup > 0 ? '<span class="chip xs warn">' + vacInGroup + ' Slot Vacant Belum Dinamai</span>' : '') +
+                '<span class="spacer"></span>' +
+                (editable && namedList.length ? '<button class="btn xs ghost" data-allh="' + k + '"><span class="material-symbols-outlined" style="font-size:15px">done_all</span> Clock-In Divisi</button>' : '') +
+                '</div><div class="grp-body">' +
+                list.map((r, idx) => absRow(r, idx)).join('') + '</div></div>';
+        }).join('');
+
+        $$('.clockin-check').forEach(cb => cb.onchange = () => {
+            const id = cb.closest('.att').dataset.id;
+            setStatus(id, cb.checked ? 'H' : '', true);
+        });
+        $$('.stat-btns button').forEach(b => b.onclick = () => setStatus(b.closest('.att').dataset.id, b.dataset.s));
+        $$('.att .lem').forEach(i => i.onchange = () => queueAbs(i.closest('.att').dataset.id, { lembur: i.value }));
+        $$('.att .ket').forEach(i => i.onchange = () => queueAbs(i.closest('.att').dataset.id, { ket: i.value }));
+        $$('[data-allh]').forEach(b => b.onclick = () => {
+            absData.rows.filter(r => r.bagianTugas === b.dataset.allh && r.canEdit && !r.isVacant && !/vacant/i.test(r.nama) && r.status !== 'H').forEach(r => setStatus(r.operatorId, 'H', true));
+        });
+        $$('[data-rm]').forEach(b => b.onclick = () => removeFromShift(b.dataset.rm));
+
+        // Handler pengisian nama karyawan pada Slot VACANT di halaman Absensi
+        $$('[data-vac-save]').forEach(btn => btn.onclick = async () => {
+            const rowEl = btn.closest('.att');
+            const vacId = rowEl.dataset.id;
+            const bag = rowEl.dataset.bag;
+            const inp = $('.vac-fill-input', rowEl);
+            const nama = (inp ? inp.value : '').trim();
+            if (!nama) {
+                if (inp) inp.focus();
+                return toast('Ketik nama karyawan pengisi Vacant terlebih dahulu.', 'warn');
+            }
+            btn.disabled = true;
+            try {
+                await flushAbs();
+                const res = await call('fillVacant', {
+                    tanggal: S.abs.tanggal,
+                    shift: S.abs.shift,
+                    vacantId: vacId,
+                    bagian: bag,
+                    nama: nama
+                });
+                toast('Slot Vacant diisi oleh ' + res.nama + ' & otomatis Clock-In!', 'ok');
+                await Promise.all([loadMaster(), loadAbs()]);
+            } catch (e) {
+                btn.disabled = false;
+                fail(e);
+            }
+        });
+        $$('.vac-fill-input').forEach(inp => inp.onkeydown = e => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const btn = $('[data-vac-save]', inp.closest('.att'));
+                if (btn) btn.click();
+            }
+        });
+    }
+
+    function absRow(r, idx) {
+        const dis = r.canEdit ? '' : ' disabled';
+        const isVac = r.isVacant || /vacant/i.test(r.nama);
+
+        // Bila ini adalah Slot VACANT dari Request OS -> Tampilkan Input Nama Karyawan Pengisi Vacant
+        if (isVac) {
+            return '<div class="att vac-fill-row" data-id="' + r.operatorId + '" data-bag="' + esc(r.bagianTugas) + '">' +
+                '<div class="vac-fill-badge">' +
+                '<span class="material-symbols-outlined" style="font-size:18px">person_add</span>' +
+                '<span>SLOT VACANT</span>' +
+                '</div>' +
+                '<div class="vac-fill-control">' +
+                '<input type="text" class="vac-fill-input" list="vacOpSuggestions" placeholder="Ketik nama karyawan pengisi vacant di sini…" autocomplete="off"' + dis + '>' +
+                '<button type="button" class="btn sm primary vac-fill-btn" data-vac-save="' + r.operatorId + '"' + dis + '>' +
+                '<span class="material-symbols-outlined" style="font-size:17px">how_to_reg</span>' +
+                '<span>Simpan Nama &amp; Clock-In</span>' +
+                '</button>' +
+                (r.canEdit ? '<button type="button" class="icon-btn" data-rm="' + r.operatorId + '" title="Hapus slot vacant ini" aria-label="Hapus slot vacant"><span class="material-symbols-outlined">close</span></button>' : '') +
+                '</div>' +
+                '</div>';
+        }
+
+        const isMasuk = r.status === 'H' || r.status === 'T';
+        const isExVacant = r.sumber === 'VACANT_FILLED' || /vacant/i.test(r.ket || '');
+        return '<div class="att' + (isMasuk ? ' is-clocked-in' : '') + '" data-id="' + r.operatorId + '">' +
+            '<label class="clockin-pill' + (isMasuk ? ' on' : '') + '" title="Checklist Masuk / Clock-In">' +
+            '<input type="checkbox" class="clockin-check"' + (isMasuk ? ' checked' : '') + dis + '>' +
+            '<span class="material-symbols-outlined" style="font-size:18px">' + (isMasuk ? 'check_circle' : 'radio_button_unchecked') + '</span>' +
+            '<span class="clockin-text">' + (isMasuk ? 'Masuk' : 'Clock-In') + '</span>' +
+            '</label>' +
+            '<div class="att-name"><b>' + esc(r.nama) + '</b>' +
+            (r.nik ? ' <small>(' + esc(r.nik) + ')</small>' : '') +
+            (isExVacant ? ' <span class="chip xs warn">Pengisi Vacant</span>' : '') +
+            (r.bagianTugas !== r.bagian ? ' <span class="chip xs info">BKO</span>' : '') +
+            '</div>' +
+            '<div class="stat-btns">' + Object.keys(STATUS).map(s =>
+                '<button type="button" data-s="' + s + '" class="' + (r.status === s ? 'on' : '') + '" title="' + STATUS[s] + '"' + dis + '>' + s + '</button>').join('') + '</div>' +
+            '<div class="att-extra"><input class="lem" type="number" min="0" max="8" step="0.5" placeholder="Lembur" inputmode="decimal" value="' + (r.lembur || '') + '" title="Lembur (jam)"' + dis + '>' +
+            '<input class="ket" placeholder="Catatan…" value="' + esc(r.ket) + '"' + dis + '>' +
+            (r.canEdit && r.terjadwal ? '<button class="icon-btn" data-rm="' + r.operatorId + '" title="Keluarkan dari shift" aria-label="Keluarkan dari shift"><span class="material-symbols-outlined">close</span></button>' : '') + '</div></div>';
+    }
+
+    function setStatus(id, s, force) {
+        const r = absData.rows.find(x => x.operatorId === id);
+        if (!r || !r.canEdit) return;
+        r.status = (!force && r.status === s) ? '' : s;
+        if (r.status === 'H' || r.status === 'T') {
+            r.terjadwal = true;
+            if (!r.updatedAt) {
+                const now = new Date();
+                r.updatedAt = now.toISOString().slice(0, 10) + ' ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0') + ':00';
+            }
+        }
+        const el = $('.att[data-id="' + id + '"]');
+        if (el) {
+            const isMasuk = r.status === 'H' || r.status === 'T';
+            el.classList.toggle('is-clocked-in', isMasuk);
+            const cb = $('.clockin-check', el);
+            if (cb) cb.checked = isMasuk;
+            const pill = $('.clockin-pill', el);
+            if (pill) {
+                pill.classList.toggle('on', isMasuk);
+                const ico = $('.material-symbols-outlined', pill);
+                if (ico) ico.textContent = isMasuk ? 'check_circle' : 'radio_button_unchecked';
+                const txt = $('.clockin-text', pill);
+                if (txt) txt.textContent = isMasuk ? 'Sudah Masuk' : 'Clock-In';
+            }
+            $$('.stat-btns button', el).forEach(b => b.classList.toggle('on', b.dataset.s === r.status));
+        }
+        const list = getFilteredAbsRows().filter(x => x.bagianTugas === r.bagianTugas);
+        const cnt = $('[data-cnt="' + r.bagianTugas + '"]');
+        if (cnt) cnt.textContent = list.filter(x => x.status === 'H' || x.status === 'T').length + ' / ' + list.length + ' Masuk';
+        updateAbsStats();
+        queueAbs(id, {});
+    }
+
+    function queueAbs(id, patch) {
+        const r = absData.rows.find(x => x.operatorId === id);
+        Object.assign(r, patch);
+        absQueue[id] = { operatorId: id, status: r.status, lembur: r.lembur, ket: r.ket };
+        if (!r.status && (patch.lembur || patch.ket)) toast('Pilih status kehadiran dulu agar lembur/keterangan tersimpan.');
+        const el = $('.att[data-id="' + id + '"]');
+        if (el) el.classList.add('saving');
+        clearTimeout(absTimer);
+        absTimer = setTimeout(flushAbs, 600);
+    }
+
+    async function flushAbs() {
+        clearTimeout(absTimer);
+        const items = Object.values(absQueue);
+        if (!items.length || !absData) return;
+        absQueue = {};
+        const ctx = { tanggal: absData.tanggal, shift: absData.shift };
+        try {
+            await call('setAbsensi', Object.assign({ items: items }, ctx), { silent: true });
+            items.forEach(it => { const el = $('.att[data-id="' + it.operatorId + '"]'); if (el) el.classList.remove('saving'); });
+        } catch (e) {
+            fail(e);
+            if (S.page === 'absensi') loadAbs();
+        }
+    }
+
+    function addOperatorModal() {
+        const av = absData.available;
+        openModal({
+            title: 'Tambah operator ke ' + shiftName(absData.shift),
+            body: '<p class="muted small">' + esc(absData.tanggalLabel) + '. Operator tetap di bagiannya sendiri.</p>' +
+                '<label class="field"><span>Cari operator</span><input id="mQ" placeholder="Ketik nama…"></label>' +
+                '<label class="field"><span>Operator</span><select name="operatorId" id="mOp" size="6" style="min-height:160px">' +
+                av.filter(o => canEdit(o.bagian)).map(o => '<option value="' + o.id + '">' + esc(o.nama) + ' — ' + esc(bagName(o.bagian)) + ' (hari ini: ' + o.jadwalHariIni + ')</option>').join('') + '</select></label>' +
+                (isAdmin() ? '<label class="check"><input type="checkbox" name="force"> Tetap simpan walau melanggar batas jam</label>' : ''),
+            onOpen: body => {
+                $('#mQ', body).oninput = e => {
+                    const q = e.target.value.toLowerCase();
+                    $$('#mOp option', body).forEach(o => o.hidden = o.textContent.toLowerCase().indexOf(q) < 0);
+                };
+            },
+            buttons: [{ label: 'Batal' }, {
+                label: 'Tambahkan', cls: 'primary', onClick: async () => {
+                    const f = formData($('#modalBody'));
+                    if (!f.operatorId) return toast('Pilih operator.', 'err');
+                    try {
+                        await call('addToShift', Object.assign(f, { tanggal: absData.tanggal, shift: absData.shift }));
+                        closeModal(); toast('Operator ditambahkan.', 'ok'); loadAbs();
+                    } catch (e) { fail(e); }
+                }
+            }]
+        });
+    }
+
+    async function removeFromShift(id) {
+        const r = absData.rows.find(x => x.operatorId === id);
+        if (!await confirmBox('Keluarkan dari shift?', r.nama + ' akan dijadikan OFF pada ' + absData.tanggalLabel + '.', 'Keluarkan', 'danger')) return;
+        try { await call('removeFromShift', { tanggal: absData.tanggal, shift: absData.shift, operatorId: id }); toast('Dikeluarkan.', 'ok'); loadAbs(); } catch (e) { fail(e); }
+    }
+
+    /* =========================== JADWAL MINGGUAN & JADWAL IEG =========================== */
+    let J = null, jBrush = null, jPaint = false, jOnlyIeg = false;
+
+    function canEditWeek(locked) {
+        if (locked) return false;
+        return jOnlyIeg ? isEditor() : isAdmin();
+    }
+
+    function kodeOf(k) { return (J ? J.kodes : S.master.kodes || []).find(x => x.kode === k); }
+    function kMin(hhmm) { const m = /^(\d{2}):(\d{2})$/.exec(hhmm || ''); return m ? (+m[1]) * 60 + (+m[2]) : null; }
+    function textColor(hex) {
+        const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || '#ffffff');
+        if (!m) return '#111';
+        const l = (parseInt(m[1], 16) * 299 + parseInt(m[2], 16) * 587 + parseInt(m[3], 16) * 114) / 1000;
+        return l > 150 ? '#1D2D3E' : '#FFFFFF';
+    }
+
+    async function renderJadwalIeg() {
+        return renderJadwalBase(true);
+    }
+
+    async function renderJadwal() {
+        return renderJadwalBase(false);
+    }
+
+    async function renderJadwalBase(onlyIeg) {
+        jOnlyIeg = !!onlyIeg;
+        S.jad.tanggal = S.jad.tanggal || S.master.today;
+        if (S.jad.bagian === undefined) S.jad.bagian = (role() === 'LEADER' && S.user.bagian.length === 1) ? S.user.bagian[0] : '';
+        S.jad.emp = jOnlyIeg ? 'IEG' : (S.jad.emp || '');
+        S.jad.q = S.jad.q || '';
+        jBrush = null;
+        $('#view').innerHTML =
+            '<div class="toolbar">' +
+            '<button class="btn sm" id="wkPrev" aria-label="Minggu sebelumnya"><span class="material-symbols-outlined" style="font-size:16px">chevron_left</span></button><input type="date" id="wkDate" value="' + S.jad.tanggal + '" aria-label="Minggu"><button class="btn sm" id="wkNext" aria-label="Minggu berikutnya"><span class="material-symbols-outlined" style="font-size:16px">chevron_right</span></button>' +
+            '<select id="wkBag"><option value="">Semua bagian</option>' + S.master.bagian.map(b => '<option value="' + b.kode + '"' + (S.jad.bagian === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') + '</select>' +
+            (jOnlyIeg
+                ? '<span class="chip pri" style="height:36px;padding:0 12px"><span class="material-symbols-outlined" style="font-size:16px;margin-right:4px">badge</span>Khusus Karyawan IEG</span>'
+                : '<select id="wkEmp"><option value="">Semua employer</option></select>') +
+            '<input type="search" id="wkQ" placeholder="Cari nama / NIK…" value="' + esc(S.jad.q) + '" style="flex:1 1 140px">' +
+            '</div>' +
+            '<div class="toolbar" id="wkActs"></div>' +
+            '<div class="brushbar" id="wkBrush"></div>' +
+            '<div id="wkBody"><div class="empty">Memuat…</div></div>' +
+            '<div class="savebar hidden" id="wkSave"><span id="wkSaveTxt"></span><span class="spacer"></span><button class="btn sm ghost" id="wkUndo">Batal</button><button class="btn sm primary" id="wkDo"><span class="material-symbols-outlined">check_circle</span> ' + (jOnlyIeg ? 'Submit &amp; Masuk Jadwal Mingguan' : 'Simpan') + '</button></div>';
+        const moveWeek = async n => { if (!await confirmDiscard()) return; S.jad.tanggal = addDays(monday(S.jad.tanggal), n); $('#wkDate').value = S.jad.tanggal; loadWeek(); };
+        $('#wkPrev').onclick = () => moveWeek(-7);
+        $('#wkNext').onclick = () => moveWeek(7);
+        $('#wkDate').onchange = async e => { if (!await confirmDiscard()) { e.target.value = S.jad.tanggal; return; } S.jad.tanggal = e.target.value; loadWeek(); };
+        $('#wkBag').onchange = e => { S.jad.bagian = e.target.value; drawWeek(); };
+        if ($('#wkEmp')) $('#wkEmp').onchange = e => { S.jad.emp = e.target.value; drawWeek(); };
+        $('#wkQ').oninput = e => { S.jad.q = e.target.value; drawWeek(); };
+        $('#wkUndo').onclick = () => { J.pending = {}; drawWeek(); };
+        $('#wkDo').onclick = () => saveWeek(false);
+        document.onmouseup = () => { jPaint = false; };
+        await loadWeek();
+    }
+
+    async function confirmDiscard() {
+        if (!J || !Object.keys(J.pending || {}).length) return true;
+        return confirmBox('Buang perubahan?', Object.keys(J.pending).length + ' perubahan jadwal belum disimpan.', 'Buang', 'danger');
+    }
+
+    async function loadWeek() {
+        J = await call('minggu', { tanggal: S.jad.tanggal, onlyIeg: jOnlyIeg });
+        J.pending = {};
+        S.jad.tanggal = J.monday;
+        $('#wkDate').value = J.monday;
+        const emp = $('#wkEmp');
+        if (emp) {
+            emp.innerHTML = '<option value="">Semua employer</option>' + J.employers.map(e => '<option' + (S.jad.emp === e ? ' selected' : '') + '>' + esc(e) + '</option>').join('');
+        }
+        const d0 = J.dates[0], d6 = J.dates[6];
+        $('#pageSub').textContent = (jOnlyIeg ? 'Karyawan IEG · ' : '') + 'Minggu ' + d0.tgl + ' ' + BULAN[+J.monday.slice(5, 7) - 1] + ' – ' + d6.tgl + ' ' + BULAN[+d6.d.slice(5, 7) - 1] + ' ' + d6.d.slice(0, 4) +
+            ' · batas ' + J.maxJam + ' jam/' + (J.mode === 'MINGGU' ? 'minggu' : '7 hari') + (J.lock ? ' · dikunci' : '');
+        const locked = J.lock && !isAdmin();
+        const editable = canEditWeek(locked);
+        $('#wkActs').innerHTML =
+            (editable ? '<button class="btn sm grad" id="wkAuto"><span class="material-symbols-outlined">bolt</span> Isi otomatis (pola 5/6 hari)</button>' : '') +
+            (editable ? '<button class="btn sm primary" id="wkBatch"><span class="material-symbols-outlined">calendar_month</span> Input Tanggal &amp; Divisi</button><button class="btn sm" id="wkCopy"><span class="material-symbols-outlined">content_copy</span> Salin minggu lalu</button>' : '') +
+            (isAdmin() && !locked && !jOnlyIeg ? '<button class="btn sm" id="wkPaste"><span class="material-symbols-outlined">content_paste</span> Tempel dari Excel</button>' : '') +
+            (jOnlyIeg && editable ? '<button class="btn sm ok" id="wkSubmitTop"><span class="material-symbols-outlined">check_circle</span> Submit ke Jadwal Mingguan</button>' : '') +
+            (jOnlyIeg ? '<button class="btn sm ghost" id="wkGoFull"><span class="material-symbols-outlined">calendar_month</span> Lihat Jadwal Mingguan →</button>' : '') +
+            (!editable && !jOnlyIeg ? '<span class="chip pri"><span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;margin-right:4px">visibility</span>Mode View Saja (Terisi otomatis dari Submit Jadwal IEG &amp; Approval Request OS)</span>' : '') +
+            '<button class="btn sm ghost" id="wkXls"><span class="material-symbols-outlined">download</span> Excel</button>' +
+            (isAdmin() && !jOnlyIeg ? '<button class="btn sm ghost" id="wkLock"><span class="material-symbols-outlined">' + (J.lock ? 'lock_open' : 'lock') + '</span> ' + (J.lock ? 'Buka kunci' : 'Kunci minggu') + '</button>' : '') +
+            (J.lock ? '<span class="chip warn">Dikunci ' + esc(J.lock.by) + ' · ' + esc(J.lock.at.slice(5, 16)) + '</span>' : '');
+        if ($('#wkAuto')) $('#wkAuto').onclick = autoWeekModal;
+        if ($('#wkBatch')) $('#wkBatch').onclick = () => batchJadwalModal(S.jad.tanggal || J.monday, S.jad.bagian);
+        if ($('#wkCopy')) $('#wkCopy').onclick = copyWeek;
+        if ($('#wkPaste')) $('#wkPaste').onclick = pasteWeekModal;
+        if ($('#wkSubmitTop')) $('#wkSubmitTop').onclick = () => {
+            if (!Object.keys(J.pending || {}).length) {
+                toast('Semua jadwal IEG minggu ini sudah tersimpan & tampil di Jadwal Mingguan!', 'ok');
+                return;
+            }
+            saveWeek(false);
+        };
+        if ($('#wkGoFull')) $('#wkGoFull').onclick = async () => {
+            if (Object.keys(J.pending || {}).length) await saveWeek(false);
+            S.jad.emp = '';
+            go('jadwal');
+        };
+        $('#wkXls').onclick = async () => { try { saveB64(await call('mingguExcel', { tanggal: J.monday, bagian: S.jad.bagian })); } catch (e) { fail(e); } };
+        if ($('#wkLock')) $('#wkLock').onclick = async () => {
+            try { await call('mingguKunci', { tanggal: J.monday, kunci: !J.lock }); toast(J.lock ? 'Kunci dibuka.' : 'Minggu dikunci — Leader tidak bisa mengubah.', 'ok'); loadWeek(); } catch (e) { fail(e); }
+        };
+        drawBrush(locked);
+        drawWeek();
+    }
+
+    function drawBrush(locked) {
+        if (!canEditWeek(locked)) { $('#wkBrush').innerHTML = ''; return; }
+        $('#wkBrush').innerHTML = '<div class="brush-title"><span class="material-symbols-outlined">brush</span> Kuas:</div>' +
+            '<button class="kb' + (!jBrush ? ' on' : '') + '" data-brush=""><span class="material-symbols-outlined" style="font-size:14px">touch_app</span> Per sel</button>' +
+            J.kodes.map(k => '<button class="kb' + (jBrush === k.kode ? ' on' : '') + '" data-brush="' + k.kode + '" style="background:' + k.warna + ';color:' + textColor(k.warna) + '" title="' + esc(k.nama + (k.kerja ? ' ' + k.mulai + '–' + k.selesai + ' (' + k.jam + ' jam)' : '')) + '">' + esc(k.label) + '</button>').join('') +
+            '<button class="kb' + (jBrush === '-' ? ' on' : '') + '" data-brush="-"><span class="material-symbols-outlined" style="font-size:14px">backspace</span> Kosong</button>' +
+            '<span class="small muted brush-hint">' + (jBrush ? 'Klik / seret di sel untuk mengisi.' : 'Pilih kuas untuk mengisi banyak sel sekaligus.') + '</span>';
+        $$('[data-brush]').forEach(b => b.onclick = () => { jBrush = b.dataset.brush || null; drawBrush(false); });
+    }
+
+    function cellKode(r, i) { const k = r.id + '|' + J.dates[i].d; return k in J.pending ? J.pending[k] : r.codes[i]; }
+
+    function evalRow(r) {
+        const codes = J.dates.map((x, i) => cellKode(r, i));
+        let jam = 0, hari = 0;
+        codes.forEach((k, i) => { const kk = kodeOf(k); if (kk && kk.kerja) { jam += kk.jam; hari++; } jam += r.lembur[i] || 0; });
+        const warn = [];
+        if (jam > J.maxJam) warn.push(jam + ' jam > batas ' + J.maxJam);
+        if (codes.filter(Boolean).length === 7 && hari !== r.pola) warn.push(hari + ' hari kerja, pola ' + r.pola + ' hari');
+        for (let i = 0; i < 7; i++) {
+            const p = kodeOf(i === 0 ? r.prevKode : codes[i - 1]), c = kodeOf(codes[i]);
+            if (!p || !c || !p.kerja || !c.kerja) continue;
+            let pe = kMin(p.selesai), ps = kMin(p.mulai), cs = kMin(c.mulai);
+            if (pe === null || cs === null) continue;
+            if (pe <= ps) pe += 1440;
+            const rest = (1440 + cs - pe) / 60;
+            if (rest < J.minRest) warn.push('istirahat ' + rest + ' jam sebelum ' + J.dates[i].hari);
+        }
+        return { codes: codes, jam: jam, hari: hari, warn: warn };
+    }
+
+    function weekRows() {
+        const q = (S.jad.q || '').toLowerCase();
+        const bagOrder = {};
+        (S.master.bagian || []).forEach((b, i) => { bagOrder[b.kode] = i; });
+        return J.rows.filter(r => (!S.jad.bagian || r.bagian === S.jad.bagian) && (!S.jad.emp || r.employer === S.jad.emp) &&
+            (!q || r.nama.toLowerCase().indexOf(q) >= 0 || String(r.nik).indexOf(q) >= 0))
+            .sort((a, b) => {
+                const vacA = /vacant/i.test(a.nama) ? 1 : 0;
+                const vacB = /vacant/i.test(b.nama) ? 1 : 0;
+                if (vacA !== vacB) return vacA - vacB;
+                const ordA = a.bagian in bagOrder ? bagOrder[a.bagian] : 99;
+                const ordB = b.bagian in bagOrder ? bagOrder[b.bagian] : 99;
+                return (ordA - ordB) || (a.nama || '').localeCompare(b.nama || '');
+            });
+    }
+
+    function drawWeek() {
+        const rows = weekRows();
+        const locked = J.lock && !isAdmin();
+        const editable = canEditWeek(locked);
+        if (!rows.length) {
+            $('#wkBody').innerHTML = '<div class="card empty"><div class="big"><span class="material-symbols-outlined">group_off</span></div><p>Tidak ada karyawan ' + (jOnlyIeg ? 'IEG ' : '') + 'untuk filter ini.</p>' + (isAdmin() ? '<button class="btn primary" onclick="go(\'operator\')">Kelola operator</button>' : '') + '</div>';
+            updateSaveBar(); return;
+        }
+        let h = '<div class="table-wrap wk-wrap"><table class="wk"><thead><tr><th class="c-no">No</th><th class="c-nama">Nama Karyawan</th><th class="c-bag">Divisi</th><th class="c-nik wide-only">NIK</th><th class="c-role wide-only">Role &amp; Job Desc</th>' +
+            J.dates.map(x => '<th class="c-day' + (x.isToday ? ' today' : '') + '" data-day-d="' + x.d + '"' + (editable ? ' title="Klik untuk input per tanggal ini" style="cursor:pointer"' : '') + '><span>' + x.hari.slice(0, 3) + '</span><b>' + x.tgl + '</b></th>').join('') +
+            '<th class="c-jam" title="Total jam minggu ini (termasuk lembur)">Jam</th><th class="c-hari" title="Hari kerja / pola">Hari</th></tr></thead><tbody>';
+        let no = 0;
+        rows.forEach(r => {
+            no++;
+            const ev = evalRow(r);
+            const ed = r.canEdit && editable;
+            h += '<tr data-op="' + r.id + '"><td class="c-no">' + no + '</td>' +
+                '<td class="c-nama"><b>' + esc(r.nama) + '</b><small>' + esc((GRUP_LABEL[r.grup] || r.grup) + ' · ' + r.pola + ' hari' + (r.employer ? ' · ' + r.employer : '')) + '</small></td>' +
+                '<td class="c-bag"><span class="badge-bag' + (editable ? ' clickable' : '') + '" data-op-bag="' + esc(r.bagian) + '" title="' + (editable ? 'Klik untuk input divisi ini' : '') + '">' + esc(bagName(r.bagian)) + '</span></td>' +
+                '<td class="c-nik wide-only">' + esc(r.nik) + '</td>' +
+                '<td class="c-role wide-only">' + esc(r.role) + '</td>' +
+                ev.codes.map((k, i) => {
+                    const kk = kodeOf(k), changed = (r.id + '|' + J.dates[i].d) in J.pending;
+                    return '<td class="c-day"><button class="kc' + (changed ? ' changed' : '') + (k ? '' : ' empty') + '" data-i="' + i + '"' + (ed ? '' : ' disabled') +
+                        ' style="' + (kk ? 'background:' + kk.warna + ';color:' + textColor(kk.warna) : '') + '" title="' + esc(kk ? kk.nama + (kk.kerja ? ' ' + kk.mulai + '–' + kk.selesai + ' · ' + kk.jam + ' jam' : '') : 'Kosong') + (r.ket[i] ? ' · ' + r.ket[i] : '') + '">' + esc(kk ? kk.label : (k || '·')) + '</button></td>';
+                }).join('') +
+                '<td class="c-jam' + (ev.jam > J.maxJam ? ' bad' : '') + '" title="' + esc(ev.warn.join('\n')) + '">' + ev.jam + '</td>' +
+                '<td class="c-hari' + (ev.warn.some(w => /hari kerja|istirahat/.test(w)) ? ' bad' : '') + '" title="' + esc(ev.warn.join('\n')) + '">' + ev.hari + '/' + r.pola + (ev.warn.length ? ' !' : '') + '</td></tr>';
+        });
+        h += '</tbody><tfoot>';
+        const work = J.kodes.filter(k => k.kerja);
+        const count = (pred) => J.dates.map((x, i) => rows.filter(r => pred(cellKode(r, i))).length);
+        work.forEach(k => {
+            const c = count(x => x === k.kode);
+            if (!c.some(Boolean)) return;
+            h += '<tr><td colspan="3" class="c-foot">' + esc(k.label) + '</td><td class="wide-only" colspan="2"></td>' + c.map(n => '<td>' + (n || '') + '</td>').join('') + '<td colspan="2"></td></tr>';
+        });
+        ['S1', 'S2'].forEach(sh => {
+            const c = count(x => { const kk = kodeOf(x); return kk && kk.kerja && kk.shift === sh; });
+            const t = J.targets[sh] || 0;
+            h += '<tr class="tot"><td colspan="3" class="c-foot">Total ' + esc(shiftName(sh)) + (t ? ' <small>/ ' + t + '</small>' : '') + '</td><td class="wide-only" colspan="2"></td>' +
+                c.map(n => '<td style="color:' + (t && n < t ? 'var(--err)' : 'inherit') + '">' + n + '</td>').join('') + '<td colspan="2"></td></tr>';
+        });
+        const off = count(x => { const kk = kodeOf(x); return kk && !kk.kerja; });
+        h += '<tr><td colspan="3" class="c-foot">Libur / Cuti</td><td class="wide-only" colspan="2"></td>' + off.map(n => '<td class="muted">' + n + '</td>').join('') + '<td colspan="2"></td></tr>';
+        h += '</tfoot></table></div>' +
+            '<div class="legend">' + J.kodes.map(k => '<span class="cell" style="background:' + k.warna + ';color:' + textColor(k.warna) + '">' + esc(k.label) + '</span><span class="muted small">' + (k.kerja ? k.mulai + '–' + k.selesai + ' (' + k.jam + 'j)' : esc(k.nama)) + '</span>').join(' ') + '</div>';
+        $('#wkBody').innerHTML = h;
+        $$('#wkBody .kc:not([disabled])').forEach(b => {
+            const tr = b.closest('tr'), r = J.rows.find(x => x.id === tr.dataset.op), i = +b.dataset.i;
+            b.onmousedown = e => { if (jBrush) { e.preventDefault(); jPaint = true; setCell(r, i, jBrush === '-' ? '' : jBrush); } };
+            b.onmouseenter = () => { if (jBrush && jPaint) setCell(r, i, jBrush === '-' ? '' : jBrush); };
+            b.onclick = e => { if (!jBrush) cellMenu(b, r, i); };
+            b.ontouchstart = e => { if (jBrush) { e.preventDefault(); setCell(r, i, jBrush === '-' ? '' : jBrush); } };
+        });
+        if (editable) {
+            $$('#wkBody th.c-day[data-day-d]').forEach(th => {
+                th.onclick = () => batchJadwalModal(th.dataset.dayD, S.jad.bagian);
+            });
+            $$('#wkBody [data-op-bag]').forEach(badge => {
+                badge.onclick = (e) => {
+                    e.stopPropagation();
+                    batchJadwalModal(S.jad.tanggal || J.monday, badge.dataset.opBag);
+                };
+            });
+        }
+        updateSaveBar();
+    }
+
+    function setCell(r, i, kode) {
+        const key = r.id + '|' + J.dates[i].d;
+        if ((r.codes[i] || '') === kode) delete J.pending[key]; else J.pending[key] = kode;
+        // gambar ulang satu baris saja (cepat saat menyeret)
+        const tr = $('#wkBody tr[data-op="' + r.id + '"]');
+        if (!tr) return drawWeek();
+        const b = $('.kc[data-i="' + i + '"]', tr), kk = kodeOf(kode);
+        b.textContent = kk ? kk.label : '·';
+        b.style.background = kk ? kk.warna : ''; b.style.color = kk ? textColor(kk.warna) : '';
+        b.classList.toggle('changed', key in J.pending); b.classList.toggle('empty', !kode);
+        const ev = evalRow(r);
+        const jc = $('.c-jam', tr), hc = $('.c-hari', tr);
+        jc.textContent = ev.jam; jc.classList.toggle('bad', ev.jam > J.maxJam); jc.title = ev.warn.join('\n');
+        hc.textContent = ev.hari + '/' + r.pola + (ev.warn.length ? ' !' : ''); hc.classList.toggle('bad', ev.warn.some(w => /hari kerja|istirahat/.test(w))); hc.title = ev.warn.join('\n');
+        clearTimeout(J._ft); J._ft = setTimeout(() => { const y = window.scrollY; drawWeek(); window.scrollTo(0, y); }, 900);
+        updateSaveBar();
+    }
+
+    function cellMenu(btn, r, i) {
+        closeCellMenu();
+        const m = document.createElement('div');
+        m.className = 'cellmenu';
+        m.innerHTML = '<div class="small muted" style="padding:4px 8px">' + esc(r.nama) + ' · ' + J.dates[i].hari + ' ' + J.dates[i].tgl + '</div>' +
+            J.kodes.map(k => '<button data-k="' + k.kode + '"><span class="sw" style="background:' + k.warna + '"></span><b>' + esc(k.label) + '</b><small>' + (k.kerja ? k.mulai + '–' + k.selesai : esc(k.nama)) + '</small></button>').join('') +
+            '<button data-k=""><span class="sw"></span><b>Kosongkan</b></button>';
+        document.body.appendChild(m);
+        const rc = btn.getBoundingClientRect();
+        const top = Math.min(window.innerHeight - m.offsetHeight - 8, rc.bottom + 4);
+        m.style.top = Math.max(8, top) + 'px';
+        m.style.left = Math.max(8, Math.min(window.innerWidth - m.offsetWidth - 8, rc.left)) + 'px';
+        $$('button', m).forEach(x => x.onclick = () => { setCell(r, i, x.dataset.k); closeCellMenu(); });
+        setTimeout(() => document.addEventListener('click', closeCellMenuOut), 0);
+    }
+    function closeCellMenuOut(e) { if (!e.target.closest('.cellmenu')) closeCellMenu(); }
+    function closeCellMenu() { const m = $('.cellmenu'); if (m) m.remove(); document.removeEventListener('click', closeCellMenuOut); }
+
+    function updateSaveBar() {
+        const n = Object.keys(J.pending || {}).length;
+        $('#wkSave').classList.toggle('hidden', !n);
+        $('#wkSaveTxt').textContent = n + ' perubahan belum disimpan';
+    }
+
+    async function saveWeek(force) {
+        const changes = Object.keys(J.pending).map(k => { const p = k.split('|'); return { operatorId: p[0], tanggal: p[1], kode: J.pending[k] }; });
+        try {
+            const r = await call('mingguSimpan', { tanggal: J.monday, changes: changes, force: force, onlyIeg: jOnlyIeg });
+            if (!r.ok) return showWeekWarnings(r.warnings);
+            toast(jOnlyIeg
+                ? 'Jadwal IEG (' + r.saved + ' sel) berhasil disubmit & otomatis masuk ke Jadwal Mingguan!'
+                : r.saved + ' sel disimpan' + (r.warnings && r.warnings.length ? ' (dengan ' + r.warnings.length + ' pengecualian)' : '') + '.', 'ok');
+            loadWeek();
+        } catch (e) { fail(e); }
+    }
+
+    function showWeekWarnings(ws) {
+        openModal({
+            title: 'Melanggar aturan jam kerja',
+            body: '<p class="small muted">Batas ' + J.maxJam + ' jam/' + (J.mode === 'MINGGU' ? 'minggu' : '7 hari') + ' · istirahat min ' + J.minRest + ' jam.</p><div class="table-wrap" style="max-height:300px"><table class="tbl"><tbody>' +
+                ws.map(w => '<tr><td><b>' + esc(w.nama) + '</b><br><span class="small muted">' + esc(fmtShort(w.tanggal)) + '</span></td><td class="small">' + esc(w.pesan) + '</td></tr>').join('') + '</tbody></table></div>' +
+                (isAdmin() ? '' : '<div class="alert warn">Perbaiki jadwalnya, atau minta Admin menyimpan sebagai pengecualian.</div>'),
+            buttons: [{ label: 'Perbaiki dulu' }].concat(isAdmin() ? [{ label: 'Simpan tetap (pengecualian)', cls: 'danger', onClick: () => { closeModal(); saveWeek(true); } }] : [])
+        });
+    }
+
+    function batchJadwalModal(initialDate, initialBagian) {
+        if (!J || !J.dates) return;
+        let curDate = initialDate && J.dates.some(x => x.d === initialDate) ? initialDate : (S.jad.tanggal && J.dates.some(x => x.d === S.jad.tanggal) ? S.jad.tanggal : J.monday);
+        let curBag = initialBagian !== undefined ? initialBagian : (S.jad.bagian || '');
+        let curKode = J.kodes[0] ? J.kodes[0].kode : 'S1';
+        let filterQ = '';
+
+        function getEligibleOps() {
+            const q = filterQ.trim().toLowerCase();
+            const bagOrder = {};
+            (S.master.bagian || []).forEach((b, i) => { bagOrder[b.kode] = i; });
+            return J.rows.filter(r => {
+                if (curBag && r.bagian !== curBag) return false;
+                if (q && r.nama.toLowerCase().indexOf(q) < 0 && String(r.nik).indexOf(q) < 0) return false;
+                return true;
+            }).sort((a, b) => {
+                const vacA = /vacant/i.test(a.nama) ? 1 : 0;
+                const vacB = /vacant/i.test(b.nama) ? 1 : 0;
+                if (vacA !== vacB) return vacA - vacB;
+                const ordA = a.bagian in bagOrder ? bagOrder[a.bagian] : 99;
+                const ordB = b.bagian in bagOrder ? bagOrder[b.bagian] : 99;
+                return (ordA - ordB) || (a.nama || '').localeCompare(b.nama || '');
+            });
+        }
+
+        function renderModalBody() {
+            const dateIdx = J.dates.findIndex(x => x.d === curDate);
+            const dayInfo = dateIdx >= 0 ? J.dates[dateIdx] : J.dates[0];
+            const ops = getEligibleOps();
+
+            let h = '<div class="batch-modal-wrap">';
+            h += '<div class="field"><label><span>Pilih Tanggal dalam 1 Minggu:</span></label>';
+            h += '<div class="seg-days">';
+            J.dates.forEach(d => {
+                const isSel = d.d === curDate;
+                h += '<button type="button" class="day-pill' + (isSel ? ' active' : '') + (d.isToday ? ' today' : '') + '" data-bp-date="' + d.d + '">' +
+                    '<span>' + d.hari.slice(0, 3) + '</span><b>' + d.tgl + '</b>' +
+                    '</button>';
+            });
+            h += '</div></div>';
+
+            h += '<div class="grid2">';
+            h += '<label class="field"><span>Divisi / Bagian:</span><select id="bmBag"><option value="">Semua Divisi (' + J.rows.length + ' orang)</option>' +
+                S.master.bagian.map(b => '<option value="' + b.kode + '"' + (curBag === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') +
+                '</select></label>';
+
+            h += '<label class="field"><span>Shift / Kode yang Diterapkan:</span><select id="bmKode">' +
+                J.kodes.map(k => '<option value="' + k.kode + '"' + (curKode === k.kode ? ' selected' : '') + '>' + esc(k.label) + ' (' + (k.kerja ? k.mulai + '–' + k.selesai + ' · ' + k.jam + 'j' : esc(k.nama)) + ')</option>').join('') +
+                '<option value="-"' + (curKode === '-' ? ' selected' : '') + '>⌫ Kosongkan Jadwal</option>' +
+                '</select></label>';
+            h += '</div>';
+
+            h += '<div class="row" style="margin:8px 0;gap:8px;align-items:center;">';
+            h += '<input type="search" id="bmQ" placeholder="Cari nama / NIK…" value="' + esc(filterQ) + '" style="flex:1 1 140px;height:34px">';
+            h += '<button type="button" class="btn xs ghost" id="bmSelectAll">Pilih Semua</button>';
+            h += '<button type="button" class="btn xs ghost" id="bmClearAll">Kosongkan</button>';
+            h += '</div>';
+
+            h += '<div class="batch-op-list" id="bmOpList">';
+            if (!ops.length) {
+                h += '<div class="empty small">Tidak ada karyawan untuk divisi / pencarian ini.</div>';
+            } else {
+                ops.forEach(r => {
+                    const currentCellKode = cellKode(r, dateIdx);
+                    const kk = kodeOf(currentCellKode);
+                    h += '<div class="batch-op-item">';
+                    h += '<input type="checkbox" data-bm-op="' + r.id + '" checked>';
+                    h += '<div class="batch-op-info"><div class="batch-op-name">' + esc(r.nama) + ' <small class="muted">' + esc(r.nik) + '</small></div>';
+                    h += '<div class="batch-op-sub">' + esc(bagName(r.bagian)) + ' · Pola ' + r.pola + ' hari' + (r.employer ? ' · ' + esc(r.employer) : '') + '</div></div>';
+                    h += '<div class="batch-op-curr">';
+                    h += '<span class="chip sm ' + (kk ? '' : 'muted') + '" style="' + (kk ? 'background:' + kk.warna + ';color:' + textColor(kk.warna) : '') + '">' + esc(kk ? kk.label : 'Kosong') + '</span>';
+                    h += '</div>';
+                    h += '</div>';
+                });
+            }
+            h += '</div>';
+
+            const activeKodeObj = kodeOf(curKode);
+            h += '<div class="alert info small" style="margin-top:10px">';
+            h += '<span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px;margin-right:4px">info</span>Menerapkan shift <b>' + (activeKodeObj ? activeKodeObj.label : (curKode === '-' ? 'Kosong' : curKode)) + '</b> untuk karyawan yang dicentang pada <b>' + dayInfo.hari + ', ' + dayInfo.tgl + ' ' + BULAN[+curDate.slice(5, 7) - 1] + '</b>.';
+            h += '</div>';
+            h += '</div>';
+            return h;
+        }
+
+        openModal({
+            title: 'Input Jadwal per Tanggal & Divisi',
+            body: renderModalBody(),
+            buttons: [
+                { label: 'Batal' },
+                {
+                    label: '<span class="material-symbols-outlined" style="font-size:16px">save</span> Terapkan ke Jadwal',
+                    cls: 'primary',
+                    onClick: () => {
+                        const selCheckboxes = $$('#bmOpList input[data-bm-op]:checked');
+                        if (!selCheckboxes.length) {
+                            toast('Pilih minimal satu karyawan untuk diterapkan.', 'err');
+                            return;
+                        }
+                        const dateIdx = J.dates.findIndex(x => x.d === curDate);
+                        if (dateIdx < 0) return;
+                        const shiftVal = curKode === '-' ? '' : curKode;
+                        let count = 0;
+                        selCheckboxes.forEach(cb => {
+                            const opId = cb.dataset.bmOp;
+                            const r = J.rows.find(x => x.id === opId);
+                            if (r) {
+                                const key = r.id + '|' + curDate;
+                                if ((r.codes[dateIdx] || '') === shiftVal) {
+                                    delete J.pending[key];
+                                } else {
+                                    J.pending[key] = shiftVal;
+                                }
+                                count++;
+                            }
+                        });
+                        closeModal();
+                        drawWeek();
+                        toast(count + ' jadwal diterapkan ke antrean! Klik "Simpan" di bar bawah untuk menyimpan permanen.', 'ok');
+                    }
+                }
+            ]
+        });
+
+        function attachEvents() {
+            $$('#modalBody [data-bp-date]').forEach(btn => {
+                btn.onclick = () => {
+                    curDate = btn.dataset.bpDate;
+                    $('#modalBody').innerHTML = renderModalBody();
+                    attachEvents();
+                };
+            });
+
+            const bagSelect = $('#bmBag');
+            if (bagSelect) {
+                bagSelect.onchange = e => {
+                    curBag = e.target.value;
+                    $('#modalBody').innerHTML = renderModalBody();
+                    attachEvents();
+                };
+            }
+
+            const kodeSelect = $('#bmKode');
+            if (kodeSelect) {
+                kodeSelect.onchange = e => {
+                    curKode = e.target.value;
+                    const alertB = $('#modalBody .batch-modal-wrap .alert b');
+                    if (alertB) {
+                        const kk = kodeOf(curKode);
+                        alertB.textContent = kk ? kk.label : (curKode === '-' ? 'Kosong' : curKode);
+                    }
+                };
+            }
+
+            const qInput = $('#bmQ');
+            if (qInput) {
+                qInput.oninput = e => {
+                    filterQ = e.target.value;
+                    const ops = getEligibleOps();
+                    const listEl = $('#bmOpList');
+                    const dateIdx = J.dates.findIndex(x => x.d === curDate);
+                    if (!ops.length) {
+                        listEl.innerHTML = '<div class="empty small">Tidak ada karyawan untuk filter ini.</div>';
+                    } else {
+                        let h = '';
+                        ops.forEach(r => {
+                            const currentCellKode = cellKode(r, dateIdx);
+                            const kk = kodeOf(currentCellKode);
+                            h += '<div class="batch-op-item">';
+                            h += '<input type="checkbox" data-bm-op="' + r.id + '" checked>';
+                            h += '<div class="batch-op-info"><div class="batch-op-name">' + esc(r.nama) + ' <small class="muted">' + esc(r.nik) + '</small></div>';
+                            h += '<div class="batch-op-sub">' + esc(bagName(r.bagian)) + ' · Pola ' + r.pola + ' hari' + (r.employer ? ' · ' + esc(r.employer) : '') + '</div></div>';
+                            h += '<div class="batch-op-curr">';
+                            h += '<span class="chip sm ' + (kk ? '' : 'muted') + '" style="' + (kk ? 'background:' + kk.warna + ';color:' + textColor(kk.warna) : '') + '">' + esc(kk ? kk.label : 'Kosong') + '</span>';
+                            h += '</div>';
+                            h += '</div>';
+                        });
+                        listEl.innerHTML = h;
+                    }
+                };
+            }
+
+            const btnAll = $('#bmSelectAll');
+            if (btnAll) {
+                btnAll.onclick = () => {
+                    $$('#bmOpList input[data-bm-op]').forEach(cb => cb.checked = true);
+                };
+            }
+            const btnClear = $('#bmClearAll');
+            if (btnClear) {
+                btnClear.onclick = () => {
+                    $$('#bmOpList input[data-bm-op]').forEach(cb => cb.checked = false);
+                };
+            }
+        }
+
+        attachEvents();
+    }
+
+    function autoWeekModal() {
+        openModal({
+            title: 'Isi otomatis jadwal',
+            body: '<div class="alert info">Mengisi sesuai <b>pola kerja</b> tiap karyawan: 5 hari (2 hari OFF, bawaan Sabtu–Minggu) atau 6 hari (1 OFF' + (J.half6 ? ' + HALF sehari sebelumnya' : '') + '). ' +
+                'Grup A/B bergantian Shift 1/Shift 2, grup NS = Non Shift. Hari yang melewati batas jam otomatis OFF.</div>' +
+                '<div class="grid2"><label class="field"><span>Mulai minggu</span><input type="date" name="tanggal" value="' + J.monday + '"></label>' +
+                '<label class="field"><span>Jumlah minggu</span><select name="weeks">' + [1, 2, 3, 4].map(n => '<option>' + n + '</option>').join('') + '</select></label></div>' +
+                '<label class="field"><span>Bagian</span><select name="bagian"><option value="">Semua bagian</option>' + S.master.bagian.map(b => '<option value="' + b.kode + '"' + (S.jad.bagian === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') + '</select></label>' +
+                '<label class="check"><input type="checkbox" name="timpa"> Timpa juga sel yang diisi manual (cuti tetap dipertahankan)</label>',
+            buttons: [{ label: 'Batal' }, {
+                label: '<span class="material-symbols-outlined" style="font-size:16px">bolt</span> Isi', cls: 'grad', onClick: async () => {
+                    const f = formData($('#modalBody'));
+                    f.onlyIeg = jOnlyIeg;
+                    try { const r = await call('mingguIsi', f); closeModal(); toast((r.operator || 0) + ' karyawan · ' + (r.entri || r.saved || 0) + ' sel terisi & masuk ke Jadwal Mingguan!', 'ok'); J.pending = {}; loadWeek(); } catch (e) { fail(e); }
+                }
+            }]
+        });
+    }
+
+    async function copyWeek() {
+        if (!await confirmDiscard()) return;
+        openModal({
+            title: 'Salin minggu lalu',
+            body: '<p>Kode jadwal minggu ' + fmtShort(addDays(J.monday, -7)) + ' disalin ke minggu ' + fmtShort(J.monday) + (S.jad.bagian ? ' (bagian ' + esc(bagName(S.jad.bagian)) + ')' : '') + '.</p>' +
+                '<label class="check"><input type="checkbox" name="timpa"> Timpa sel yang sudah terisi</label>',
+            buttons: [{ label: 'Batal' }, {
+                label: 'Salin', cls: 'primary', onClick: async () => {
+                    const f = formData($('#modalBody'));
+                    try {
+                        const r = await call('mingguSalin', { tanggal: J.monday, timpa: f.timpa, bagian: S.jad.bagian, onlyIeg: jOnlyIeg });
+                        closeModal();
+                        if (r.ok === false) return showWeekWarnings(r.warnings);
+                        toast(r.info || r.saved + ' sel disalin & masuk ke Jadwal Mingguan.', 'ok'); loadWeek();
+                    } catch (e) { fail(e); }
+                }
+            }]
+        });
+    }
+
+    function pasteWeekModal() {
+        openModal({
+            title: 'Tempel jadwal dari Excel / Sheet',
+            body: '<p class="small muted">Blok baris dari sheet jadwal Anda — mulai kolom <b>No/NIK/Nama</b> sampai kolom <b>Senin–Minggu</b> minggu ' + fmtShort(J.monday) + ' — lalu salin & tempel di sini. ' +
+                'Karyawan dicocokkan lewat NIK atau nama; 7 kolom terakhir dibaca sebagai Senin–Minggu. Teks seperti <span class="mono">Shift 1, LS 1, NS, HALF, OFF</span> dikenali otomatis.</p>' +
+                '<textarea name="text" style="min-height:200px" placeholder="1	0426083436	Daniel Imsula	Staff Inventory	IEG	NS	NS	NS	NS	NS	OFF	OFF"></textarea>' +
+                (isAdmin() ? '<label class="check"><input type="checkbox" name="force"> Simpan walau melanggar batas jam (pengecualian)</label>' : '') + '<div id="pwRes"></div>',
+            buttons: [{ label: 'Tutup' }, {
+                label: 'Tempel', cls: 'primary', onClick: async () => {
+                    const f = formData($('#modalBody'));
+                    try {
+                        const r = await call('mingguImport', { tanggal: J.monday, text: f.text, force: f.force });
+                        let msg = '';
+                        if (r.ok) msg = '<div class="alert ok">' + r.matched + ' karyawan · ' + r.saved + ' sel tersimpan.</div>';
+                        else if (r.warnings) msg = '<div class="alert warn">Tidak disimpan — ' + r.warnings.length + ' pelanggaran jam kerja:\n' + esc(r.warnings.slice(0, 15).map(w => w.nama + ' ' + fmtShort(w.tanggal) + ': ' + w.pesan).join('\n')) + (isAdmin() ? '\nCentang "Simpan walau melanggar" bila disetujui.' : '') + '</div>';
+                        if (r.errors && r.errors.length) msg += '<div class="alert warn">' + esc(r.errors.slice(0, 20).join('\n')) + '</div>';
+                        $('#pwRes').innerHTML = msg;
+                        if (r.ok) loadWeek();
+                    } catch (e) { fail(e); }
+                }
+            }]
+        });
+    }
+
+    function saveB64(r) {
+        const a = document.createElement('a');
+        a.href = 'data:' + r.mime + ';base64,' + r.base64;
+        a.download = r.name;
+        document.body.appendChild(a); a.click(); a.remove();
+        toast('Diunduh: ' + r.name, 'ok');
+    }
+
+    /* =========================== REQUEST OS (WHATSAPP & AUTO-SCHEDULE) =========================== */
+    let OD = null, odTimer = null, odDirty = false, odQ = '', odBagFilter = '', odPreviewMode = 'NUM', odSelectedDates = [];
+
+    async function renderWa() {
+        const c = S.master.current;
+        S.wa.tanggal = S.wa.tanggal || c.tanggal;
+        S.wa.shift = S.wa.shift || c.kode;
+        S.wa.type = S.wa.type || 'REQ';
+        odQ = '';
+        odBagFilter = '';
+        odSelectedDates = [S.wa.tanggal];
+        $('#view').innerHTML =
+            '<div class="toolbar">' +
+            '<input type="date" id="wTgl" value="' + S.wa.tanggal + '" aria-label="Tanggal">' + shiftSeg(S.wa.shift, 'wshift') +
+            '<div class="seg"><button data-otype="REQ" class="' + (S.wa.type === 'REQ' ? 'on' : '') + '">Request OS</button><button data-otype="REAL" class="' + (S.wa.type === 'REAL' ? 'on' : '') + '">Realisasi Absen</button></div>' +
+            '<span class="spacer"></span>' +
+            (isSupervisor() ? '<button class="btn sm primary" id="wGoAppList"><span class="material-symbols-outlined">fact_check</span> Daftar Approval Request OS</button>' : '') +
+            '<button class="btn sm ghost" id="wGoAbs"><span class="material-symbols-outlined">how_to_reg</span> Clock-In Absensi</button>' +
+            '<button class="btn sm ghost" id="wGoJad"><span class="material-symbols-outlined">calendar_month</span> Jadwal Mingguan</button>' +
+            '<button class="btn sm ghost" id="wRekap"><span class="material-symbols-outlined">download</span> Unduh rekap</button></div>' +
+            '<div id="waStatus" class="status-line"></div>' +
+            '<div id="odPendingBar"></div>' +
+            '<div class="card order-grid"><div id="odLeft"><div class="empty">Memuat…</div></div><div id="odRight"></div></div>' +
+            '<div id="odScheduleResult"></div>' +
+            '<details class="card more-card"><summary>Riwayat kirim</summary><div id="waLog" class="table-wrap" style="max-height:320px;margin-top:10px"></div></details>';
+        $('#wTgl').onchange = async e => { await flushOrder(); S.wa.tanggal = e.target.value; odSelectedDates = [S.wa.tanggal]; loadOrder(); };
+        $$('[data-wshift]').forEach(b => b.onclick = async () => { await flushOrder(); S.wa.shift = b.dataset.wshift; $$('[data-wshift]').forEach(x => x.classList.toggle('on', x === b)); loadOrder(); });
+        $$('[data-otype]').forEach(b => b.onclick = async () => { await flushOrder(); S.wa.type = b.dataset.otype; $$('[data-otype]').forEach(x => x.classList.toggle('on', x === b)); drawOrder(); });
+        if ($('#wGoAppList')) $('#wGoAppList').onclick = async () => { await flushOrder(); go('req_approval'); };
+        $('#wGoAbs').onclick = async () => { await flushOrder(); S.abs = { tanggal: S.wa.tanggal, shift: S.wa.shift }; go('absensi'); };
+        $('#wGoJad').onclick = async () => { await flushOrder(); S.jad = { tanggal: S.wa.tanggal }; go('jadwal'); };
+        $('#wRekap').onclick = rekapModal;
+        await Promise.all([loadWaStatus(), loadOrder(), loadWaLog()]);
+    }
+
+    async function loadOrder() {
+        OD = await call('order', { tanggal: S.wa.tanggal, shift: S.wa.shift });
+        if (!odSelectedDates.length || odSelectedDates.indexOf(OD.tanggal) < 0) {
+            odSelectedDates = [OD.tanggal];
+        }
+        odDirty = false;
+        drawOrder();
+    }
+
+    function odEditable() { return OD && OD.canEdit; }
+
+    function drawOrder() {
+        const isReq = S.wa.type === 'REQ';
+        $('#pageSub').textContent = OD.tanggalLabel + ' · ' + shiftName(OD.kode) + ' ' + shiftTime(OD.kode);
+        const ro = !odEditable();
+        let h = '';
+        if (isReq) {
+            const weekDates = OD.weekDates || [OD.tanggal];
+            h += '<div class="od-date-picker-box">' +
+                '<div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">' +
+                '<span class="small" style="font-weight:700;color:var(--text)"><span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;margin-right:4px;color:var(--primary)">event_available</span>Pilih Tanggal Jadwal (Saat Input Nama):</span>' +
+                '<div class="row" style="gap:4px">' +
+                '<button type="button" class="btn xs ghost" id="odDateAll">1 Minggu Penuh</button>' +
+                '<button type="button" class="btn xs ghost" id="odDateOne">Hanya ' + fmtShort(OD.tanggal) + '</button>' +
+                '</div></div>' +
+                '<div class="od-week-pills">' +
+                weekDates.map(wd => {
+                    const isPicked = odSelectedDates.indexOf(wd) >= 0;
+                    const isMain = wd === OD.tanggal;
+                    return '<label class="od-day-pill' + (isPicked ? ' on' : '') + (isMain ? ' is-cur-day' : '') + '">' +
+                        '<input type="checkbox" data-od-date="' + wd + '"' + (isPicked ? ' checked' : '') + (ro ? ' disabled' : '') + '>' +
+                        '<span>' + HARI3[dow(wd)] + '</span><b>' + wd.slice(8, 10) + '/' + wd.slice(5, 7) + '</b>' +
+                        '</label>';
+                }).join('') +
+                '</div></div>';
+
+            h += '<div class="od-card-stat">' +
+                '<div class="od-stat-item">' +
+                '<label class="od-stat-label">Jumlah Request MP</label>' +
+                '<div class="od-stat-input-wrap">' +
+                '<input type="number" min="0" id="odReq" class="od-stat-input" value="' + OD.request + '"' + (ro ? ' disabled' : '') + '>' +
+                '<span class="od-stat-unit">Orang</span>' +
+                '</div></div>' +
+                '<div class="od-stat-divider"></div>' +
+                '<div class="od-stat-status" id="odSum"></div>' +
+                '</div>';
+        } else {
+            h += '<div class="od-card-stat">' +
+                '<div class="od-stat-item" style="flex:1">' +
+                '<label class="od-stat-label">Realisasi Kehadiran Operator</label>' +
+                '<div class="row" style="gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap">' +
+                '<div id="odSum" class="od-stat-status" style="display:inline-block"></div>' +
+                (OD.belumAbsen ? '<span class="chip warn">' + OD.belumAbsen + ' belum diabsen</span><button class="btn sm ghost" id="odGoAbs">Clock-In Absensi →</button>' : '') +
+                (OD.realAuto ? '<span class="chip pri">Otomatis dari absensi</span>' : '<span class="chip warn">Diubah manual</span>' + (ro ? '' : '<button class="btn sm ghost" id="odReauto">Kembali otomatis</button>')) +
+                '</div></div></div>';
+        }
+
+        h += '<div class="row" style="gap:8px;margin-bottom:8px;flex-wrap:wrap">' +
+            '<div class="od-search-bar" style="flex:1 1 180px;margin-bottom:0">' +
+            '<span class="material-symbols-outlined od-search-icon">search</span>' +
+            '<input type="search" id="odQ" placeholder="Cari nama karyawan atau NIK…" value="' + esc(odQ) + '">' +
+            '</div>' +
+            '<select id="odBagFilter" style="min-width:140px"><option value="">Semua Divisi</option>' +
+            (S.master.bagian || []).map(b => '<option value="' + b.kode + '"' + (odBagFilter === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') +
+            '</select>' +
+            '</div>' +
+            (!ro ? '<div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px;padding:0 2px">' +
+                '<span class="small muted">Multiple Select Karyawan (' + OD.candidates.length + ' total user):</span>' +
+                '<div class="row" style="gap:6px">' +
+                '<button type="button" class="btn xs" id="odSelAll"><span class="material-symbols-outlined" style="font-size:14px">select_all</span> Pilih Semua</button>' +
+                '<button type="button" class="btn xs ghost" id="odSelNone"><span class="material-symbols-outlined" style="font-size:14px">deselect</span> Reset</button>' +
+                '</div></div>' : '') +
+            '<div id="odList"></div>';
+
+        if (isReq && !ro) {
+            h += '<details class="more" id="odJamBox"' + (OD.jamExtra.length ? ' open' : '') + '><summary>Jam masuk berbeda (opsional)</summary>' +
+                '<p class="small muted" style="margin:6px 0">Contoh: 1 orang masuk 06:00–14:00 di Shift 1. Tambahkan jamnya, lalu pilih jam di samping nama.</p>' +
+                '<div class="row" id="odJams">' + OD.jamExtra.map(j => '<span class="chip pri">' + esc(j.replace('-', '–')) + ' <button class="x" data-rmjam="' + j + '" aria-label="Hapus"><span class="material-symbols-outlined">close</span></button></span>').join('') + '</div>' +
+                '<div class="row" style="margin-top:8px;align-items:flex-end"><label class="field" style="margin:0;flex:1 1 100px"><span>Mulai</span><input type="time" id="odJm" value="06:00"></label>' +
+                '<label class="field" style="margin:0;flex:1 1 100px"><span>Selesai</span><input type="time" id="odJs" value="14:00"></label><button class="btn sm" id="odAddJam">＋ Tambah</button></div></details>';
+        }
+        $('#odLeft').innerHTML = h;
+        const subAt = isReq ? OD.reqSubmitAt : OD.realSubmitAt, subBy = isReq ? OD.reqSubmitBy : OD.realSubmitBy;
+        const sentAt = isReq ? OD.reqSentAt : OD.realSentAt;
+        const manual = OD.provider === 'MANUAL';
+        const noTag = (OD.tagTanpaNomor && OD.tagTanpaNomor.length);
+        const appSt = OD.approvalStatus || 'DRAFT';
+
+        const spvUserLabel = OD.supervisorName || 'Supervisor';
+        const subUserLabel = OD.reqSubmitByNama || subBy || 'Leader / PIC';
+        const appUserLabel = OD.approvedByNama || OD.approvedBy || spvUserLabel;
+
+        // Render Pending Approval Queue (menampilkan Nama-Nama Karyawan & Status Waiting Approval Supervisor)
+        const pendBox = $('#odPendingBar');
+        if (pendBox) {
+            const pendList = (OD.pendingList || []).filter(p => p.request > 0 || p.submitAt);
+            if (pendList.length) {
+                pendBox.innerHTML = '<div class="pending-approval-card">' +
+                    '<div class="pending-approval-head" style="justify-content:space-between;flex-wrap:wrap">' +
+                    '<div class="row" style="gap:8px"><span class="material-symbols-outlined">notifications_active</span>' +
+                    '<b>Waiting Approval Supervisor · ' + esc(spvUserLabel) + ' (' + pendList.length + ' Request OS)</b></div>' +
+                    (isSupervisor() ? '<button type="button" class="btn xs ghost" onclick="go(\'req_approval\')">Lihat Semua Detail Nama →</button>' : '') +
+                    '</div>' +
+                    '<div class="pending-approval-list">' +
+                    pendList.map(p => {
+                        const isCur = p.tanggal === OD.tanggal && p.shift === OD.kode;
+                        const namesPreview = (p.reqNames || []).map(n => '<span class="chip xs ' + (n.isVacant ? 'warn' : '') + '">' + esc(n.nama) + ' <small>(' + esc(bagName(n.bagian)) + ')</small></span>').join(' ');
+                        return '<div class="pending-approval-item' + (isCur ? ' active' : '') + '">' +
+                            '<div class="pending-approval-info" style="flex:1;min-width:220px">' +
+                            '<div class="row" style="gap:8px"><b>' + esc(p.tanggalLabel) + ' · ' + esc(shiftName(p.shift)) + '</b>' +
+                            '<span class="chip xs warn"><span class="material-symbols-outlined">schedule</span> Waiting Approval Supervisor · ' + esc(p.supervisorName || spvUserLabel) + '</span></div>' +
+                            '<small>Total <b>' + p.request + ' MP</b> · Diajukan oleh: <b>' + esc(p.submitByNama || p.submitBy || 'Leader') + '</b>' + (p.submitAt ? ' (' + esc(p.submitAt.slice(5, 16)) + ')' : '') + '</small>' +
+                            (namesPreview ? '<div class="row" style="gap:4px;margin-top:4px;flex-wrap:wrap">' + namesPreview + '</div>' : '') +
+                            '</div>' +
+                            '<div class="row" style="gap:6px">' +
+                            (!isCur ? '<button type="button" class="btn xs ghost" data-pend-open="' + p.tanggal + '|' + p.shift + '">Lihat</button>' : '<span class="chip xs pri">Sedang Dibuka</span>') +
+                            (OD.canApprove ? '<button type="button" class="btn xs ok" data-pend-app="' + p.tanggal + '|' + p.shift + '"><span class="material-symbols-outlined" style="font-size:14px">check_circle</span> Approve</button>' : '') +
+                            '</div></div>';
+                    }).join('') +
+                    '</div></div>';
+                $$('[data-pend-open]', pendBox).forEach(b => b.onclick = async () => {
+                    const [dt, sh] = b.dataset.pendOpen.split('|');
+                    await flushOrder();
+                    S.wa.tanggal = dt; S.wa.shift = sh;
+                    if ($('#wTgl')) $('#wTgl').value = dt;
+                    $$('[data-wshift]').forEach(x => x.classList.toggle('on', x.dataset.wshift === sh));
+                    odSelectedDates = [dt];
+                    loadOrder();
+                });
+                $$('[data-pend-app]', pendBox).forEach(b => b.onclick = async () => {
+                    const [dt, sh] = b.dataset.pendApp.split('|');
+                    b.disabled = true;
+                    try {
+                        const v = await call('orderApprove', { tanggal: dt, shift: sh, dates: [dt] });
+                        toast('Request OS (' + dt + ' · ' + shiftName(sh) + ') berhasil di-Approve! Data otomatis masuk ke Jadwal Mingguan & Absensi.', 'ok');
+                        if (dt === OD.tanggal && sh === OD.kode) { OD = v; drawOrder(); }
+                        else loadOrder();
+                    } catch (e) { b.disabled = false; fail(e); }
+                });
+            } else {
+                pendBox.innerHTML = '';
+            }
+        }
+
+        let approvalBannerHtml = '';
+        if (isReq) {
+            if (appSt === 'APPROVED') {
+                approvalBannerHtml = '<div class="approval-banner ok">' +
+                    '<span class="material-symbols-outlined">verified</span>' +
+                    '<div class="approval-banner-text"><b>Approved oleh Supervisor: ' + esc(appUserLabel) + '</b>' +
+                    '<small>Diajukan oleh: ' + esc(subUserLabel) + ' · Disetujui ' + esc((OD.approvedAt || '').slice(5, 16)) + ' · Data sudah masuk ke Jadwal Mingguan &amp; Absensi Shift</small></div></div>';
+            } else if (appSt === 'PENDING') {
+                approvalBannerHtml = '<div class="approval-banner warn">' +
+                    '<span class="material-symbols-outlined">pending_actions</span>' +
+                    '<div class="approval-banner-text"><b>Waiting Approval Supervisor · ' + esc(spvUserLabel) + '</b>' +
+                    '<small>Diajukan oleh: <b>' + esc(subUserLabel) + '</b>' + (subAt ? ' (' + esc(subAt.slice(5, 16)) + ')' : '') + ' · Menunggu persetujuan Supervisor untuk masuk ke Jadwal Mingguan &amp; Absensi</small></div></div>';
+            } else if (appSt === 'REJECTED') {
+                approvalBannerHtml = '<div class="approval-banner err">' +
+                    '<span class="material-symbols-outlined">cancel</span>' +
+                    '<div class="approval-banner-text"><b>Ditolak oleh Supervisor: ' + esc(appUserLabel) + '</b>' +
+                    '<small>' + esc(OD.approvalNote || 'Silakan perbaiki dan submit ulang.') + '</small></div></div>';
+            } else {
+                approvalBannerHtml = '<div class="approval-banner draft">' +
+                    '<span class="material-symbols-outlined">edit_note</span>' +
+                    '<div class="approval-banner-text"><b>Draft Request OS</b>' +
+                    '<small>Pilih karyawan lalu klik <b>Submit ke Supervisor</b> (' + esc(spvUserLabel) + ') agar di-Approve &amp; masuk ke Jadwal Mingguan + Absensi.</small></div></div>';
+            }
+        }
+
+        let spvActionHtml = '';
+        if (isReq && OD.canApprove) {
+            spvActionHtml = '<div class="spv-approval-bar">' +
+                '<div class="spv-approval-title"><span class="material-symbols-outlined" style="font-size:18px">fact_check</span>Panel Approval Supervisor</div>' +
+                '<div class="row" style="gap:8px;flex-wrap:wrap">' +
+                '<button type="button" class="btn sm ok" id="odApprove"><span class="material-symbols-outlined">verified</span> ' + (appSt === 'APPROVED' ? 'Approve Ulang &amp; Sync Jadwal' : 'Approve &amp; Masukkan ke Jadwal + Absensi') + '</button>' +
+                (appSt !== 'REJECTED' ? '<button type="button" class="btn sm danger" id="odReject"><span class="material-symbols-outlined">close</span> Tolak</button>' : '') +
+                '</div></div>';
+        }
+
+        let tagBoxHtml = '';
+        const allTagged = [];
+        (OD.picList || []).forEach(m => allTagged.push(Object.assign({ role: 'PIC' }, m)));
+        (OD.ccList || []).forEach(m => allTagged.push(Object.assign({ role: 'CC' }, m)));
+
+        if (allTagged.length) {
+            tagBoxHtml = '<details class="more" style="margin-bottom:10px">' +
+                '<summary style="font-size:12.5px;display:flex;align-items:center;gap:6px"><span class="material-symbols-outlined" style="font-size:16px;color:var(--primary)">verified_user</span>Daftar Kontak Tag WhatsApp (' + allTagged.length + ')</summary>' +
+                '<div class="wa-tag-box" style="margin-top:6px;margin-bottom:0">' +
+                '<div class="wa-tag-list">' +
+                allTagged.map(m => {
+                    const hasNum = !!m.nomor;
+                    return '<div class="wa-tag-row">' +
+                        '<div class="wa-tag-avatar ' + m.role.toLowerCase() + '">' + m.role + '</div>' +
+                        '<div class="wa-tag-info" style="flex:1;min-width:0">' +
+                        '<div class="wa-tag-nama">' + (m.sapaan ? esc(m.sapaan) + ' ' : '') + '<b>' + esc(m.nama) + '</b></div>' +
+                        '</div>' +
+                        (hasNum
+                            ? '<span class="chip xs ok">+' + esc(m.nomor) + '</span>'
+                            : '<span class="chip xs warn">Tanpa No HP</span>') +
+                        '</div>';
+                }).join('') +
+                '</div></div></details>';
+        }
+
+        const previewCardHtml = '<div class="wa-preview-card">' +
+            '<div class="wa-preview-head">' +
+            '<div class="wa-preview-title">' +
+            '<span class="material-symbols-outlined" style="font-size:18px;color:#25D366">chat</span>' +
+            '<b>Pratinjau WhatsApp</b>' +
+            '</div>' +
+            '<div class="seg sm">' +
+            '<button type="button" class="btn sm' + (odPreviewMode === 'NUM' ? ' on active' : '') + '" id="odPrevNum">@Nomor</button>' +
+            '<button type="button" class="btn sm' + (odPreviewMode === 'NAME' ? ' on active' : '') + '" id="odPrevName">@Nama</button>' +
+            '</div>' +
+            '</div>' +
+            '<div class="wa-wrap"><div class="wa-bubble" id="odBubble"></div></div>' +
+            '</div>';
+
+        $('#odRight').innerHTML =
+            approvalBannerHtml +
+            spvActionHtml +
+            '<div class="row" style="margin-bottom:10px;justify-content:space-between;align-items:center">' +
+            '<div class="row" style="gap:6px;flex-wrap:wrap">' +
+            (appSt === 'APPROVED'
+                ? '<span class="chip ok"><span class="material-symbols-outlined">check_circle</span> Approved Supervisor · ' + esc(appUserLabel) + '</span>'
+                : (appSt === 'PENDING'
+                    ? '<span class="chip warn"><span class="material-symbols-outlined">schedule</span> Waiting Approval Supervisor · ' + esc(spvUserLabel) + '</span>'
+                    : (appSt === 'REJECTED'
+                        ? '<span class="chip err"><span class="material-symbols-outlined">cancel</span> Ditolak · ' + esc(appUserLabel) + '</span>'
+                        : '<span class="chip">Draft</span>'))) +
+            (subAt ? '<span class="chip pri">Diajukan: ' + esc(subUserLabel) + ' (' + esc(subAt.slice(5, 16)) + ')</span>' : '') +
+            (sentAt ? '<span class="chip ok">WA Terkirim ' + esc(sentAt.slice(5, 16)) + '</span>' : '') +
+            '</div>' +
+            (isReq ? '<span class="chip sm ghost">Shift ' + esc(OD.kode) + '</span>' : '') +
+            '</div>' +
+            previewCardHtml +
+            tagBoxHtml +
+            '<div class="row" style="margin-top:12px;gap:8px;flex-wrap:wrap">' +
+            (odEditable() ? '<button class="btn primary" id="odSubmit"><span class="material-symbols-outlined">send</span> ' + (isReq ? 'Submit ke Supervisor (Approval)' : 'Submit Realisasi') + '</button><button class="btn btn-wa" id="odSend">' + (manual ? '<span class="material-symbols-outlined">share</span> Share WhatsApp' : '<span class="material-symbols-outlined">send</span> Kirim WA') + '</button>' : '') +
+            '<button class="btn" id="odCopy"><span class="material-symbols-outlined">content_copy</span> Salin</button>' +
+            (isReq ? '<button class="btn ghost" id="odImg"><span class="material-symbols-outlined">image</span> Gambar</button>' : '') +
+            '</div>';
+
+        drawOrderList();
+        refreshOrderPreview();
+        drawSubmittedSchedule();
+
+        $$('[data-od-date]').forEach(cb => cb.onchange = () => {
+            const d = cb.dataset.odDate;
+            if (cb.checked) {
+                if (odSelectedDates.indexOf(d) < 0) odSelectedDates.push(d);
+            } else {
+                if (odSelectedDates.length <= 1) { cb.checked = true; return toast('Minimal 1 tanggal harus dipilih.', 'warn'); }
+                odSelectedDates = odSelectedDates.filter(x => x !== d);
+            }
+            cb.closest('.od-day-pill').classList.toggle('on', cb.checked);
+        });
+        if ($('#odDateAll')) $('#odDateAll').onclick = () => { odSelectedDates = (OD.weekDates || [OD.tanggal]).slice(); drawOrder(); };
+        if ($('#odDateOne')) $('#odDateOne').onclick = () => { odSelectedDates = [OD.tanggal]; drawOrder(); };
+
+        if ($('#odPrevNum')) $('#odPrevNum').onclick = () => { odPreviewMode = 'NUM'; drawOrder(); };
+        if ($('#odPrevName')) $('#odPrevName').onclick = () => { odPreviewMode = 'NAME'; drawOrder(); };
+        $('#odQ').oninput = e => { odQ = e.target.value; drawOrderList(); };
+        if ($('#odBagFilter')) $('#odBagFilter').onchange = e => { odBagFilter = e.target.value; drawOrderList(); };
+        if ($('#odSelAll')) $('#odSelAll').onclick = () => {
+            const visible = getFilteredCandidates();
+            const existing = {};
+            OD.req.forEach(x => existing[x.id] = x);
+            visible.forEach(c => {
+                if (c.isVacant || /vacant/i.test(c.nama)) return;
+                if (isReq) {
+                    if (!existing[c.id]) { OD.req.push({ id: c.id, jam: OD.defJam, qty: 1 }); existing[c.id] = true; }
+                } else {
+                    if (OD.realIds.indexOf(c.id) < 0) OD.realIds.push(c.id);
+                    OD.realAuto = false;
+                }
+            });
+            if (isReq) {
+                OD.request = Math.max(OD.request, totalSelectedMp());
+                if ($('#odReq')) $('#odReq').value = OD.request;
+            }
+            drawOrderList(); markOrder(); refreshOrderPreview(true);
+        };
+        if ($('#odSelNone')) $('#odSelNone').onclick = () => {
+            const visibleIds = {};
+            getFilteredCandidates().forEach(c => visibleIds[c.id] = true);
+            if (isReq) {
+                OD.req = OD.req.filter(x => !visibleIds[x.id]);
+                OD.request = totalSelectedMp();
+                if ($('#odReq')) $('#odReq').value = OD.request;
+            } else {
+                OD.realIds = OD.realIds.filter(id => !visibleIds[id]);
+                OD.realAuto = false;
+            }
+            drawOrderList(); markOrder(); refreshOrderPreview(true);
+        };
+        if ($('#odReq')) $('#odReq').oninput = e => { OD.request = Math.max(0, +e.target.value || 0); markOrder(); refreshOrderPreview(true); };
+        if ($('#odGoAbs')) $('#odGoAbs').onclick = () => { S.abs = { tanggal: OD.tanggal, shift: OD.kode }; go('absensi'); };
+        if ($('#odReauto')) $('#odReauto').onclick = () => { OD.realAuto = true; OD.realIds = []; markOrder(true); };
+        if ($('#odAddJam')) $('#odAddJam').onclick = () => {
+            const j = $('#odJm').value + '-' + $('#odJs').value;
+            if (j === OD.defJam || OD.jamExtra.indexOf(j) >= 0) return toast('Jam itu sudah ada.', 'err');
+            OD.jamExtra.push(j); markOrder(); drawOrder();
+        };
+        $$('[data-rmjam]').forEach(b => b.onclick = () => {
+            const j = b.dataset.rmjam;
+            OD.jamExtra = OD.jamExtra.filter(x => x !== j);
+            OD.req.forEach(x => { if (x.jam === j) x.jam = OD.defJam; });
+            markOrder(); drawOrder();
+        });
+        $('#odCopy').onclick = async () => { await flushOrder(); toast(await copyText(shareText()) ? 'Teks disalin — tempel di grup WA.' : 'Gagal menyalin.', 'ok'); };
+        if ($('#odImg')) $('#odImg').onclick = async () => { await flushOrder(); downloadRekap({ jenis: 'GAMBAR', from: OD.tanggal, to: OD.tanggal }); };
+        if ($('#odSend')) $('#odSend').onclick = sendOrder;
+        if ($('#odSubmit')) $('#odSubmit').onclick = submitOrder;
+        if ($('#odApprove')) $('#odApprove').onclick = approveOrder;
+        if ($('#odReject')) $('#odReject').onclick = rejectOrder;
+    }
+
+    function curText() { return S.wa.type === 'REQ' ? OD.textReq : OD.textReal; }
+    /** Teks untuk dibagikan: PIC & CC ditulis @nomor agar WhatsApp menjadikannya tag kontak. */
+    function shareText() { return S.wa.type === 'REQ' ? (OD.shareReq || OD.textReq) : (OD.shareReal || OD.textReal); }
+
+    function totalSelectedMp() {
+        if (!OD || !OD.req) return 0;
+        return OD.req.reduce((acc, x) => acc + Math.max(1, +(x.qty || 1)), 0);
+    }
+
+    function getFilteredCandidates() {
+        if (!OD || !OD.candidates) return [];
+        const q = odQ.trim().toLowerCase();
+        const bagOrder = {};
+        (S.master.bagian || []).forEach((b, i) => bagOrder[b.kode] = i);
+        return OD.candidates.filter(c => {
+            if (S.wa.type === 'REAL' && (c.isVacant || String(c.id).indexOf('VAC_') === 0)) return false;
+            if (odBagFilter && c.bagian !== odBagFilter) return false;
+            if (q && c.nama.toLowerCase().indexOf(q) < 0 && (c.nik || '').toLowerCase().indexOf(q) < 0 && bagName(c.bagian).toLowerCase().indexOf(q) < 0) return false;
+            return true;
+        }).sort((a, b) => {
+            const oa = bagOrder[a.bagian] !== undefined ? bagOrder[a.bagian] : 99;
+            const ob = bagOrder[b.bagian] !== undefined ? bagOrder[b.bagian] : 99;
+            if (oa !== ob) return oa - ob;
+            const vacA = (a.isVacant || /vacant/i.test(a.nama)) ? 1 : 0;
+            const vacB = (b.isVacant || /vacant/i.test(b.nama)) ? 1 : 0;
+            if (vacA !== vacB) return vacA - vacB;
+            return (a.nama || '').localeCompare(b.nama || '');
+        });
+    }
+
+    function setVacantQty(vacId, newQty) {
+        newQty = Math.max(0, Math.min(50, parseInt(newQty, 10) || 0));
+        const existing = OD.req.find(x => x.id === vacId);
+        if (newQty <= 0) {
+            OD.req = OD.req.filter(x => x.id !== vacId);
+        } else if (existing) {
+            existing.qty = newQty;
+        } else {
+            OD.req.push({ id: vacId, jam: OD.defJam, qty: newQty });
+        }
+        OD.request = totalSelectedMp();
+        if ($('#odReq')) $('#odReq').value = OD.request;
+        drawOrderList();
+        markOrder();
+        refreshOrderPreview(true);
+    }
+
+    function drawOrderList() {
+        const isReq = S.wa.type === 'REQ';
+        const ro = !odEditable();
+        const reqIdx = {};
+        OD.req.forEach(x => reqIdx[x.id] = x);
+        const sel = id => isReq ? !!reqIdx[id] : OD.realIds.indexOf(id) >= 0;
+        const list = getFilteredCandidates();
+        if (!list.length) {
+            $('#odList').innerHTML = '<div class="empty small">Nama karyawan tidak ditemukan.</div>';
+            return;
+        }
+        const jams = [OD.defJam].concat(OD.jamExtra);
+        const stChip = c => c.status ? '<span class="chip xs ' + ({ H: 'ok', T: 'info', S: 'warn', I: 'warn', A: 'err', C: 'pri' }[c.status] || '') + '">' + esc(STATUS[c.status]) + '</span>' : '';
+        let lastBag = null, h = '<div class="picks one">';
+        list.forEach(c => {
+            if (c.bagian !== lastBag) {
+                lastBag = c.bagian;
+                const realInBag = list.filter(x => x.bagian === c.bagian && !x.isVacant);
+                const selRealInBag = realInBag.filter(x => sel(x.id)).length;
+                const vacEntry = reqIdx['VAC_' + c.bagian];
+                const vacQtyInBag = vacEntry ? Math.max(1, +(vacEntry.qty || 1)) : 0;
+                h += '<div class="pick-head">' +
+                    '<span class="pick-head-title">' + esc(bagName(c.bagian)) + '</span>' +
+                    '<div class="pick-head-actions">' +
+                    '<span class="chip xs ' + ((selRealInBag + vacQtyInBag) > 0 ? 'pri' : 'muted') + '">' + selRealInBag + '/' + realInBag.length + (vacQtyInBag ? ' +' + vacQtyInBag + ' Vac' : '') + '</span>' +
+                    (!ro && realInBag.length ? '<button type="button" class="btn xs ghost" data-bag-toggle="' + esc(c.bagian) + '">' + (selRealInBag === realInBag.length ? 'Reset' : '+ Pilih') + '</button>' : '') +
+                    '</div></div>';
+            }
+            const on = sel(c.id);
+            const isVacRow = c.isVacant || String(c.id).indexOf('VAC_') === 0;
+            if (isReq && isVacRow) {
+                const vQty = on ? Math.max(1, +(reqIdx[c.id].qty || 1)) : 0;
+                const jamSelHtml = (on && OD.jamExtra.length)
+                    ? '<select class="jam-sel" data-jam="' + c.id + '"' + (ro ? ' disabled' : '') + '>' + jams.map(j => '<option value="' + j + '"' + (reqIdx[c.id].jam === j ? ' selected' : '') + '>' + j.replace('-', '–') + '</option>').join('') + '</select>'
+                    : '';
+                h += '<div class="pick vacant-row' + (on ? ' is-picked' : '') + '">' +
+                    '<label class="vac-check-label">' +
+                    '<input type="checkbox" data-vac-check="' + c.id + '"' + (on ? ' checked' : '') + (ro ? ' disabled' : '') + '>' +
+                    '<span class="vac-label-text">+ SLOT VACANT</span>' +
+                    '</label>' +
+                    jamSelHtml +
+                    '<div class="vac-qty-box">' +
+                    '<button type="button" class="vac-qty-btn" data-vac-dec="' + c.id + '"' + (ro || vQty <= 0 ? ' disabled' : '') + ' title="Kurangi Vacant">−</button>' +
+                    '<input type="number" min="0" max="50" class="vac-qty-input" data-vac-inp="' + c.id + '" value="' + vQty + '"' + (ro ? ' disabled' : '') + '>' +
+                    '<button type="button" class="vac-qty-btn vac-btn-plus" data-vac-inc="' + c.id + '"' + (ro ? ' disabled' : '') + ' title="Tambah Vacant">＋</button>' +
+                    '</div></div>';
+                return;
+            }
+            let extra = '';
+            if (isReq) {
+                if (on && OD.jamExtra.length) extra = '<select class="jam-sel" data-jam="' + c.id + '"' + (ro ? ' disabled' : '') + '>' + jams.map(j => '<option value="' + j + '"' + (reqIdx[c.id].jam === j ? ' selected' : '') + '>' + j.replace('-', '–') + '</option>').join('') + '</select>';
+                else if (c.status) extra = stChip(c);
+                else if (c.terjadwal) extra = '<span class="chip xs ok">' + esc(c.jadwal) + '</span>';
+            } else {
+                extra = (stChip(c) || '<span class="chip xs">Belum</span>') + (reqIdx[c.id] ? '' : ' <span class="chip xs info">Pengganti</span>');
+            }
+            h += '<label class="pick' + (on ? ' is-picked' : '') + '"><input type="checkbox" data-pick="' + c.id + '"' + (on ? ' checked' : '') + (ro ? ' disabled' : '') + '>' +
+                '<span class="grow"><b>' + esc(c.nama) + '</b>' + (c.nik ? ' <small class="muted">' + esc(c.nik) + '</small>' : '') + '</span>' + extra + '</label>';
+        });
+        $('#odList').innerHTML = h + '</div>';
+
+        $$('#odList [data-bag-toggle]').forEach(btn => btn.onclick = e => {
+            e.preventDefault();
+            const bag = btn.dataset.bagToggle;
+            const inBag = list.filter(x => x.bagian === bag && !x.isVacant && !/vacant/i.test(x.nama));
+            const allChecked = inBag.every(x => sel(x.id));
+            inBag.forEach(c => {
+                if (isReq) {
+                    if (allChecked) OD.req = OD.req.filter(x => x.id !== c.id);
+                    else if (!reqIdx[c.id]) { OD.req.push({ id: c.id, jam: OD.defJam, qty: 1 }); reqIdx[c.id] = { id: c.id, jam: OD.defJam, qty: 1 }; }
+                } else {
+                    OD.realIds = OD.realIds.filter(id => id !== c.id);
+                    if (!allChecked) OD.realIds.push(c.id);
+                    OD.realAuto = false;
+                }
+            });
+            if (isReq) {
+                OD.request = totalSelectedMp();
+                if ($('#odReq')) $('#odReq').value = OD.request;
+            }
+            drawOrderList(); markOrder(); refreshOrderPreview(true);
+        });
+
+        $$('#odList [data-pick]').forEach(cb => cb.onchange = () => {
+            const id = cb.dataset.pick;
+            if (isReq) {
+                if (cb.checked) { if (!reqIdx[id]) OD.req.push({ id: id, jam: OD.defJam, qty: 1 }); }
+                else OD.req = OD.req.filter(x => x.id !== id);
+                OD.request = totalSelectedMp();
+                if ($('#odReq')) $('#odReq').value = OD.request;
+                drawOrderList();
+            } else {
+                OD.realIds = OD.realIds.filter(x => x !== id);
+                if (cb.checked) OD.realIds.push(id);
+                OD.realAuto = false;
+                drawOrderList();
+            }
+            markOrder(); refreshOrderPreview(true);
+        });
+
+        $$('#odList [data-vac-check]').forEach(cb => cb.onchange = () => {
+            const id = cb.dataset.vacCheck;
+            setVacantQty(id, cb.checked ? 1 : 0);
+        });
+        $$('#odList [data-vac-inc]').forEach(btn => btn.onclick = e => {
+            e.preventDefault();
+            const id = btn.dataset.vacInc;
+            const cur = reqIdx[id] ? Math.max(1, +(reqIdx[id].qty || 1)) : 0;
+            setVacantQty(id, cur + 1);
+        });
+        $$('#odList [data-vac-dec]').forEach(btn => btn.onclick = e => {
+            e.preventDefault();
+            const id = btn.dataset.vacDec;
+            const cur = reqIdx[id] ? Math.max(1, +(reqIdx[id].qty || 1)) : 0;
+            setVacantQty(id, Math.max(0, cur - 1));
+        });
+        $$('#odList [data-vac-inp]').forEach(inp => {
+            inp.onclick = e => e.stopPropagation();
+            inp.onchange = () => setVacantQty(inp.dataset.vacInp, inp.value);
+        });
+        $$('#odList [data-jam]').forEach(se => { se.onclick = e => e.preventDefault(); se.onchange = () => { reqIdx[se.dataset.jam].jam = se.value; markOrder(); refreshOrderPreview(true); }; });
+    }
+
+    function drawSubmittedSchedule() {
+        const box = $('#odScheduleResult');
+        if (!box || !OD) return;
+        const rows = (OD.scheduledRows || []).slice().sort((a, b) => {
+            const vacA = /vacant/i.test(a.nama) ? 1 : 0;
+            const vacB = /vacant/i.test(b.nama) ? 1 : 0;
+            if (vacA !== vacB) return vacA - vacB;
+            return (a.nama || '').localeCompare(b.nama || '');
+        });
+        const weekDates = OD.weekDates || [OD.tanggal];
+
+        const appSt = OD.approvalStatus || 'DRAFT';
+        const spvUserLabel = OD.supervisorName || 'Supervisor';
+        const appUserLabel = OD.approvedByNama || OD.approvedBy || spvUserLabel;
+        const subUserLabel = OD.reqSubmitByNama || OD.reqSubmitBy || 'Leader / PIC';
+        if (!rows.length) {
+            box.innerHTML = '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="vertical-align:middle;margin-right:6px;color:var(--primary)">calendar_month</span>Ringkasan Request OS &amp; Jadwal</h2></div>' +
+                '<div class="empty small">Pilih karyawan lalu klik <b>Submit ke Supervisor (Approval)</b>.</div></div>';
+            return;
+        }
+
+        const stBadgeTop = appSt === 'APPROVED'
+            ? '<span class="chip sm ok"><span class="material-symbols-outlined">check_circle</span> Approved oleh Supervisor: ' + esc(appUserLabel) + ' · Masuk Jadwal &amp; Absensi</span>'
+            : (appSt === 'PENDING'
+                ? '<span class="chip sm warn"><span class="material-symbols-outlined">schedule</span> Waiting Approval Supervisor · ' + esc(spvUserLabel) + ' (Diajukan: ' + esc(subUserLabel) + ')</span>'
+                : (appSt === 'REJECTED'
+                    ? '<span class="chip sm err"><span class="material-symbols-outlined">cancel</span> Ditolak Supervisor: ' + esc(appUserLabel) + '</span>'
+                    : '<span class="chip sm">Draft</span>'));
+
+        let h = '<div class="card">' +
+            '<div class="card-head" style="flex-wrap:wrap;gap:8px">' +
+            '<div class="row" style="gap:8px;align-items:center">' +
+            '<h2><span class="material-symbols-outlined" style="vertical-align:middle;margin-right:6px;color:var(--primary)">event_available</span>Daftar Karyawan Request OS (' + rows.length + ')</h2>' +
+            stBadgeTop +
+            '</div>' +
+            '<div class="row" style="gap:8px">' +
+            (OD.canApprove && appSt !== 'APPROVED' ? '<button type="button" class="btn sm ok" id="resApproveBtn"><span class="material-symbols-outlined">verified</span> Approve Sekarang</button>' : '') +
+            '<button type="button" class="btn sm primary" id="resGoAbs"><span class="material-symbols-outlined">how_to_reg</span> Clock-In Absensi →</button>' +
+            '<button type="button" class="btn sm" id="resGoJad"><span class="material-symbols-outlined">calendar_month</span> Jadwal Mingguan →</button>' +
+            '</div></div>' +
+            '<div class="table-wrap" style="max-height:none"><table class="tbl"><thead><tr>' +
+            '<th style="width:40px">No</th><th>Nama Karyawan</th><th>Divisi</th><th>Jam Kerja</th>' +
+            weekDates.map(wd => '<th class="num" style="' + (wd === OD.tanggal ? 'background:var(--primary-soft);color:var(--primary)' : '') + '">' + HARI3[dow(wd)] + '<br><small>' + wd.slice(8, 10) + '/' + wd.slice(5, 7) + '</small></th>').join('') +
+            '<th>Status Approval</th></tr></thead><tbody>';
+
+        rows.forEach((r, idx) => {
+            const isVac = /vacant/i.test(r.nama);
+            const rowStChip = appSt === 'APPROVED'
+                ? '<span class="chip xs ok"><span class="material-symbols-outlined">check_circle</span> Approved · ' + esc(appUserLabel) + '</span>'
+                : (appSt === 'PENDING'
+                    ? '<span class="chip xs warn"><span class="material-symbols-outlined">schedule</span> Waiting Approval Supervisor · ' + esc(spvUserLabel) + '</span>'
+                    : (appSt === 'REJECTED' ? '<span class="chip xs err"><span class="material-symbols-outlined">cancel</span> Ditolak · ' + esc(appUserLabel) + '</span>' : '<span class="chip xs">Draft</span>'));
+            h += '<tr>' +
+                '<td class="muted">' + (idx + 1) + '</td>' +
+                '<td><b style="' + (isVac ? 'color:var(--warn)' : '') + '">' + esc(r.nama) + '</b>' + (isVac ? ' <small class="muted">(Dinamai saat Absensi)</small>' : '') + '</td>' +
+                '<td><span class="wk-div-badge">' + esc(bagName(r.bagian)) + '</span></td>' +
+                '<td class="small"><b>' + esc((r.jamKerja || OD.defJam).replace('-', '–')) + '</b></td>' +
+                weekDates.map(wd => {
+                    const kd = (r.days && r.days[wd]) ? r.days[wd] : '-';
+                    const kObj = (S.master.kodes || []).find(x => x.kode === kd);
+                    const lbl = kObj ? kObj.label : kd;
+                    const bg = kObj && kObj.warna ? 'background:' + kObj.warna + ';color:' + textColor(kObj.warna) + ';' : '';
+                    return '<td class="num" style="' + (wd === OD.tanggal ? 'background:var(--primary-soft);' : '') + '">' +
+                        (kd !== '-' ? '<span class="chip xs" style="' + bg + 'font-weight:700">' + esc(lbl) + '</span>' : '<span class="muted">—</span>') +
+                        '</td>';
+                }).join('') +
+                '<td>' + rowStChip + '</td>' +
+                '</tr>';
+        });
+
+        h += '</tbody></table></div></div>';
+        box.innerHTML = h;
+        if ($('#resApproveBtn')) $('#resApproveBtn').onclick = approveOrder;
+        if ($('#resGoAbs')) $('#resGoAbs').onclick = () => { S.abs = { tanggal: OD.tanggal, shift: OD.kode }; go('absensi'); };
+        if ($('#resGoJad')) $('#resGoJad').onclick = () => { S.jad = { tanggal: OD.tanggal }; go('jadwal'); };
+    }
+
+    function refreshOrderPreview(pending) {
+        const isReq = S.wa.type === 'REQ';
+        const sum = $('#odSum');
+        if (sum) {
+            if (isReq) {
+                const realCnt = OD.req.filter(x => String(x.id).indexOf('VAC_') !== 0).length;
+                const vacExplicit = OD.req.filter(x => String(x.id).indexOf('VAC_') === 0).reduce((a, x) => a + Math.max(1, +(x.qty || 1)), 0);
+                const totSel = realCnt + vacExplicit;
+                const vacExtra = Math.max(0, OD.request - totSel);
+                const totalVac = vacExplicit + vacExtra;
+                sum.innerHTML = '<b>' + realCnt + '</b> Nama' +
+                    (totalVac ? ' + <b style="color:var(--warn)">' + totalVac + ' ' + esc(OD.vacant) + '</b>' : '') +
+                    ' = <b>' + Math.max(OD.request, totSel) + '</b> Mp';
+                sum.className = 'od-stat-status ' + (totalVac ? 'warn' : 'ok');
+            } else {
+                const n = OD.realIds.length;
+                sum.innerHTML = 'Hadir <b>' + n + '</b> / Request <b>' + OD.request + '</b>' +
+                    (n >= OD.request ? ' · <span class="ok">Terfullfill</span>' : ' · <span class="err">Kurang ' + (OD.request - n) + '</span>');
+                sum.className = 'od-stat-status ' + (n >= OD.request ? 'ok' : 'err');
+            }
+        }
+        const bub = $('#odBubble');
+        if (bub) {
+            const raw = odPreviewMode === 'NUM' ? shareText() : curText();
+            let safeHtml = esc(raw || '');
+            safeHtml = safeHtml.replace(/(@\d{9,16}|@[A-Za-z0-9\s.]{2,30}(?=\s|[,.]|$))/g, '<span class="wa-mention-pill">$1</span>');
+            safeHtml = safeHtml.replace(/\*([^*]+)\*/g, '<b>$1</b>');
+            bub.innerHTML = safeHtml;
+            bub.classList.toggle('stale', !!pending);
+        }
+    }
+
+    function markOrder(reload) {
+        if (!odEditable()) return;
+        odDirty = true;
+        clearTimeout(odTimer);
+        odTimer = setTimeout(() => flushOrder(reload), reload ? 0 : 500);
+    }
+    async function flushOrder(reload) {
+        clearTimeout(odTimer);
+        if (!odDirty || !OD) return;
+        odDirty = false;
+        try {
+            const v = await call('orderSave', {
+                tanggal: OD.tanggal, shift: OD.kode, request: OD.request, req: OD.req, jamExtra: OD.jamExtra,
+                realIds: OD.realIds, realAuto: OD.realAuto
+            }, { silent: true });
+            if (S.page !== 'wa' || v.tanggal !== OD.tanggal || v.kode !== OD.kode) return;
+            OD.textReq = v.textReq; OD.textReal = v.textReal;
+            OD.shareReq = v.shareReq; OD.shareReal = v.shareReal;
+            OD.belumAbsen = v.belumAbsen; OD.groups = v.groups;
+            OD.scheduledRows = v.scheduledRows;
+            if (reload || OD.realAuto) { OD.realIds = v.realIds; }
+            if (reload) drawOrder(); else if (!odDirty) { refreshOrderPreview(false); drawSubmittedSchedule(); }
+        } catch (e) { fail(e); }
+    }
+
+    function orderPayload() {
+        return {
+            tanggal: OD.tanggal,
+            dates: odSelectedDates.length ? odSelectedDates : [OD.tanggal],
+            shift: OD.kode,
+            request: OD.request,
+            req: OD.req,
+            jamExtra: OD.jamExtra,
+            realIds: OD.realIds,
+            realAuto: OD.realAuto
+        };
+    }
+
+    async function submitOrder() {
+        clearTimeout(odTimer); odDirty = false;
+        try {
+            const v = await call('orderSubmit', Object.assign(orderPayload(), { type: S.wa.type }));
+            OD = v; drawOrder();
+            toast('Request OS berhasil dikirim ke Supervisor untuk di-Approve!', 'ok');
+        } catch (e) { fail(e); }
+    }
+
+    async function approveOrder() {
+        clearTimeout(odTimer); odDirty = false;
+        const btn = $('#odApprove');
+        if (btn) btn.disabled = true;
+        try {
+            const v = await call('orderApprove', orderPayload());
+            OD = v; drawOrder();
+            toast('Request OS berhasil di-Approve! Data otomatis masuk ke Jadwal Mingguan & Absensi Shift.', 'ok');
+        } catch (e) {
+            if (btn) btn.disabled = false;
+            fail(e);
+        }
+    }
+
+    async function rejectOrder() {
+        openModal({
+            title: 'Tolak Request OS',
+            body: '<p class="small muted">Berikan catatan alasan penolakan untuk Leader / PIC:</p>' +
+                '<label class="field"><span>Catatan Supervisor</span><input name="note" placeholder="Contoh: Kurang 2 operator Inbound…"></label>',
+            buttons: [
+                { label: 'Batal' },
+                {
+                    label: 'Tolak Request', cls: 'danger', onClick: async () => {
+                        const f = formData($('#modalBody'));
+                        try {
+                            const v = await call('orderReject', { tanggal: OD.tanggal, shift: OD.kode, note: f.note });
+                            closeModal();
+                            OD = v; drawOrder();
+                            toast('Request OS ditolak.', 'warn');
+                        } catch (e) { fail(e); }
+                    }
+                }
+            ]
+        });
+    }
+
+    async function sendOrder() {
+        const type = S.wa.type;
+        if (OD.provider === 'MANUAL') {
+            clearTimeout(odTimer); odDirty = false;
+            const text = shareText();
+            copyText(text);
+            if (navigator.share) {
+                try {
+                    await navigator.share({
+                        title: 'MPP ' + (type === 'REQ' ? 'Request' : 'Realisasi') + ' - ' + shiftName(OD.kode),
+                        text: text
+                    });
+                    OD = await call('orderShared', Object.assign(orderPayload(), { type: type }), { silent: true });
+                    drawOrder(); loadWaLog();
+                    toast('Pesan & tag akun WhatsApp berhasil dibagikan.', 'ok');
+                    return;
+                } catch (err) {
+                    if (err.name === 'AbortError') return;
+                }
+            }
+            window.open('https://api.whatsapp.com/send?text=' + encodeURIComponent(text), '_blank');
+            try {
+                OD = await call('orderShared', Object.assign(orderPayload(), { type: type }), { silent: true });
+                drawOrder(); loadWaLog();
+            } catch (e) { fail(e); }
+            toast('WhatsApp dibuka — teks & tag akun WhatsApp telah disalin ke clipboard.', 'ok');
+            return;
+        }
+        await flushOrder();
+        const info = type === 'REQ' ? 'Request ' + OD.request + ' Mp (' + OD.req.length + ' nama)' + (OD.lampiran !== 'TIDAK' ? ' + ' + (OD.lampiran === 'GAMBAR' ? 'gambar tabel' : 'file Excel') : '')
+            : 'Realisasi hadir ' + OD.realIds.length + ' / request ' + OD.request;
+        if (!await confirmBox('Kirim ke grup WhatsApp?', shiftName(OD.kode) + ' · ' + OD.tanggalLabel + '\n' + info, 'Kirim')) return;
+        try {
+            const r = await call('orderSend', { tanggal: OD.tanggal, shift: OD.kode, type: type });
+            toast(r.ok ? (r.queued ? 'Masuk antrean bot WhatsApp.\n' + r.detail : 'Terkirim ke grup.') : 'Gagal: ' + r.detail, r.ok ? 'ok' : 'err');
+            OD = r.view; drawOrder(); loadWaLog(); loadWaStatus();
+        } catch (e) { fail(e); }
+    }
+
+    async function downloadRekap(p) {
+        try {
+            const r = await call('rekapExcel', p);
+            const a = document.createElement('a');
+            a.href = 'data:' + r.mime + ';base64,' + r.base64;
+            a.download = r.name;
+            document.body.appendChild(a); a.click(); a.remove();
+            toast('Diunduh: ' + r.name, 'ok');
+        } catch (e) { fail(e); }
+    }
+
+    function rekapModal() {
+        const t = OD ? OD.tanggal : S.master.today;
+        openModal({
+            title: 'Unduh rekap',
+            body: '<div class="seg" style="margin-bottom:12px"><button type="button" data-rj="EXCEL" class="on">Excel (rentang)</button><button type="button" data-rj="GAMBAR">Gambar tabel (1 hari)</button></div>' +
+                '<input type="hidden" name="jenis" value="EXCEL">' +
+                '<div class="grid2"><label class="field"><span>Dari</span><input type="date" name="from" value="' + t + '"></label>' +
+                '<label class="field" id="rkTo"><span>Sampai</span><input type="date" name="to" value="' + t + '"></label></div>' +
+                '<p class="small muted">Kolom: Tgl | Shift | Jumlah MP | Jam Masuk (+ TOTAL di Excel).</p>',
+            onOpen: body => $$('[data-rj]', body).forEach(b => b.onclick = () => {
+                $$('[data-rj]', body).forEach(x => x.classList.toggle('on', x === b));
+                $('[name=jenis]', body).value = b.dataset.rj;
+                $('#rkTo', body).classList.toggle('hidden', b.dataset.rj === 'GAMBAR');
+            }),
+            buttons: [{ label: 'Batal' }, {
+                label: '⬇ Unduh', cls: 'primary', onClick: async () => {
+                    const f = formData($('#modalBody'));
+                    if (f.jenis === 'GAMBAR') f.to = f.from;
+                    await flushOrder(); closeModal(); downloadRekap(f);
+                }
+            }]
+        });
+    }
+
+    async function loadWaStatus() {
+        const s = await call('waStatus', {}, { silent: true });
+        const prov = ({ BOT: 'Bot WA kantor', FONNTE: 'Fonnte', WEBHOOK: 'Webhook', MANUAL: 'Manual' }[s.provider] || s.provider) +
+            (s.bot ? (s.bot.online ? ' (online)' : ' (OFFLINE' + (s.bot.lastPoll ? ', terakhir ' + s.bot.lastPoll.slice(11, 16) : '') + ')') + (s.bot.pending ? ' · antre ' + s.bot.pending : '') : '');
+        const jad = s.jadwalKirim.map(j => esc(j.nama) + ': ' + (j.kirimReq ? 'request ' + esc(j.kirimReq) + ', ' : '') + 'realisasi ' + esc(j.kirim)).join(' · ');
+        $('#waStatus').innerHTML = '<span class="chip ' + (s.auto ? 'ok' : '') + '">' + (s.auto ? '● Otomatis aktif' : '○ Otomatis nonaktif') + '</span>' +
+            '<span class="small muted">' + esc(prov) + ' · ' + jad + (s.next && s.next.at ? ' · berikutnya ' + esc(s.next.at.slice(11)) + (s.next.type ? ' ' + (s.next.type === 'REQ' ? 'request' : 'realisasi') : '') : '') + '</span>' +
+            (isAdmin() ? '<button class="btn sm ghost" id="wAuto">' + (s.auto ? 'Matikan' : 'Aktifkan') + '</button><button class="btn sm ghost" onclick="go(\'pengaturan\')" title="Pengaturan"><span class="material-symbols-outlined">settings</span></button>' : '');
+        if ($('#wAuto')) $('#wAuto').onclick = async () => {
+            try { await call('waAuto', { on: !s.auto }); toast(!s.auto ? 'Kirim otomatis aktif.' : 'Kirim otomatis dimatikan.', 'ok'); loadWaStatus(); } catch (e) { fail(e); }
+        };
+    }
+    async function loadWaLog() {
+        const log = await call('waLog', {}, { silent: true });
+        $('#waLog').innerHTML = log.length ? '<table class="tbl"><thead><tr><th>Waktu</th><th>Shift / bagian</th><th>Mode</th><th>Status</th><th>Detail</th></tr></thead><tbody>' +
+            log.map(l => '<tr><td class="small">' + esc(l.waktu) + '</td><td>' + esc(l.tanggal.slice(5)) + ' ' + esc(l.shift) + '</td><td>' + esc(l.mode) + '</td>' +
+                '<td><span class="chip ' + (l.status === 'TERKIRIM' ? 'ok' : l.status === 'GAGAL' ? 'err' : '') + '">' + esc(l.status) + '</span></td><td class="small muted">' + esc(l.detail) + ' · ' + esc(l.oleh) + '</td></tr>').join('') +
+            '</tbody></table>' : '<div class="empty small">Belum ada riwayat.</div>';
+    }
+
+    /* =========================== REKAP MPP =========================== */
+    let rkData = null, rkBagFilter = '', rkQ = '';
+
+    async function renderRekap() {
+        S.rk = S.rk || { from: monday(S.master.today), to: addDays(monday(S.master.today), 6) };
+        $('#view').innerHTML =
+            '<div class="toolbar"><button class="btn sm" id="rkPrev" aria-label="Sebelumnya"><span class="material-symbols-outlined" style="font-size:16px">chevron_left</span></button><input type="date" id="rkFrom" value="' + S.rk.from + '"><span class="muted">s/d</span><input type="date" id="rkTo" value="' + S.rk.to + '"><button class="btn sm" id="rkNext" aria-label="Berikutnya"><span class="material-symbols-outlined" style="font-size:16px">chevron_right</span></button>' +
+            '<span class="spacer"></span><button class="btn sm primary" onclick="go(\'wa\')"><span class="material-symbols-outlined">edit_calendar</span> Buat Request OS</button><button class="btn sm" id="rkXls"><span class="material-symbols-outlined">download</span> Excel</button></div><div id="rkBody"><div class="empty">Memuat…</div></div>';
+        const shiftBy = d => { S.rk.from = addDays(S.rk.from, d); S.rk.to = addDays(S.rk.to, d); $('#rkFrom').value = S.rk.from; $('#rkTo').value = S.rk.to; loadRekap(); };
+        $('#rkPrev').onclick = () => shiftBy(-7);
+        $('#rkNext').onclick = () => shiftBy(7);
+        $('#rkFrom').onchange = e => { S.rk.from = e.target.value; loadRekap(); };
+        $('#rkTo').onchange = e => { S.rk.to = e.target.value; loadRekap(); };
+        $('#rkXls').onclick = () => downloadRekap({ jenis: 'EXCEL', from: S.rk.from, to: S.rk.to });
+        await loadRekap();
+    }
+
+    async function loadRekap() {
+        rkData = await call('rekapMpp', { from: S.rk.from, to: S.rk.to });
+        drawRekapView();
+    }
+
+    function drawRekapView() {
+        const d = rkData;
+        if (!d) return;
+        const t = d.total;
+        $('#pageSub').textContent = fmtShort(d.from) + ' – ' + fmtShort(d.to) + ' · Rekap Request OS & Realisasi Kehadiran Karyawan';
+        const st = s => !s ? '<span class="muted">—</span>' : '<span class="chip xs ' + (s === 'TERKIRIM' || s === 'CLOCK-IN' ? 'ok' : s === 'SUBMIT' ? 'pri' : 'info') + '">' + esc(s) + '</span>';
+        let h = '<div class="kpis k4">' +
+            '<div class="kpi hero"><div class="lbl">Fulfillment Kehadiran</div><div class="val">' + (t.persen === null ? '—' : t.persen + '%') + '</div><div class="sub">Hadir Clock-In ÷ Total Request MP</div></div>' +
+            '<div class="kpi"><div class="lbl">Total Request OS</div><div class="val">' + t.request + '</div><div class="sub">Mp diminta</div></div>' +
+            '<div class="kpi"><div class="lbl">Karyawan Terisi</div><div class="val">' + t.terisi + '</div><div class="sub">Slot VACANT: ' + t.vacant + '</div></div>' +
+            '<div class="kpi"><div class="lbl">Total Hadir (Clock-In)</div><div class="val">' + t.hadir + '</div><div class="sub">dari ' + t.requestReal + ' Request MP</div></div>' +
+            '</div>';
+        if (!d.rows.length) {
+            h += '<div class="card empty"><div class="big"><span class="material-symbols-outlined">summarize</span></div><p>Belum ada Request OS atau jadwal pada rentang tanggal ini.</p><button class="btn primary" onclick="go(\'wa\')">Buka Request OS</button></div>';
+            $('#rkBody').innerHTML = h; return;
+        }
+        h += '<div class="card" style="padding:0;overflow:hidden"><div class="card-head" style="padding:16px 18px 12px;margin:0;border-bottom:1px solid var(--line)"><h2><span class="material-symbols-outlined" style="vertical-align:middle;margin-right:6px;color:var(--primary)">analytics</span>Ringkasan Rekap MPP per Shift</h2><span class="small muted">Klik baris untuk membuka Request OS</span></div>' +
+            '<div class="table-wrap" style="border:0;max-height:none"><table class="tbl rk"><thead><tr><th>Tanggal</th><th>Shift</th><th>Jam Kerja</th><th class="num">Request</th><th class="num">Terisi</th><th class="num">VACANT</th><th class="num">Hadir</th><th class="num">%</th><th>Karyawan Di-Request</th><th>Karyawan Hadir (Clock-In)</th><th>Status</th></tr></thead><tbody>';
+        let last = null;
+        d.rows.forEach(r => {
+            const first = r.tanggal !== last; last = r.tanggal;
+            h += '<tr class="rk-row" data-t="' + r.tanggal + '" data-s="' + r.shift + '" title="Buka di Request OS">' +
+                '<td>' + (first ? '<b>' + esc(r.hari.slice(0, 3)) + ', ' + fmtShort(r.tanggal) + '</b>' : '') + '</td><td><b>' + esc(r.shiftNama) + '</b></td><td class="small">' + esc(r.jamMasuk) + '</td>' +
+                '<td class="num"><b>' + r.request + '</b></td><td class="num">' + r.terisi + '</td><td class="num">' + (r.vacant ? '<span class="chip xs warn">' + r.vacant + '</span>' : 0) + '</td>' +
+                '<td class="num"><b style="color:var(--ok)">' + (r.hadir === null ? '—' : r.hadir) + '</b></td><td class="num">' + (r.persen === null ? '—' : '<span class="chip xs ' + (r.persen >= 100 ? 'ok' : r.persen >= 90 ? 'pri' : 'err') + '">' + r.persen + '%</span>') + '</td>' +
+                '<td class="small" style="max-width:240px">' + (r.namaRequest ? esc(r.namaRequest) : '<span class="muted">—</span>') + '</td>' +
+                '<td class="small" style="max-width:240px;color:var(--ok);font-weight:600">' + (r.namaHadir ? esc(r.namaHadir) : '<span class="muted">Belum ada clock-in</span>') + '</td>' +
+                '<td>' + st(r.statusRequest) + ' ' + st(r.statusRealisasi) + '</td></tr>';
+        });
+        h += '</tbody></table></div></div>';
+
+        // Tabel Detail Karyawan yang Di-Request & Kehadirannya
+        const details = (d.detailKaryawan || []).filter(k => {
+            if (rkBagFilter && k.bagian !== rkBagFilter) return false;
+            if (rkQ && k.nama.toLowerCase().indexOf(rkQ.toLowerCase()) < 0 && (k.nik || '').toLowerCase().indexOf(rkQ.toLowerCase()) < 0) return false;
+            return true;
+        }).sort((a, b) => {
+            if (a.tanggal !== b.tanggal) return b.tanggal.localeCompare(a.tanggal);
+            if (a.shift !== b.shift) return a.shift.localeCompare(b.shift);
+            if (a.isVacant !== b.isVacant) return (a.isVacant ? 1 : 0) - (b.isVacant ? 1 : 0);
+            return (a.nama || '').localeCompare(b.nama || '');
+        });
+
+        h += '<div class="card" style="margin-top:16px">' +
+            '<div class="card-head" style="flex-wrap:wrap;gap:10px">' +
+            '<h2><span class="material-symbols-outlined" style="vertical-align:middle;margin-right:6px;color:var(--primary)">fact_check</span>Karyawan Di-Request &amp; Status Kehadiran (' + details.length + ')</h2>' +
+            '<div class="row" style="gap:8px">' +
+            '<select id="rkBagSel"><option value="">Semua Divisi</option>' + (S.master.bagian || []).map(b => '<option value="' + b.kode + '"' + (rkBagFilter === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') + '</select>' +
+            '<input type="search" id="rkSearch" placeholder="Cari nama…" value="' + esc(rkQ) + '" style="width:180px">' +
+            '</div></div>' +
+            '<div class="table-wrap" style="max-height:520px"><table class="tbl"><thead><tr>' +
+            '<th style="width:40px">No</th><th>Tanggal</th><th>Shift</th><th>Nama Karyawan</th><th>Divisi</th><th>Status Kehadiran</th><th>Jam Clock-In</th><th>Keterangan</th><th class="act">Aksi</th>' +
+            '</tr></thead><tbody>';
+
+        if (!details.length) {
+            h += '<tr><td colspan="9" class="empty small">Tidak ada data karyawan pada filter ini.</td></tr>';
+        } else {
+            details.forEach((k, idx) => {
+                let statusBadge = '<span class="chip xs warn">Belum Clock-In</span>';
+                if (k.isVacant) {
+                    statusBadge = '<span class="chip xs warn">Slot Vacant (Belum Dinamai)</span>';
+                } else if (k.status === 'H') {
+                    statusBadge = '<span class="chip xs ok"><span class="material-symbols-outlined">check_circle</span> Hadir</span>';
+                } else if (k.status === 'T') {
+                    statusBadge = '<span class="chip xs info"><span class="material-symbols-outlined">check_circle</span> Telat</span>';
+                } else if (k.status === 'S' || k.status === 'I') {
+                    statusBadge = '<span class="chip xs warn">' + esc(STATUS[k.status]) + '</span>';
+                } else if (k.status === 'A') {
+                    statusBadge = '<span class="chip xs err">Alpa</span>';
+                } else if (k.status === 'C') {
+                    statusBadge = '<span class="chip xs pri">Cuti</span>';
+                }
+                h += '<tr>' +
+                    '<td class="muted">' + (idx + 1) + '</td>' +
+                    '<td><b>' + esc(k.hari.slice(0, 3)) + ', ' + fmtShort(k.tanggal) + '</b></td>' +
+                    '<td><span class="chip xs">' + esc(k.shiftNama) + '</span></td>' +
+                    '<td><b style="' + (k.isVacant ? 'color:var(--warn)' : '') + '">' + esc(k.nama) + '</b></td>' +
+                    '<td><span class="wk-div-badge">' + esc(bagName(k.bagian)) + '</span></td>' +
+                    '<td>' + statusBadge + '</td>' +
+                    '<td class="small mono">' + (k.clockInAt ? '<b style="color:var(--ok)">' + esc(k.clockInAt) + '</b>' : '—') + '</td>' +
+                    '<td class="small muted">' + esc(k.ket || '—') + '</td>' +
+                    '<td class="act"><button type="button" class="btn xs ' + (k.isVacant ? 'primary' : 'ghost') + '" data-rk-abs="' + k.tanggal + '|' + k.shift + '">' + (k.isVacant ? 'Isi Nama →' : 'Absensi →') + '</button></td>' +
+                    '</tr>';
+            });
+        }
+        h += '</tbody></table></div></div>';
+
+        $('#rkBody').innerHTML = h;
+        $$('.rk-row').forEach(tr => tr.onclick = () => { S.wa = { tanggal: tr.dataset.t, shift: tr.dataset.s, type: 'REQ' }; go('wa'); });
+        $$('[data-rk-abs]').forEach(btn => btn.onclick = () => {
+            const p = btn.dataset.rkAbs.split('|');
+            S.abs = { tanggal: p[0], shift: p[1] };
+            go('absensi');
+        });
+        if ($('#rkBagSel')) $('#rkBagSel').onchange = e => { rkBagFilter = e.target.value; drawRekapView(); };
+        if ($('#rkSearch')) $('#rkSearch').oninput = e => { rkQ = e.target.value; drawRekapView(); };
+    }
+
+    /* =========================== OPERATOR =========================== */
+    async function renderOperator() {
+        const f = S.op;
+        $('#view').innerHTML =
+            '<div class="toolbar">' +
+            '<input type="search" id="oQ" placeholder="Cari nama / NIK…" value="' + esc(f.q) + '" style="flex:1 1 160px">' +
+            '<select id="oBag"><option value="">Semua bagian</option>' + S.master.bagian.map(b => '<option value="' + b.kode + '"' + (f.bagian === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') + '</select>' +
+            '<select id="oSt"><option value="aktif">Aktif</option><option value="nonaktif">Nonaktif</option><option value="semua">Semua</option></select>' +
+            (isAdmin() ? '<button class="btn sm primary" id="oAdd"><span class="material-symbols-outlined">person_add</span> Operator</button><button class="btn sm" id="oImp"><span class="material-symbols-outlined">upload</span> Import</button>' : '') +
+            '</div><div class="card" style="padding:0" id="oBody"></div>';
+        $('#oSt').value = f.status;
+        $('#oQ').oninput = e => { f.q = e.target.value; drawOps(); };
+        $('#oBag').onchange = e => { f.bagian = e.target.value; drawOps(); };
+        $('#oSt').onchange = e => { f.status = e.target.value; drawOps(); };
+        if ($('#oAdd')) { $('#oAdd').onclick = () => opModal(null); $('#oImp').onclick = importModal; }
+        drawOps();
+    }
+    function drawOps() {
+        const f = S.op, q = f.q.toLowerCase();
+        const list = S.master.operators.filter(o => (!q || o.nama.toLowerCase().indexOf(q) >= 0 || o.nik.toLowerCase().indexOf(q) >= 0) &&
+            (!f.bagian || o.bagian === f.bagian) && (f.status === 'semua' || (f.status === 'aktif') === o.aktif))
+            .sort((a, b) => {
+                const vacA = /vacant/i.test(a.nama) ? 1 : 0;
+                const vacB = /vacant/i.test(b.nama) ? 1 : 0;
+                if (vacA !== vacB) return vacA - vacB;
+                return (a.nama || '').localeCompare(b.nama || '');
+            });
+        $('#pageSub').textContent = list.length + ' operator';
+        if (!list.length) { $('#oBody').innerHTML = '<div class="empty"><div class="big"><span class="material-symbols-outlined">group_off</span></div>Tidak ada operator.' + (isAdmin() ? '<br><br><button class="btn primary" onclick="opModal(null)">Tambah operator</button> <button class="btn" onclick="importModal()">Import dari Excel</button>' : '') + '</div>'; return; }
+        const act = o => isAdmin() ? '<button class="btn sm" data-edit="' + o.id + '">Ubah</button>' : '';
+        $('#oBody').innerHTML =
+            '<div class="only-wide"><div class="table-wrap" style="border:0"><table class="tbl"><thead><tr><th>Nama</th><th>NIK</th><th>Role</th><th>Bagian</th><th>Employer</th><th>Grup</th><th>Pola</th><th>Libur</th><th>Status</th><th></th></tr></thead><tbody>' +
+            list.map(o => '<tr><td><b>' + esc(o.nama) + '</b></td><td>' + esc(o.nik) + '</td><td class="small">' + esc(o.role) + '</td><td>' + esc(bagName(o.bagian)) + '</td><td>' + esc(o.employer) + '</td><td>' + esc(GRUP_LABEL[o.grup] || o.grup) + '</td><td>' + o.pola + ' hari</td><td>' + liburLabel(o.libur) + '</td>' +
+                '<td><span class="chip ' + (o.aktif ? 'ok' : '') + '">' + (o.aktif ? 'Aktif' : 'Nonaktif') + '</span></td><td class="act">' + act(o) + '</td></tr>').join('') +
+            '</tbody></table></div></div>' +
+            '<div class="only-narrow">' + list.map(o => '<div class="list-item"><div class="grow"><b>' + esc(o.nama) + '</b><span class="small muted">' + esc(bagName(o.bagian)) + ' · ' + esc(GRUP_LABEL[o.grup] || o.grup) + ' · ' + o.pola + ' hari · libur ' + liburLabel(o.libur) + '</span></div>' +
+                (o.aktif ? '' : '<span class="chip">Nonaktif</span>') + act(o) + '</div>').join('') + '</div>';
+        $$('[data-edit]').forEach(b => b.onclick = () => opModal(S.master.operators.find(o => o.id === b.dataset.edit)));
+    }
+    function opModal(o) {
+        const isNew = !o;
+        o = o || { nama: '', nik: '', bagian: S.op.bagian || (S.master.bagian[0] || {}).kode, grup: 'A', libur: '', hp: '', aktif: true, tglMasuk: '', ket: '', pola: 6, employer: '', role: '' };
+        const emps = S.master.operators.map(x => x.employer).filter((e, i, a) => e && a.indexOf(e) === i);
+        const lib = String(o.libur).split(',');
+        openModal({
+            title: isNew ? 'Tambah operator' : 'Ubah operator',
+            body: '<label class="field"><span>Nama lengkap *</span><input name="nama" value="' + esc(o.nama) + '" required></label>' +
+                '<div class="grid2"><label class="field"><span>NIK / ID karyawan</span><input name="nik" value="' + esc(o.nik) + '"><small>Opsional</small></label>' +
+                '<label class="field"><span>No HP / WA</span><input name="hp" inputmode="tel" value="' + esc(o.hp) + '"></label></div>' +
+                '<div class="grid2"><label class="field"><span>Bagian *</span><select name="bagian">' + S.master.bagian.map(b => '<option value="' + b.kode + '"' + (o.bagian === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') + '</select></label>' +
+                '<label class="field"><span>Grup rotasi *</span><select name="grup">' + Object.keys(GRUP_LABEL).map(k => '<option value="' + k + '"' + (o.grup === k ? ' selected' : '') + '>' + GRUP_LABEL[k] + '</option>').join('') + '</select></label></div>' +
+                '<div class="grid2"><label class="field"><span>Role & job desc</span><input name="role" value="' + esc(o.role) + '" placeholder="Staff Inventory"></label>' +
+                '<label class="field"><span>Employer</span><input name="employer" list="empList" value="' + esc(o.employer) + '" placeholder="IEG / LPK RKA"><datalist id="empList">' + emps.map(e => '<option value="' + esc(e) + '">').join('') + '</datalist></label></div>' +
+                '<div class="field"><span>Pola kerja</span><div class="seg"><button type="button" data-pola="5" class="' + (o.pola === 5 ? 'on' : '') + '">5 hari kerja</button><button type="button" data-pola="6" class="' + (o.pola !== 5 ? 'on' : '') + '">6 hari kerja</button></div><input type="hidden" name="pola" value="' + (o.pola === 5 ? 5 : 6) + '">' +
+                '<small>5 hari = 2 hari OFF (bawaan Sabtu–Minggu). 6 hari = 1 hari OFF (bawaan Minggu) + HALF sehari sebelumnya.</small></div>' +
+                '<div class="field"><span>Hari libur rutin</span><div class="days-pick">' + [1, 2, 3, 4, 5, 6, 0].map(d => '<label><input type="checkbox" data-multi="1" name="libur" value="' + d + '"' + (lib.indexOf(String(d)) >= 0 ? ' checked' : '') + '>' + HARI3[d] + '</label>').join('') + '</div><small>Kosongkan untuk memakai bawaan pola (karyawan shift 6 hari dibagikan bergilir saat isi otomatis).</small></div>' +
+                '<div class="grid2"><label class="field"><span>Tanggal masuk</span><input type="date" name="tglMasuk" value="' + esc(o.tglMasuk) + '"></label>' +
+                '<label class="field"><span>Keterangan</span><input name="ket" value="' + esc(o.ket) + '"></label></div>' +
+                '<label class="check"><input type="checkbox" name="aktif"' + (o.aktif ? ' checked' : '') + '> Aktif</label>',
+            onOpen: body => $$('[data-pola]', body).forEach(b => b.onclick = () => { $$('[data-pola]', body).forEach(x => x.classList.toggle('on', x === b)); $('[name=pola]', body).value = b.dataset.pola; }),
+            buttons: (isNew ? [] : [{
+                label: 'Hapus', cls: 'danger', onClick: async () => {
+                    if (!await confirmBox('Hapus operator?', o.nama + ' akan dihapus (atau dinonaktifkan bila sudah punya riwayat jadwal/absensi).', 'Hapus', 'danger')) return;
+                    try { const r = await call('deleteOperator', { id: o.id }); toast(r.mode === 'hapus' ? 'Operator dihapus.' : 'Operator dinonaktifkan (ada riwayat).', 'ok'); await loadMaster(); drawOps(); } catch (e) { fail(e); }
+                }
+            }]).concat([{ label: 'Batal' }, {
+                label: 'Simpan', cls: 'primary', onClick: async () => {
+                    const f = formData($('#modalBody'));
+                    f.id = isNew ? '' : o.id;
+                    try { await call('saveOperator', f); closeModal(); toast('Operator disimpan.', 'ok'); await loadMaster(); drawOps(); } catch (e) { fail(e); }
+                }
+            }])
+        });
+    }
+    function importModal() {
+        openModal({
+            title: 'Import operator dari Excel',
+            body: '<p class="small muted">Salin kolom dari Excel/Sheet lalu tempel di bawah (boleh dengan baris judul). Urutan kolom:</p>' +
+                '<p class="small mono">Nama | Bagian | Grup (A/B/S1/S2/NS) | NIK | No HP | Hari libur | Role | Employer | Pola (5/6)</p>' +
+                '<p class="small muted">Contoh: <span class="mono">Budi Santoso → PICKING → A → 1001 → 0812xxxx → Minggu</span></p>' +
+                '<textarea name="text" placeholder="Tempel di sini…"></textarea>' +
+                '<label class="check"><input type="checkbox" name="autoBagian" checked> Buat bagian baru otomatis bila belum terdaftar</label>' +
+                '<div id="impRes"></div>',
+            buttons: [{ label: 'Tutup' }, {
+                label: 'Import', cls: 'primary', onClick: async () => {
+                    const f = formData($('#modalBody'));
+                    try {
+                        const r = await call('importOperator', f);
+                        $('#impRes').innerHTML = '<div class="alert ' + (r.gagal ? 'warn' : 'ok') + '">' + r.masuk + ' operator masuk, ' + r.gagal + ' gagal.' +
+                            (r.bagianBaru.length ? '\nBagian baru: ' + esc(r.bagianBaru.join(', ')) : '') + (r.errors.length ? '\n' + esc(r.errors.join('\n')) : '') + '</div>';
+                        await loadMaster(); drawOps();
+                    } catch (e) { fail(e); }
+                }
+            }]
+        });
+    }
+
+    /* =========================== BAGIAN =========================== */
+    async function renderBagian() {
+        const cnt = {};
+        S.master.operators.filter(o => o.aktif).forEach(o => cnt[o.bagian] = (cnt[o.bagian] || 0) + 1);
+        const shifts = S.master.shifts;
+        $('#pageSub').textContent = 'Target MPP per shift dipakai di dashboard & pesan WA';
+        $('#view').innerHTML = '<div class="toolbar"><span class="spacer"></span><button class="btn sm primary" id="bAdd"><span class="material-symbols-outlined">add_business</span> Bagian</button></div>' +
+            '<div class="card" style="padding:0"><div class="table-wrap" style="border:0"><table class="tbl"><thead><tr><th>Bagian</th><th class="num">Target ' + esc(shifts[0] ? shifts[0].nama : 'S1') + '</th><th class="num">Target ' + esc(shifts[1] ? shifts[1].nama : 'S2') + '</th><th class="num">Operator aktif</th><th>Status</th><th></th></tr></thead><tbody>' +
+            S.master.bagian.map(b => '<tr><td><b>' + esc(b.nama) + '</b><br><span class="small muted">' + esc(b.kode) + '</span></td><td class="num">' + b.targetS1 + '</td><td class="num">' + b.targetS2 + '</td><td class="num">' + (cnt[b.kode] || 0) + '</td>' +
+                '<td><span class="chip ' + (b.aktif ? 'ok' : '') + '">' + (b.aktif ? 'Aktif' : 'Nonaktif') + '</span></td><td class="act"><button class="btn sm" data-b="' + b.kode + '">Ubah</button></td></tr>').join('') +
+            '</tbody></table></div></div>';
+        $('#bAdd').onclick = () => bagModal(null);
+        $$('[data-b]').forEach(x => x.onclick = () => bagModal(S.master.bagian.find(b => b.kode === x.dataset.b)));
+    }
+    function bagModal(b) {
+        const isNew = !b;
+        b = b || { kode: '', nama: '', targetS1: 0, targetS2: 0, urutan: S.master.bagian.length + 1, aktif: true };
+        openModal({
+            title: isNew ? 'Tambah bagian' : 'Ubah bagian',
+            body: '<div class="grid2"><label class="field"><span>Kode *</span><input name="kode" value="' + esc(b.kode) + '"' + (isNew ? '' : ' readonly') + ' style="text-transform:uppercase"></label>' +
+                '<label class="field"><span>Nama *</span><input name="nama" value="' + esc(b.nama) + '"></label></div>' +
+                '<div class="grid2"><label class="field"><span>Target MPP ' + esc(shiftName('S1')) + '</span><input type="number" min="0" name="targetS1" value="' + b.targetS1 + '"></label>' +
+                '<label class="field"><span>MPP default ' + esc(shiftName('S2')) + '</span><input type="number" min="0" name="targetS2" value="' + b.targetS2 + '"></label></div>' +
+                '<label class="field"><span>Urutan tampil</span><input type="number" name="urutan" value="' + b.urutan + '"></label>' +
+                '<label class="check"><input type="checkbox" name="aktif"' + (b.aktif ? ' checked' : '') + '> Aktif</label>',
+            buttons: (isNew ? [] : [{
+                label: 'Hapus', cls: 'danger', onClick: async () => {
+                    if (!await confirmBox('Hapus bagian?', b.nama, 'Hapus', 'danger')) return;
+                    try { await call('deleteBagian', { kode: b.kode }); toast('Bagian dihapus.', 'ok'); await loadMaster(); renderBagian(); } catch (e) { fail(e); }
+                }
+            }]).concat([{ label: 'Batal' }, {
+                label: 'Simpan', cls: 'primary', onClick: async () => {
+                    const f = formData($('#modalBody')); f.isNew = isNew;
+                    try { await call('saveBagian', f); closeModal(); toast('Bagian disimpan.', 'ok'); await loadMaster(); renderBagian(); } catch (e) { fail(e); }
+                }
+            }])
+        });
+    }
+
+    /* =========================== PENGATURAN =========================== */
+    /* ---- daftar orang (PIC / CC) ---- */
+    function parsePeople(text) {
+        const lines = [];
+        String(text || '').split('\n').map(l => l.trim()).filter(String).forEach(l => {
+            if (l.indexOf('|') < 0 && l.indexOf(',') >= 0) l.split(',').forEach(x => { if (x.trim()) lines.push(x.trim()); }); else lines.push(l);
+        });
+        return lines.map(l => {
+            const p = l.split('|').map(x => x.trim());
+            const isNum = x => /^\+?[\d\s-]{6,}$/.test(x);
+            let sapaan = '', nama = '', nomor = '';
+            if (p.length >= 3) { sapaan = p[0]; nama = p[1]; nomor = p[2]; }
+            else if (p.length === 2) { if (isNum(p[1])) { nama = p[0]; nomor = p[1]; } else { sapaan = p[0]; nama = p[1]; } }
+            else nama = p[0];
+            nama = nama.replace(/^@/, '');
+            const m = !sapaan && nama.match(/^(pak|bapak|bpk|bu|ibu|mas|mba|mbak|kak)\.?\s+/i);
+            if (m) { sapaan = m[0].trim(); nama = nama.slice(m[0].length).trim(); }
+            return { sapaan: sapaan, nama: nama, nomor: nomor };
+        });
+    }
+    function pplRowHtml(p, removable) {
+        return '<div class="ppl-row"><input class="ppl-s" placeholder="Pak/Bu" value="' + esc(p.sapaan) + '"><input class="ppl-n" placeholder="Nama (mis. Erfan RKA)" value="' + esc(p.nama) + '">' +
+            '<input class="ppl-w" inputmode="tel" placeholder="No WA 0812…" value="' + esc(p.nomor) + '">' + (removable ? '<button type="button" class="icon-btn ppl-x" aria-label="Hapus"><span class="material-symbols-outlined">close</span></button>' : '') + '</div>';
+    }
+    function pplRender(sel, list, removable) {
+        $(sel).innerHTML = list.map(p => pplRowHtml(p, removable)).join('');
+        $$(sel + ' .ppl-x').forEach(b => b.onclick = () => b.closest('.ppl-row').remove());
+    }
+    function pplAddRow(sel, p, removable) {
+        $(sel).insertAdjacentHTML('beforeend', pplRowHtml(p, removable));
+        const rows = $$(sel + ' .ppl-row'), last = rows[rows.length - 1];
+        const x = $('.ppl-x', last); if (x) x.onclick = () => last.remove();
+        $('.ppl-n', last).focus();
+    }
+    function pplSerialize(sel) {
+        return $$(sel + ' .ppl-row').map(r => [$('.ppl-s', r).value.trim(), $('.ppl-n', r).value.trim(), $('.ppl-w', r).value.trim()])
+            .filter(x => x[1]).map(x => x.join(' | ').replace(/ \| $/, '')).join('\n');
+    }
+    function drawBotBox(b) {
+        const box = $('#waBotBox'); if (!box) return;
+        box.innerHTML = '<b>Bot WhatsApp kantor</b> — bot mengambil antrean pesan dari aplikasi ini lalu mengirim ke grup dengan tag asli. ' +
+            (b.online ? '<span class="chip ok">● Bot online</span>' : '<span class="chip err">○ Bot belum terhubung' + (b.lastPoll ? ' (terakhir ' + esc(b.lastPoll) + ')' : '') + '</span>') +
+            (b.pending ? ' <span class="chip warn">' + b.pending + ' pesan menunggu</span>' : '') +
+            '<div class="small" style="margin-top:8px">Isi di file <span class="mono">.env</span> bot (lihat CARA-PASANG-BOT.md):</div>' +
+            '<pre class="mono small env">HRIS_URL=' + esc(b.url || '(deploy web app dulu)') + '\nHRIS_TOKEN=' + esc(b.token || '(klik Buat token)') + '</pre>' +
+            '<div class="row"><button type="button" class="btn sm" id="botTok">' + (b.token ? 'Ganti token' : 'Buat token bot') + '</button>' +
+            (b.token ? '<button type="button" class="btn sm ghost" id="botCopy"><span class="material-symbols-outlined">content_copy</span> Salin isi .env</button>' : '') + '</div>';
+        $('#botTok').onclick = async () => {
+            if (b.token && !await confirmBox('Ganti token bot?', 'Token lama langsung tidak berlaku — .env di PC bot harus diperbarui.', 'Ganti')) return;
+            try { drawBotBox(await call('botToken')); toast('Token dibuat. Salin ke .env bot.', 'ok'); } catch (e) { fail(e); }
+        };
+        if ($('#botCopy')) $('#botCopy').onclick = async () => toast(await copyText('HRIS_URL=' + b.url + '\nHRIS_TOKEN=' + b.token) ? 'Disalin.' : 'Gagal menyalin.', 'ok');
+    }
+
+    async function renderPengaturan() {
+        const d = await call('settings');
+        const s = d.settings;
+        $('#pageSub').textContent = 'Aturan kerja, shift, WhatsApp, pengguna';
+        $('#view').innerHTML =
+            '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;margin-right:6px">timer</span>Aturan kerja &amp; rolling</h2></div><form id="fRule">' +
+            '<div class="grid2"><label class="field"><span>Batas jam kerja per minggu</span><input type="number" name="max_jam_minggu" min="8" max="84" value="' + esc(s.max_jam_minggu) + '"><small>Termasuk lembur. Default 49.</small></label>' +
+            '<label class="field"><span>Cara hitung batas</span><select name="batas_mode"><option value="MINGGU"' + (s.batas_mode !== 'BERJALAN' ? ' selected' : '') + '>Per minggu Senin–Minggu</option><option value="BERJALAN"' + (s.batas_mode === 'BERJALAN' ? ' selected' : '') + '>Per 7 hari berjalan</option></select></label></div>' +
+            '<label class="check"><input type="checkbox" name="pola6_half"' + (s.pola6_half !== '0' ? ' checked' : '') + '> Pola 6 hari kerja = 5 hari penuh + HALF sehari sebelum libur (tidak dicentang = 6 hari penuh)</label>' +
+            '<div class="grid2">' +
+            '<label class="field"><span>Istirahat minimal antar shift (jam)</span><input type="number" name="min_istirahat" min="0" max="24" value="' + esc(s.min_istirahat) + '"><small>Shift 2 selesai 00:00 → Shift 1 08:00 = 8 jam.</small></label></div>' +
+            '<div class="grid2"><label class="field"><span>Minggu acuan rotasi</span><input type="date" name="rotasi_anchor" value="' + esc(s.rotasi_anchor) + '"><small>Pada minggu ini grup A = Shift 1 (dibulatkan ke Senin).</small></label>' +
+            '<label class="field"><span>Tukar shift setiap</span><select name="rotasi_periode">' + [1, 2, 3, 4].map(n => '<option value="' + n + '"' + (String(s.rotasi_periode) === String(n) ? ' selected' : '') + '>' + n + ' minggu</option>').join('') + '</select></label></div>' +
+            '<div class="grid2"><label class="field"><span>Nama aplikasi</span><input name="app_nama" value="' + esc(s.app_nama) + '"></label>' +
+            '<label class="field"><span>Employer yang ikut Order MPP</span><input name="order_employer" value="' + esc(s.order_employer) + '" placeholder="LPK RKA"><small>Pisahkan koma. Kosong = semua karyawan.</small></label></div>' +
+            '<button class="btn primary">Simpan aturan</button></form></div>' +
+
+            '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;margin-right:6px">palette</span>Kode jadwal</h2><button type="button" class="btn sm" id="kAdd"><span class="material-symbols-outlined">add</span> Kode</button></div>' +
+            '<p class="small muted" style="margin-top:0">Dipakai di Jadwal Mingguan. "Dihitung sebagai" menentukan kode ini masuk Shift 1 atau Shift 2 untuk absensi, dashboard & Order MPP. Jam masuk berbeda (mis. LS 1 08:00–20:00) otomatis tampil di pesan request & tabel rekap.</p>' +
+            '<div class="table-wrap"><table class="tbl kode-tbl"><thead><tr><th>Kode</th><th>Label</th><th>Nama</th><th>Hari kerja</th><th>Mulai</th><th>Selesai</th><th>Jam</th><th>Dihitung sebagai</th><th>Warna</th><th></th></tr></thead><tbody id="kRows"></tbody></table></div>' +
+            '<div class="row" style="margin-top:10px"><button type="button" class="btn primary" id="kSave">Simpan kode jadwal</button></div></div>' +
+
+            '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;margin-right:6px">schedule</span>Shift &amp; jam kirim WA</h2></div><p class="small muted" style="margin-top:0">Kirim request kosong = request dikirim manual. Bila jam kirim request ≥ jam mulai shift (mis. Shift 1 jam 20:00), yang dikirim request untuk shift BESOK.</p>' +
+            d.shifts.map(x => '<form class="fShift row" data-k="' + x.kode + '" style="margin-bottom:10px;align-items:flex-end">' +
+                '<label class="field grow" style="margin:0"><span>Nama (' + x.kode + ')</span><input name="nama" value="' + esc(x.nama) + '"></label>' +
+                '<label class="field" style="margin:0;flex:1 1 120px"><span>Mulai</span><input type="time" name="mulai" value="' + x.mulai + '"></label>' +
+                '<label class="field" style="margin:0;flex:1 1 120px"><span>Selesai</span><input type="time" name="selesai" value="' + x.selesai + '"></label>' +
+                '<label class="field" style="margin:0;flex:1 1 120px"><span>Kirim realisasi</span><input type="time" name="kirim" value="' + x.kirim + '"></label>' +
+                '<label class="field" style="margin:0;flex:1 1 120px"><span>Kirim request</span><input type="time" name="kirimReq" value="' + (x.kirimReq || '') + '"></label>' +
+                '<button class="btn sm">Simpan</button></form>').join('') +
+            '</div>' +
+
+            '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;margin-right:6px">chat</span>WhatsApp gateway</h2><span class="chip ' + (s.wa_auto ? 'ok' : '') + '">Otomatis ' + (s.wa_auto ? 'AKTIF' : 'NONAKTIF') + '</span></div><form id="fWa">' +
+            '<label class="field"><span>Provider</span><select name="wa_provider" id="waProv">' +
+            [['MANUAL', 'Manual — salin & tempel (tanpa tag otomatis)'], ['BOT', 'Bot WhatsApp kantor — tag asli (disarankan)'], ['FONNTE', 'Fonnte (api.fonnte.com)'], ['WEBHOOK', 'Webhook — server WA sendiri']].map(o => '<option value="' + o[0] + '"' + (s.wa_provider === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select></label>' +
+            '<div id="waAuthBox"><label class="field"><span>Token</span><input type="password" name="wa_token" placeholder="' + (s.wa_token_ada ? '•••••• tersimpan — isi untuk mengganti' : 'Tempel token') + '" autocomplete="off"></label>' +
+            (s.wa_token_ada ? '<label class="check small"><input type="checkbox" name="hapus_token"> Hapus token tersimpan</label>' : '') + '</div>' +
+            '<div id="waBotBox" class="alert info" style="margin-bottom:12px"></div>' +
+            '<label class="field" id="waUrlBox"><span>URL webhook</span><input name="wa_webhook_url" value="' + esc(s.wa_webhook_url) + '" placeholder="https://…/send"><small>Menerima POST JSON {target, targets, message}, header Authorization: Bearer token.</small></label>' +
+            '<label class="field"><span>ID grup WhatsApp</span><textarea name="wa_target" style="min-height:64px" placeholder="120363xxxxxxxx@g.us">' + esc(s.wa_target) + '</textarea><small>Bisa lebih dari satu, pisahkan koma.</small></label>' +
+            '<div id="waGrpBox" class="row" style="margin-bottom:12px"><button type="button" class="btn sm" id="gGet">Ambil daftar grup Fonnte</button><button type="button" class="btn sm ghost" id="gRef">Perbarui dari WhatsApp</button></div><div id="gList"></div>' +
+            '<div class="grid2"><label class="field"><span>Nama tim (pesan request & judul tabel)</span><input name="wa_tim" value="' + esc(s.wa_tim) + '" placeholder="Inventory"></label>' +
+            '<label class="field"><span>Judul realisasi</span><input name="wa_judul" value="' + esc(s.wa_judul) + '" placeholder="INVENTORY LPK RKA"></label></div>' +
+            '<div class="field"><span>PIC vendor (tujuan request — "Selamat Siang Pak @Erfan RKA")</span><div class="ppl" id="pplPic"></div><input type="hidden" name="wa_pic"></div>' +
+            '<div class="field"><span>CC (di-tag di semua pesan)</span><div class="ppl" id="pplCc"></div><button type="button" class="btn sm" id="ccAdd" style="margin-top:6px;align-self:flex-start"><span class="material-symbols-outlined">person_add</span> Tambah CC</button><input type="hidden" name="wa_mention">' +
+            '<small>Isi No WA agar benar-benar ter-tag (memberi notifikasi). Tanpa nomor, nama hanya tampil sebagai teks @Nama.</small></div>' +
+            '<label class="field"><span>Lampiran pesan request</span><select name="wa_lampiran">' + [['GAMBAR', 'Gambar tabel rekap (seperti contoh)'], ['EXCEL', 'File Excel rekap'], ['TIDAK', 'Tanpa lampiran']].map(o => '<option value="' + o[0] + '"' + (String(s.wa_lampiran).toUpperCase() === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select><small>Lampiran lewat Fonnte butuh paket yang mendukung file.</small></label>' +
+            '<details class="more"><summary>Template pesan (lanjutan)</summary>' +
+            '<label class="field" style="margin-top:8px"><span>Template Request MP</span><textarea name="wa_tpl_req" class="mono" style="min-height:170px">' + esc(s.wa_tpl_req) + '</textarea></label>' +
+            '<label class="field"><span>Template Realisasi</span><textarea name="wa_tpl_real" class="mono" style="min-height:280px">' + esc(s.wa_tpl_real) + '</textarea>' +
+            '<small>Placeholder: {Salam}/{salam} {pic} {cc} {mention} {tim} {judul} {shift} {shift_kecil} {hari} {d} {dd} {bulan} {yyyy} {mulai} {selesai} {jam_kerja} {request} {hadir} {keterangan} {selisih} {nama} {nama_tab}. *teks* = tebal di WA. Kosongkan untuk kembali ke bawaan.</small></label>' +
+            '<div class="grid2"><label class="field"><span>Keterangan bila terpenuhi</span><input name="wa_ket_full" value="' + esc(s.wa_ket_full) + '"></label>' +
+            '<label class="field"><span>Keterangan bila kurang</span><input name="wa_ket_kurang" value="' + esc(s.wa_ket_kurang) + '"></label></div>' +
+            '<label class="field"><span>Pengisi nama kosong di request</span><input name="wa_vacant" value="' + esc(s.wa_vacant) + '"></label>' +
+            '</details>' +
+            '<div class="row" style="margin-top:8px"><button class="btn primary">Simpan WhatsApp</button><button type="button" class="btn" onclick="go(\'wa\')">Buka halaman WA</button></div></form></div>' +
+
+            '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;margin-right:6px">group</span>Pengguna</h2><button class="btn sm primary" id="uAdd"><span class="material-symbols-outlined">person_add</span> Pengguna</button></div><div id="uList" class="table-wrap" style="border:0"></div></div>' +
+            '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;margin-right:6px">history</span>Log aktivitas</h2><button class="btn sm" id="aLoad">Tampilkan 100 terakhir</button></div><div id="auList"></div></div>' + +
+            '<p class="muted small">HRIS MPP v' + esc(S.master.version) + '</p>';
+
+        $('#fRule').onsubmit = async e => {
+            e.preventDefault();
+            const fr = formData(e.target); fr.pola6_half = fr.pola6_half ? '1' : '0';
+            try { await call('saveSettings', fr); toast('Aturan disimpan.', 'ok'); await loadMaster(); enterShellSoft(); } catch (x) { fail(x); }
+        };
+        const kodeRow = k => '<tr><td><input class="k-kode" value="' + esc(k.kode) + '" style="width:72px"></td><td><input class="k-label" value="' + esc(k.label) + '" style="width:80px"></td>' +
+            '<td><input class="k-nama" value="' + esc(k.nama) + '" style="min-width:110px"></td><td><input type="checkbox" class="k-kerja"' + (k.kerja ? ' checked' : '') + '></td>' +
+            '<td><input type="time" class="k-mulai" value="' + esc(k.mulai) + '"></td><td><input type="time" class="k-selesai" value="' + esc(k.selesai) + '"></td>' +
+            '<td><input type="number" class="k-jam" min="0" max="24" step="0.5" value="' + (k.jam || 0) + '" style="width:64px"></td>' +
+            '<td><select class="k-shift"><option value="">—</option><option value="S1"' + (k.shift === 'S1' ? ' selected' : '') + '>' + esc(shiftName('S1')) + '</option><option value="S2"' + (k.shift === 'S2' ? ' selected' : '') + '>' + esc(shiftName('S2')) + '</option></select></td>' +
+            '<td><input type="color" class="k-warna" value="' + esc(k.warna || '#ffffff') + '" style="width:48px;padding:2px"></td><td><button type="button" class="icon-btn k-x" aria-label="Hapus"><span class="material-symbols-outlined">close</span></button></td></tr>';
+        const bindK = () => $$('#kRows .k-x').forEach(b => b.onclick = () => b.closest('tr').remove());
+        $('#kRows').innerHTML = (S.master.kodes || []).map(kodeRow).join(''); bindK();
+        $('#kAdd').onclick = () => { $('#kRows').insertAdjacentHTML('beforeend', kodeRow({ kode: '', label: '', nama: '', kerja: true, mulai: '08:00', selesai: '16:00', jam: 8, shift: 'S1', warna: '#ffffff' })); bindK(); };
+        $('#kSave').onclick = async () => {
+            const kodes = $$('#kRows tr').map(tr => ({
+                kode: $('.k-kode', tr).value, label: $('.k-label', tr).value, nama: $('.k-nama', tr).value, kerja: $('.k-kerja', tr).checked,
+                mulai: $('.k-mulai', tr).value, selesai: $('.k-selesai', tr).value, jam: $('.k-jam', tr).value, shift: $('.k-shift', tr).value, warna: $('.k-warna', tr).value
+            }));
+            try { await call('kodeSimpan', { kodes: kodes }); await loadMaster(); toast('Kode jadwal disimpan.', 'ok'); } catch (e) { fail(e); }
+        };
+        $$('.fShift').forEach(f => f.onsubmit = async e => {
+            e.preventDefault();
+            try { await call('saveShift', Object.assign(formData(f), { kode: f.dataset.k })); toast('Shift disimpan.', 'ok'); await loadMaster(); updateShiftChip(); } catch (x) { fail(x); }
+        });
+        const syncProv = () => {
+            const p = $('#waProv').value;
+            $('#waAuthBox').classList.toggle('hidden', p === 'MANUAL' || p === 'BOT');
+            $('#waBotBox').classList.toggle('hidden', p !== 'BOT');
+            $('#waUrlBox').classList.toggle('hidden', p !== 'WEBHOOK');
+            $('#waGrpBox').classList.toggle('hidden', p !== 'FONNTE');
+        };
+        $('#waProv').onchange = syncProv; syncProv();
+        pplRender('#pplPic', parsePeople(s.wa_pic).slice(0, 1).concat(parsePeople(s.wa_pic).length ? [] : [{ sapaan: 'Pak', nama: '', nomor: '' }]), false);
+        pplRender('#pplCc', parsePeople(s.wa_mention), true);
+        $('#ccAdd').onclick = () => { pplAddRow('#pplCc', { sapaan: 'Pak', nama: '', nomor: '' }, true); };
+        drawBotBox(d.bot);
+        $('#fWa').onsubmit = async e => {
+            e.preventDefault();
+            $('[name=wa_pic]').value = pplSerialize('#pplPic');
+            $('[name=wa_mention]').value = pplSerialize('#pplCc');
+            const f = formData(e.target);
+            try { await call('saveSettings', f); toast('Pengaturan WhatsApp disimpan.', 'ok'); renderPengaturan(); } catch (x) { fail(x); }
+        };
+        const listGroups = async refresh => {
+            try {
+                const g = await call('waGroups', { refresh: refresh });
+                $('#gList').innerHTML = g.length ? '<div class="table-wrap" style="max-height:220px;margin-bottom:12px"><table class="tbl"><tbody>' + g.map(x => '<tr><td>' + esc(x.name) + '<br><span class="small muted mono">' + esc(x.id) + '</span></td><td class="act"><button type="button" class="btn sm" data-gid="' + esc(x.id) + '">Pakai</button></td></tr>').join('') + '</tbody></table></div>' : '<div class="alert warn">Tidak ada grup.</div>';
+                $$('[data-gid]').forEach(b => b.onclick = () => {
+                    const ta = $('[name=wa_target]');
+                    const cur = ta.value.split(',').map(x => x.trim()).filter(String);
+                    if (cur.indexOf(b.dataset.gid) < 0) cur.push(b.dataset.gid);
+                    ta.value = cur.join(', ');
+                    toast('Ditambahkan — klik Simpan WhatsApp.');
+                });
+            } catch (x) { fail(x); }
+        };
+        $('#gGet').onclick = () => listGroups(false);
+        $('#gRef').onclick = async () => { if (await confirmBox('Perbarui daftar grup?', 'Jalankan hanya saat baru bergabung/keluar grup. Terlalu sering bisa membuat nomor diblokir WhatsApp.', 'Perbarui')) listGroups(true); };
+        $('#uAdd').onclick = () => userModal(null);
+        $('#aLoad').onclick = async () => {
+            const a = await call('audit');
+            $('#auList').innerHTML = '<div class="table-wrap" style="max-height:360px"><table class="tbl"><thead><tr><th>Waktu</th><th>User</th><th>Aksi</th><th>Detail</th></tr></thead><tbody>' +
+                a.map(x => '<tr><td class="small">' + esc(x.waktu) + '</td><td>' + esc(x.user) + '</td><td><span class="chip">' + esc(x.aksi) + '</span></td><td class="small muted">' + esc(x.detail) + '</td></tr>').join('') + '</tbody></table></div>';
+        };
+        loadUsers();
+    }
+    function enterShellSoft() { $('#sideAppName').textContent = S.master.settings.app_nama; document.title = S.master.settings.app_nama; }
+
+    let usersCache = [];
+    async function loadUsers() {
+        usersCache = await call('users', {}, { silent: true });
+        $('#uList').innerHTML = '<table class="tbl"><thead><tr><th>Username</th><th>Nama</th><th>Peran</th><th>Bagian</th><th>Login terakhir</th><th></th></tr></thead><tbody>' +
+            usersCache.map(u => '<tr><td><b>' + esc(u.username) + '</b>' + (u.aktif ? '' : ' <span class="chip">nonaktif</span>') + '</td><td>' + esc(u.nama) + '</td>' +
+                '<td><span class="chip ' + (u.role === 'ADMIN' ? 'pri' : u.role === 'SUPERVISOR' ? 'ok' : u.role === 'LEADER' ? 'info' : '') + '">' + (u.role === 'LEADER' ? 'LEADER / PIC' : u.role) + '</span></td><td class="small">' + esc(u.bagian.join(', ') || ((u.role === 'LEADER' || u.role === 'SUPERVISOR') ? 'Semua' : '—')) + '</td>' +
+                '<td class="small muted">' + esc(u.lastLogin || '—') + '</td><td class="act"><button class="btn sm" data-u="' + esc(u.username) + '">Ubah</button></td></tr>').join('') + '</tbody></table>';
+        $$('[data-u]').forEach(b => b.onclick = () => userModal(usersCache.find(u => u.username === b.dataset.u)));
+    }
+    function userModal(u) {
+        const isNew = !u;
+        u = u || { username: '', nama: '', role: 'LEADER', bagian: [], aktif: true };
+        openModal({
+            title: isNew ? 'Tambah pengguna' : 'Ubah ' + u.username,
+            body: '<div class="grid2"><label class="field"><span>Username *</span><input name="username" value="' + esc(u.username) + '"' + (isNew ? '' : ' readonly') + ' autocapitalize="none"></label>' +
+                '<label class="field"><span>Nama</span><input name="nama" value="' + esc(u.nama) + '"></label></div>' +
+                '<label class="field"><span>Peran</span><select name="role">' + [
+                    ['ADMIN', 'Admin — Akses penuh semua menu'],
+                    ['SUPERVISOR', 'Supervisor — Akses penuh semua menu + Menu Approval Request OS'],
+                    ['LEADER', 'Leader / PIC — Hanya Request OS, Jadwal IEG, Absensi, Jadwal (View Saja) & Rekap MPP'],
+                    ['VIEWER', 'Viewer — Lihat saja']
+                ].map(r => '<option value="' + r[0] + '"' + (u.role === r[0] ? ' selected' : '') + '>' + r[1] + '</option>').join('') + '</select></label>' +
+                '<div class="field"><span>Bagian yang dipegang (Leader)</span><div class="days-pick">' + S.master.bagian.map(b => '<label><input type="checkbox" data-multi="1" name="bagian" value="' + b.kode + '"' + (u.bagian.indexOf(b.kode) >= 0 ? ' checked' : '') + '>' + esc(b.nama) + '</label>').join('') + '</div><small>Kosong = semua bagian.</small></div>' +
+                '<label class="field"><span>' + (isNew ? 'Password awal *' : 'Reset password') + '</span><input type="password" name="password" autocomplete="new-password" placeholder="' + (isNew ? 'min 6 karakter' : 'kosongkan bila tidak diubah') + '"><small>Pengguna wajib mengganti saat login pertama.</small></label>' +
+                '<label class="check"><input type="checkbox" name="aktif"' + (u.aktif ? ' checked' : '') + '> Aktif</label>',
+            buttons: (isNew ? [] : [{
+                label: 'Hapus', cls: 'danger', onClick: async () => {
+                    if (!await confirmBox('Hapus pengguna?', u.username, 'Hapus', 'danger')) return;
+                    try { await call('deleteUser', { username: u.username }); toast('Pengguna dihapus.', 'ok'); loadUsers(); } catch (e) { fail(e); }
+                }
+            }]).concat([{ label: 'Batal' }, {
+                label: 'Simpan', cls: 'primary', onClick: async () => {
+                    const f = formData($('#modalBody')); f.isNew = isNew;
+                    try { await call('saveUser', f); closeModal(); toast('Pengguna disimpan.', 'ok'); loadUsers(); } catch (e) { fail(e); }
+                }
+            }])
+        });
+    }
+
+    /* =========================== APPROVAL REQUEST OS (DAFTAR NAMA & APPROVAL SUPERVISOR) =========================== */
+    let reqAppFilter = 'ALL';
+    async function renderReqApproval() {
+        $('#pageSub').textContent = 'Daftar Nama Karyawan Request OS & Status Approval Supervisor';
+        $('#view').innerHTML =
+            '<div class="toolbar">' +
+            '<div class="seg">' +
+            '<button type="button" data-ra-st="ALL" class="' + (reqAppFilter === 'ALL' ? 'on' : '') + '">Semua</button>' +
+            '<button type="button" data-ra-st="PENDING" class="' + (reqAppFilter === 'PENDING' ? 'on' : '') + '">Waiting Approval Supervisor</button>' +
+            '<button type="button" data-ra-st="APPROVED" class="' + (reqAppFilter === 'APPROVED' ? 'on' : '') + '">Approved</button>' +
+            '<button type="button" data-ra-st="REJECTED" class="' + (reqAppFilter === 'REJECTED' ? 'on' : '') + '">Ditolak</button>' +
+            '</div>' +
+            '<span class="spacer"></span>' +
+            '<button type="button" class="btn sm primary" onclick="go(\'wa\')"><span class="material-symbols-outlined">add_circle</span> Buat / Edit Request OS</button>' +
+            '<button type="button" class="btn sm ghost" onclick="go(\'jadwal\')"><span class="material-symbols-outlined">calendar_month</span> Jadwal Mingguan →</button>' +
+            '</div>' +
+            '<div id="raBody"><div class="empty">Memuat daftar Request OS…</div></div>';
+
+        $$('[data-ra-st]').forEach(b => b.onclick = () => {
+            reqAppFilter = b.dataset.raSt;
+            $$('[data-ra-st]').forEach(x => x.classList.toggle('on', x === b));
+            loadReqApprovalList();
+        });
+        await loadReqApprovalList();
+    }
+
+    async function loadReqApprovalList() {
+        const res = await call('orderList', { status: reqAppFilter === 'ALL' ? '' : reqAppFilter });
+        const items = res.items || [];
+        const canApp = !!res.canApprove;
+        const spvDefault = res.supervisorName || 'Supervisor';
+        const box = $('#raBody');
+        if (!box) return;
+
+        if (!items.length) {
+            box.innerHTML = '<div class="card empty"><div class="big"><span class="material-symbols-outlined">inbox</span></div><p>Belum ada data Request OS pada filter ini.</p>' +
+                '<button class="btn primary" onclick="go(\'wa\')">Buat Request OS Baru</button></div>';
+            return;
+        }
+
+        box.innerHTML = items.map(it => {
+            const st = it.approvalStatus || 'DRAFT';
+            const spvName = it.supervisorName || spvDefault;
+            const appByName = it.approvedByNama || it.approvedBy || spvName;
+            const subByName = it.submitByNama || it.submitBy || 'Leader / PIC';
+            const names = it.reqNames || [];
+
+            let stBadge = '';
+            if (st === 'APPROVED') {
+                stBadge = '<span class="chip sm ok"><span class="material-symbols-outlined" style="font-size:15px;margin-right:4px">verified</span>Approved oleh Supervisor · ' + esc(appByName) + '</span>';
+            } else if (st === 'PENDING') {
+                stBadge = '<span class="chip sm warn"><span class="material-symbols-outlined" style="font-size:15px;margin-right:4px">pending_actions</span>Waiting Approval Supervisor · ' + esc(spvName) + '</span>';
+            } else if (st === 'REJECTED') {
+                stBadge = '<span class="chip sm err"><span class="material-symbols-outlined" style="font-size:15px;margin-right:4px">cancel</span>Ditolak oleh Supervisor · ' + esc(appByName) + '</span>';
+            } else {
+                stBadge = '<span class="chip sm">Draft (Belum Disubmit ke Supervisor) · ' + esc(spvName) + '</span>';
+            }
+
+            let rowsHtml = '';
+            if (!names.length) {
+                rowsHtml = '<tr><td colspan="6" class="empty small">Belum ada nama karyawan yang dipilih (' + it.request + ' MP).</td></tr>';
+            } else {
+                rowsHtml = names.map((n, idx) => {
+                    const rowSt = st === 'APPROVED'
+                        ? '<span class="chip xs ok"><span class="material-symbols-outlined">check_circle</span> Approved · ' + esc(appByName) + '</span>'
+                        : (st === 'PENDING'
+                            ? '<span class="chip xs warn"><span class="material-symbols-outlined">schedule</span> Waiting Approval Supervisor · ' + esc(spvName) + '</span>'
+                            : (st === 'REJECTED'
+                                ? '<span class="chip xs err"><span class="material-symbols-outlined">cancel</span> Ditolak · ' + esc(appByName) + '</span>'
+                                : '<span class="chip xs">Draft · Waiting Submit</span>'));
+                    return '<tr>' +
+                        '<td class="muted">' + (idx + 1) + '</td>' +
+                        '<td><b style="' + (n.isVacant ? 'color:var(--warn)' : '') + '">' + esc(n.nama) + '</b>' + (n.isVacant ? ' <small class="muted">(Slot Vacant)</small>' : '') + '</td>' +
+                        '<td class="mono small muted">' + esc(n.nik || '—') + '</td>' +
+                        '<td><span class="wk-div-badge">' + esc(bagName(n.bagian)) + '</span></td>' +
+                        '<td class="small"><b>' + esc((n.jam || '').replace('-', '–')) + '</b></td>' +
+                        '<td>' + rowSt + '</td>' +
+                        '</tr>';
+                }).join('');
+            }
+
+            return '<div class="card" style="margin-bottom:14px">' +
+                '<div class="card-head" style="flex-wrap:wrap;gap:10px">' +
+                '<div>' +
+                '<div class="row" style="gap:8px;align-items:center">' +
+                '<h2 style="margin:0">' + esc(it.tanggalLabel) + ' · ' + esc(shiftName(it.shift)) + '</h2>' +
+                '<span class="chip pri">' + it.request + ' MP (' + names.length + ' Nama)</span>' +
+                stBadge +
+                '</div>' +
+                '<div class="small muted" style="margin-top:4px">' +
+                'Diajukan oleh: <b>' + esc(subByName) + '</b>' + (it.submitAt ? ' (' + esc(it.submitAt.slice(0, 16)) + ')' : '') +
+                ' · Supervisor Approval: <b>' + esc(st === 'APPROVED' ? appByName : spvName) + '</b>' +
+                (it.approvedAt ? ' · Waktu Approval: <b>' + esc(it.approvedAt.slice(0, 16)) + '</b>' : '') +
+                (it.approvalNote && st === 'REJECTED' ? ' · Catatan: <span style="color:var(--err)">' + esc(it.approvalNote) + '</span>' : '') +
+                '</div>' +
+                '</div>' +
+                '<div class="row" style="gap:8px">' +
+                '<button type="button" class="btn sm ghost" data-ra-open="' + it.tanggal + '|' + it.shift + '"><span class="material-symbols-outlined">edit_square</span> Buka Request OS</button>' +
+                (canApp && st !== 'APPROVED' ? '<button type="button" class="btn sm ok" data-ra-approve="' + it.tanggal + '|' + it.shift + '"><span class="material-symbols-outlined">verified</span> Approve &amp; Masuk Jadwal</button>' : '') +
+                (canApp && st !== 'REJECTED' ? '<button type="button" class="btn sm danger" data-ra-reject="' + it.tanggal + '|' + it.shift + '"><span class="material-symbols-outlined">close</span> Tolak</button>' : '') +
+                '</div>' +
+                '</div>' +
+                '<div class="table-wrap" style="max-height:none"><table class="tbl"><thead><tr>' +
+                '<th style="width:42px">No</th><th>Nama Karyawan</th><th>NIK</th><th>Divisi</th><th>Jam Kerja</th><th>Status Approval &amp; User Supervisor</th>' +
+                '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>' +
+                '</div>';
+        }).join('');
+
+        $$('[data-ra-open]', box).forEach(b => b.onclick = () => {
+            const [dt, sh] = b.dataset.raOpen.split('|');
+            S.wa = { tanggal: dt, shift: sh, type: 'REQ' };
+            go('wa');
+        });
+        $$('[data-ra-approve]', box).forEach(b => b.onclick = async () => {
+            const [dt, sh] = b.dataset.raApprove.split('|');
+            b.disabled = true;
+            try {
+                await call('orderApprove', { tanggal: dt, shift: sh, dates: [dt] });
+                toast('Request OS (' + dt + ' · ' + shiftName(sh) + ') berhasil di-Approve! Data otomatis masuk ke Jadwal Mingguan & Absensi.', 'ok');
+                loadReqApprovalList();
+            } catch (e) { b.disabled = false; fail(e); }
+        });
+        $$('[data-ra-reject]', box).forEach(b => b.onclick = () => {
+            const [dt, sh] = b.dataset.raReject.split('|');
+            openModal({
+                title: 'Tolak Request OS (' + dt + ' · ' + shiftName(sh) + ')',
+                body: '<p class="small muted">Berikan catatan alasan penolakan untuk Leader / PIC:</p>' +
+                    '<label class="field"><span>Catatan Supervisor</span><input name="note" placeholder="Contoh: Kurang operator Inbound…"></label>',
+                buttons: [
+                    { label: 'Batal' },
+                    {
+                        label: 'Tolak Request', cls: 'danger', onClick: async () => {
+                            const f = formData($('#modalBody'));
+                            try {
+                                await call('orderReject', { tanggal: dt, shift: sh, note: f.note });
+                                closeModal();
+                                toast('Request OS ditolak.', 'warn');
+                                loadReqApprovalList();
+                            } catch (e) { fail(e); }
+                        }
+                    }
+                ]
+            });
+        });
+    }
+
+    /* =========================== INIT =========================== */
+    const RENDER = {
+        dashboard: renderDashboard, absensi: renderAbsensi, jadwal_ieg: renderJadwalIeg, jadwal: renderJadwal,
+        wa: renderWa, req_approval: renderReqApproval,
+        operator: renderOperator, bagian: renderBagian, pengaturan: renderPengaturan, rekap: renderRekap
+    };
+
+    document.addEventListener('click', e => {
+        const t = e.target.closest('[data-page],[data-menu],[data-theme-toggle],[data-close]');
+        if (!t) return;
+        if (t.dataset.page) { e.preventDefault(); if (S.page === 'absensi') flushAbs(); if (S.page === 'wa') flushOrder(); go(t.dataset.page); }
+        else if (t.hasAttribute('data-menu')) openSide(true);
+        else if (t.hasAttribute('data-theme-toggle')) toggleTheme();
+        else if (t.hasAttribute('data-close')) closeModal();
+    });
+    $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+    $('#loginForm').addEventListener('submit', doLogin);
+    $('#lgEye').onclick = () => {
+        const i = $('#lgPass');
+        const isPw = i.type === 'password';
+        i.type = isPw ? 'text' : 'password';
+        const op = $('.eye-open', $('#lgEye'));
+        const cl = $('.eye-closed', $('#lgEye'));
+        if (op && cl) {
+            op.classList.toggle('hidden', isPw);
+            cl.classList.toggle('hidden', !isPw);
+        }
+    };
+    $('#btnMenu').onclick = () => openSide(true);
+    $('#scrim').onclick = () => openSide(false);
+    $('#btnLogout').onclick = () => doLogout(false);
+    $('#btnPw').onclick = () => changePasswordModal(false);
+    $('#btnRefresh').onclick = refresh;
+    window.addEventListener('beforeunload', () => { flushAbs(); flushOrder(); });
+    boot();
+</script>

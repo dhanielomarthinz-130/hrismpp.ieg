@@ -1,0 +1,56 @@
+name: Deploy ke InfinityFree
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-infinityfree
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Buat config.local.php dari secrets
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASS: ${{ secrets.DB_PASS }}
+        run: |
+          php -r '
+            $v = fn($k) => var_export((string) getenv($k), true);
+            $out  = "<?php\n// Dibuat otomatis oleh GitHub Actions — jangan di-commit.\n";
+            $out .= "define(\"DB_DRIVER\", \"mysql\");\n";
+            $out .= "define(\"DB_HOST\", " . $v("DB_HOST") . ");\n";
+            $out .= "define(\"DB_PORT\", \"3306\");\n";
+            $out .= "define(\"DB_NAME\", " . $v("DB_NAME") . ");\n";
+            $out .= "define(\"DB_USER\", " . $v("DB_USER") . ");\n";
+            $out .= "define(\"DB_PASS\", " . $v("DB_PASS") . ");\n";
+            file_put_contents("config.local.php", $out);
+          '
+          php -l config.local.php
+
+      - name: Upload via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          port: 21
+          protocol: ftp
+          server-dir: /htdocs/
+          exclude: |
+            **/.git*
+            **/.git*/**
+            .github/**
+            .backup-ui/**
+            database/**
+            README.md
+            database.sql
+            config.local.example.php
