@@ -44,7 +44,10 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           port: 21
           protocol: ftp
-          server-dir: /htdocs/
+          # Akun InfinityFree berisi banyak domain: tiap domain punya folder sendiri.
+          # JANGAN ubah ke /htdocs/ — itu milik aplikasi lain.
+          server-dir: /hrismppieg.great-site.net/htdocs/
+          state-name: .ftp-deploy-hrismpp.json
           exclude: |
             **/.git*
             **/.git*/**
