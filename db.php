@@ -302,6 +302,23 @@ function init_db_tables(PDO $pdo, string $driver): void {
     // Employer hanya IEG atau RKA. Operator yang sudah ada (kosong / "LPK RKA" / lainnya) -> RKA.
     $pdo->exec("UPDATE operator SET employer = 'IEG' WHERE UPPER(TRIM(employer)) = 'IEG' AND employer <> 'IEG'");
     $pdo->exec("UPDATE operator SET employer = 'RKA' WHERE employer IS NULL OR employer NOT IN ('IEG', 'RKA')");
+
+    // Bagian tambahan Associate / Supervisor / Admin — ditambahkan SEKALI (penanda di settings),
+    // sehingga bila nanti dihapus/diubah dari menu Bagian tidak muncul kembali.
+    // Target 0 (tidak memengaruhi pemenuhan MPP) & tidak ikut daftar Request OS.
+    $flag = $pdo->query("SELECT COUNT(*) FROM settings WHERE key_name = 'migr_bagian_jabatan'")->fetchColumn();
+    if ((int)$flag === 0) {
+        $maxUrut = (int)$pdo->query("SELECT COALESCE(MAX(urutan), 0) FROM bagian")->fetchColumn();
+        $ins = $pdo->prepare("INSERT INTO bagian (kode, nama, target_s1, target_s2, urutan, aktif, judul_wa, mention, order_mpp) VALUES (?, ?, 0, 0, ?, 1, ?, '', 0)");
+        $chk = $pdo->prepare("SELECT COUNT(*) FROM bagian WHERE UPPER(kode) = ?");
+        foreach ([['ASSOCIATE', 'Associate'], ['SUPERVISOR', 'Supervisor'], ['ADMIN', 'Admin']] as $b) {
+            $chk->execute([$b[0]]);
+            if ((int)$chk->fetchColumn() === 0) {
+                $ins->execute([$b[0], $b[1], ++$maxUrut, $b[0]]);
+            }
+        }
+        $pdo->prepare("INSERT INTO settings (key_name, value, ket) VALUES ('migr_bagian_jabatan', '1', 'Migrasi bagian Associate/Supervisor/Admin')")->execute();
+    }
 }
 
 /** Daftar employer yang diizinkan. */
