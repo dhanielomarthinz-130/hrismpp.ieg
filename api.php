@@ -21,6 +21,7 @@ require_once __DIR__ . '/absensi.php';
 require_once __DIR__ . '/mingguan.php';
 require_once __DIR__ . '/wa.php';
 require_once __DIR__ . '/export.php';
+require_once __DIR__ . '/dbadmin.php';
 
 // Tangkap input JSON
 $rawInput = file_get_contents('php://input');
@@ -128,6 +129,12 @@ try {
         // Foto profil (user sendiri) & foto operator (Admin/Supervisor)
         'fotoProfil'      => fn() => profile_set_foto($user, isset($payload['data']) ? (string)$payload['data'] : null),
         'fotoOperator'    => $admin(fn() => operator_set_foto((string)($payload['id'] ?? ''), isset($payload['data']) ? (string)$payload['data'] : null, $user)),
+
+        // Penjelajah database (khusus super admin)
+        'dbTables'        => fn() => dba_tables($user),
+        'dbRows'          => fn() => dba_rows($payload, $user),
+        'dbDeleteRow'     => fn() => dba_delete_row($payload, $user, (string)$token),
+        'dbTruncate'      => fn() => dba_truncate($payload, $user, (string)$token),
 
         // Maintenance (khusus super admin)
         'maintenance'     => function () use ($user) {

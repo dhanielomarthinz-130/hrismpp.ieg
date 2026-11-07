@@ -130,6 +130,7 @@
     /* ------------------------------ modal ------------------------------ */
     let modalLocked = false;
     function openModal(o) {
+        $('#modal .modal-card').classList.toggle('wide', !!o.wide);
         $('#modalTitle').textContent = o.title || '';
         $('#modalBody').innerHTML = o.body || '';
         const foot = $('#modalFoot');
@@ -3001,6 +3002,71 @@
         drawMaintenance(await call('maintenance', {}));
     }
 
+    /* ---------- Penjelajah database (super admin) ---------- */
+    async function loadDbTables() {
+        const box = $('#dbList'); if (!box) return;
+        try {
+            const list = await call('dbTables', {}, { silent: true });
+            box.innerHTML = '<div class="table-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>Tabel</th><th class="num">Baris</th><th></th></tr></thead><tbody>' +
+                list.map(t => '<tr><td><b class="mono">' + esc(t.table) + '</b><div class="small muted">' + esc(t.label) + '</div></td>' +
+                    '<td class="num">' + t.rows.toLocaleString('id-ID') + '</td>' +
+                    '<td class="act"><button type="button" class="btn sm" data-dbv="' + esc(t.table) + '"><span class="material-symbols-outlined">table_view</span> Lihat</button> ' +
+                    '<button type="button" class="btn sm danger" data-dbt="' + esc(t.table) + '"' + (t.rows ? '' : ' disabled') + '><span class="material-symbols-outlined">delete_sweep</span> Kosongkan</button></td></tr>').join('') +
+                '</tbody></table></div>';
+            $$('[data-dbv]', box).forEach(b => b.onclick = () => dbViewModal(b.dataset.dbv, 1));
+            $$('[data-dbt]', box).forEach(b => b.onclick = () => dbTruncateModal(b.dataset.dbt));
+        } catch (e) { box.innerHTML = '<div class="alert err">' + esc(e.message) + '</div>'; }
+    }
+
+    async function dbViewModal(table, page) {
+        let d;
+        try { d = await call('dbRows', { table: table, page: page }); } catch (e) { return fail(e); }
+        const cell = v => {
+            const s = v == null ? '' : String(v);
+            return '<td class="small" title="' + esc(s) + '">' + (s === '' ? '<span class="muted">—</span>' : esc(s.length > 60 ? s.slice(0, 60) + '…' : s)) + '</td>';
+        };
+        const body = !d.rows.length ? '<div class="empty"><div class="big"><span class="material-symbols-outlined">inbox</span></div><p>Tabel kosong.</p></div>' :
+            '<div class="table-wrap" style="max-height:60vh"><table class="tbl db-tbl"><thead><tr><th></th>' + d.cols.map(c => '<th>' + esc(c) + '</th>').join('') + '</tr></thead><tbody>' +
+            d.rows.map(r => '<tr><td class="act">' + (r.__locked ? '<span class="material-symbols-outlined muted" title="Dilindungi">lock</span>'
+                : '<button type="button" class="icon-btn" title="Hapus baris" aria-label="Hapus baris" data-dbdel="' + esc(r[d.pk]) + '"><span class="material-symbols-outlined">delete</span></button>') + '</td>' +
+                d.cols.map(c => cell(r[c])).join('') + '</tr>').join('') + '</tbody></table></div>';
+        openModal({
+            title: 'Tabel ' + d.table + ' · ' + d.total.toLocaleString('id-ID') + ' baris', wide: true,
+            body: '<p class="small muted" style="margin-top:0">' + esc(d.label) + ' — halaman ' + d.page + ' dari ' + d.pages + ' (50 baris per halaman, terbaru di atas).</p>' + body,
+            onOpen: m => {
+                $$('[data-dbdel]', m).forEach(b => b.onclick = async () => {
+                    if (!await confirmBox('Hapus baris ini?', 'Tabel ' + d.table + ', ' + d.pk + ' = ' + b.dataset.dbdel + '\nTindakan ini permanen.', 'Hapus', 'danger')) return dbViewModal(table, page);
+                    try { await call('dbDeleteRow', { table: table, id: b.dataset.dbdel }); toast('Baris dihapus.', 'ok'); loadDbTables(); dbViewModal(table, page); } catch (e) { fail(e); dbViewModal(table, page); }
+                });
+            },
+            buttons: [].concat(d.page > 1 ? [{ label: '← Sebelumnya', onClick: () => dbViewModal(table, d.page - 1) }] : [])
+                .concat(d.page < d.pages ? [{ label: 'Berikutnya →', onClick: () => dbViewModal(table, d.page + 1) }] : [])
+                .concat([{ label: 'Tutup', cls: 'primary' }])
+        });
+    }
+
+    function dbTruncateModal(table) {
+        const notes = {
+            users: 'Semua akun kecuali super admin akan dihapus.',
+            user_tokens: 'Semua user akan keluar (kecuali sesi Anda saat ini).',
+            settings: 'Semua pengaturan kembali ke nilai bawaan.',
+            operator: 'Semua data operator & fotonya akan dihapus.'
+        };
+        openModal({
+            title: 'Kosongkan tabel ' + table + '?',
+            body: '<div class="alert err" style="margin-top:0">Seluruh isi tabel <b class="mono">' + esc(table) + '</b> akan dihapus permanen dan tidak dapat dikembalikan.' +
+                (notes[table] ? '<br>' + esc(notes[table]) : '') + '</div>' +
+                '<label class="field"><span>Ketik <b class="mono">' + esc(table) + '</b> untuk konfirmasi</span><input name="confirm" autocomplete="off" autocapitalize="none"></label>',
+            buttons: [{ label: 'Batal' }, {
+                label: 'Kosongkan tabel', cls: 'danger', onClick: async () => {
+                    const c = ($('#modalBody [name=confirm]').value || '').trim();
+                    if (c !== table) return toast('Ketik nama tabel dengan benar untuk konfirmasi.', 'err');
+                    try { const r = await call('dbTruncate', { table: table, confirm: c }); closeModal(); toast(r.deleted + ' baris dihapus dari ' + table + '.', 'ok'); loadDbTables(); } catch (e) { fail(e); }
+                }
+            }]
+        });
+    }
+
     function mtAutoApproveCard(on) {
         return '<div class="card" style="max-width:760px">' +
             '<div class="card-head"><h2><span class="material-symbols-outlined">verified</span>Approval Supervisor otomatis</h2>' +
@@ -3028,7 +3094,13 @@
             '<small>Buka alamat ini untuk menampilkan form login ketika maintenance aktif.</small></label>' +
             '<button class="btn ' + (on ? 'primary' : 'danger') + '" id="mtToggle"><span class="material-symbols-outlined">' + (on ? 'play_circle' : 'construction') + '</span> ' +
             (on ? 'Nonaktifkan maintenance' : 'Aktifkan maintenance') + '</button></div>' +
-            mtAutoApproveCard(!!d.autoApprove);
+            mtAutoApproveCard(!!d.autoApprove) +
+            '<div class="card" style="max-width:760px"><div class="card-head"><h2><span class="material-symbols-outlined">database</span>Database</h2>' +
+            '<button type="button" class="btn sm ghost" id="dbReload"><span class="material-symbols-outlined">refresh</span> Muat ulang</button></div>' +
+            '<p class="small muted" style="margin-top:0">Lihat isi setiap tabel, hapus baris satu per satu, atau kosongkan tabel. Kolom sensitif disamarkan; akun super admin dilindungi.</p>' +
+            '<div id="dbList"><div class="empty">Memuat…</div></div></div>';
+        $('#dbReload').onclick = loadDbTables;
+        loadDbTables();
         $('#aaToggle').onclick = async () => {
             const aa = !!d.autoApprove;
             if (!aa && !await confirmBox('Aktifkan approval otomatis?', 'Setiap Request OS yang disubmit akan langsung Approved tanpa menunggu Supervisor, dan langsung masuk ke Jadwal Employee & Absensi.', 'Aktifkan', 'primary')) return;
