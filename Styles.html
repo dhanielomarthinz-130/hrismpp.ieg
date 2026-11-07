@@ -3669,9 +3669,85 @@
             font-size: 13px;
         }
 
-        /* Label panjang tidak meluber keluar tombol */
-        .toolbar .btn {
-            overflow: hidden;
+        /* Label panjang turun ke baris kedua dengan rapi (tidak terpotong / meluber) */
+        .toolbar .btn,
+        .card .row > .btn,
+        .card > .btn,
+        .pending-approval-item .btn {
+            white-space: normal;
+            line-height: 1.2;
+            text-align: center;
+            min-height: 38px;
+            padding-top: 6px;
+            padding-bottom: 6px;
+        }
+
+        /* Segmen dengan banyak pilihan: baris sendiri & bisa digeser */
+        .toolbar .seg:has(> button:nth-child(3)) {
+            flex-basis: 100%;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+
+        .toolbar .seg:has(> button:nth-child(3)) button {
+            flex: 1 0 auto;
+        }
+
+        /* Baris tombol di dalam kartu selalu selebar kartu (juga bila berada di card-head yang flex) */
+        .card .row:has(> .btn) {
+            flex: 1 1 100%;
+            width: 100%;
+        }
+
+        /* Grup tombol di dalam kartu: lebar seragam, 2 per baris */
+        .card .row > .btn:not(.xs),
+        .card > .btn,
+        .pending-approval-item .btn {
+            flex: 1 1 calc(50% - 4px);
+            justify-content: center;
+        }
+
+        /* Tombol aksi utama (Submit) penuh selebar kartu */
+        .card .row > .btn.primary:first-child,
+        .card > .btn.primary:only-of-type {
+            flex-basis: 100%;
+        }
+
+        /* Tombol tanpa bingkai diberi bingkai agar seragam */
+        .card .row > .btn.ghost,
+        .pending-approval-item .btn.ghost {
+            background: var(--surface);
+            border-color: var(--border);
+            color: var(--text);
+            box-shadow: var(--shadow-xs);
+        }
+
+        /* Tombol aksi di tabel: ikon saja agar tidak terpotong */
+        .tbl .act .btn .btn-txt {
+            display: none;
+        }
+
+        .tbl .act .btn {
+            min-width: 36px;
+            padding: 0 9px;
+        }
+
+        /* Savebar: teks ringkas di HP */
+        .savebar {
+            flex-wrap: wrap;
+            font-size: 12px;
+        }
+
+        .savebar > span:first-child {
+            flex: 1 1 100%;
+        }
+
+        .savebar > .spacer {
+            display: none;
+        }
+
+        .savebar .btn {
+            flex: 1 1 auto;
         }
 
         .toolbar .btn.ghost {

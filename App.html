@@ -2651,8 +2651,8 @@
             '<div class="row" style="margin-top:8px"><button class="btn primary">Simpan WhatsApp</button><button type="button" class="btn" onclick="go(\'request_os\')">Buka halaman WA</button></div></form></div>' +
 
             '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;margin-right:6px">group</span>Pengguna</h2><button class="btn sm primary" id="uAdd"><span class="material-symbols-outlined">person_add</span> Pengguna</button></div><div id="uList" class="table-wrap" style="border:0"></div></div>' +
-            '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;margin-right:6px">history</span>Log aktivitas</h2><button class="btn sm" id="aLoad">Tampilkan 100 terakhir</button></div><div id="auList"></div></div>' + +
-            '<p class="muted small">HRIS MPP v' + esc(S.master.version) + '</p>';
+            '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;margin-right:6px">history</span>Log aktivitas</h2><button class="btn sm" id="aLoad">Tampilkan 100 terakhir</button></div><div id="auList"></div></div>' +
+            '<p class="muted small" style="text-align:center">HRIS Inventory v' + esc(S.master.version) + '</p>';
 
         $('#fRule').onsubmit = async e => {
             e.preventDefault();
@@ -3010,8 +3010,8 @@
             box.innerHTML = '<div class="table-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>Tabel</th><th class="num">Baris</th><th></th></tr></thead><tbody>' +
                 list.map(t => '<tr><td><b class="mono">' + esc(t.table) + '</b><div class="small muted">' + esc(t.label) + '</div></td>' +
                     '<td class="num">' + t.rows.toLocaleString('id-ID') + '</td>' +
-                    '<td class="act"><button type="button" class="btn sm" data-dbv="' + esc(t.table) + '"><span class="material-symbols-outlined">table_view</span> Lihat</button> ' +
-                    '<button type="button" class="btn sm danger" data-dbt="' + esc(t.table) + '"' + (t.rows ? '' : ' disabled') + '><span class="material-symbols-outlined">delete_sweep</span> Kosongkan</button></td></tr>').join('') +
+                    '<td class="act"><button type="button" class="btn sm" title="Lihat isi" data-dbv="' + esc(t.table) + '"><span class="material-symbols-outlined">table_view</span><span class="btn-txt"> Lihat</span></button> ' +
+                    '<button type="button" class="btn sm danger" title="Kosongkan tabel" data-dbt="' + esc(t.table) + '"' + (t.rows ? '' : ' disabled') + '><span class="material-symbols-outlined">delete_sweep</span><span class="btn-txt"> Kosongkan</span></button></td></tr>').join('') +
                 '</tbody></table></div>';
             $$('[data-dbv]', box).forEach(b => b.onclick = () => dbViewModal(b.dataset.dbv, 1));
             $$('[data-dbt]', box).forEach(b => b.onclick = () => dbTruncateModal(b.dataset.dbt));
