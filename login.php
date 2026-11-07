@@ -28,32 +28,46 @@ ob_start();
     <title>Masuk · HRIS Inventory PT. Inovasi Eka Gemilang</title>
     <!-- INCLUDE_STYLES -->
     <style>
+        /* Halaman: kartu login ringkas di tengah layar */
         .auth {
             min-height: 100vh;
             display: grid;
-            grid-template-columns: minmax(0, 1fr);
+            place-items: center;
+            padding: 24px 16px;
             background: var(--bg);
         }
 
-        @media (min-width: 900px) {
-            .auth {
+        .auth-card {
+            width: 100%;
+            max-width: 400px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: var(--shadow-lg);
+        }
+
+        @media (min-width: 860px) {
+            .auth-card {
+                max-width: 820px;
                 grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
             }
         }
 
-        /* Panel brand */
+        /* Panel brand (desktop saja) */
         .auth-brand {
             display: none;
-            position: relative;
-            overflow: hidden;
             background: var(--side-bg);
             color: #FFFFFF;
-            padding: 40px 48px;
+            padding: 28px 28px 22px;
             flex-direction: column;
             justify-content: space-between;
+            gap: 24px;
         }
 
-        @media (min-width: 900px) {
+        @media (min-width: 860px) {
             .auth-brand {
                 display: flex;
             }
@@ -62,41 +76,40 @@ ob_start();
         .auth-brand-top {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
         }
 
         .auth-brand-top .logo-mark {
-            width: 40px;
-            height: 40px;
+            width: 34px;
+            height: 34px;
+            border-radius: 8px;
         }
 
         .auth-brand-top b {
             display: block;
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 600;
         }
 
         .auth-brand-top small {
             display: block;
-            font-size: 12px;
+            font-size: 11.5px;
             color: var(--side-muted);
         }
 
         .auth-brand h2 {
-            font-size: 30px;
-            line-height: 1.2;
+            font-size: 20px;
+            line-height: 1.3;
             font-weight: 700;
-            letter-spacing: -0.02em;
-            margin: 0 0 14px;
-            max-width: 420px;
+            letter-spacing: -0.015em;
+            margin: 0 0 8px;
         }
 
         .auth-brand p {
-            margin: 0 0 28px;
+            margin: 0 0 18px;
             color: var(--side-text);
-            font-size: 14px;
-            line-height: 1.6;
-            max-width: 400px;
+            font-size: 12.5px;
+            line-height: 1.55;
         }
 
         .auth-feats {
@@ -104,91 +117,96 @@ ob_start();
             margin: 0;
             padding: 0;
             display: grid;
-            gap: 16px;
+            gap: 10px;
         }
 
         .auth-feats li {
             display: flex;
-            align-items: flex-start;
-            gap: 12px;
-            font-size: 13px;
-            color: var(--side-text);
-        }
-
-        .auth-feats li b {
-            display: block;
+            align-items: center;
+            gap: 10px;
+            font-size: 12.5px;
+            font-weight: 500;
             color: #FFFFFF;
-            font-weight: 600;
-            font-size: 13.5px;
         }
 
         .auth-feats .material-symbols-outlined {
-            width: 32px;
-            height: 32px;
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.07);
-            color: #8FD0F2;
-            font-size: 18px;
+            width: 28px;
+            height: 28px;
+            border-radius: 7px;
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--side-indicator, #F472B6);
+            font-size: 16px;
             flex: none;
         }
 
         .auth-brand-foot {
             display: flex;
             justify-content: space-between;
-            font-size: 12px;
+            font-size: 11px;
             color: var(--side-muted);
         }
 
         /* Panel form */
         .auth-main {
-            display: flex;
-            flex-direction: column;
-            min-height: 100vh;
-            padding: 20px 20px 24px;
+            position: relative;
+            padding: 28px 28px 22px;
+        }
+
+        @media (min-width: 860px) {
+            .auth-main {
+                padding: 32px 36px 24px;
+            }
         }
 
         .auth-top {
-            display: flex;
-            justify-content: flex-end;
-        }
-
-        .auth-form-wrap {
-            flex: 1;
-            display: grid;
-            place-items: center;
-            padding: 24px 0;
+            position: absolute;
+            top: 12px;
+            right: 12px;
         }
 
         .auth-form {
             width: 100%;
-            max-width: 380px;
         }
 
         .auth-logo {
-            height: 38px;
+            height: 30px;
             width: auto;
             display: block;
-            margin-bottom: 28px;
+            margin-bottom: 20px;
         }
 
         [data-theme="evening"] .auth-logo {
             background: #FFFFFF;
-            padding: 6px 10px;
-            border-radius: 8px;
+            padding: 5px 8px;
+            border-radius: 6px;
             box-sizing: content-box;
         }
 
         .auth-form h1 {
-            font-size: 24px;
+            font-size: 19px;
             font-weight: 700;
-            letter-spacing: -0.02em;
-            margin: 0 0 6px;
+            letter-spacing: -0.015em;
+            margin: 0 0 4px;
         }
 
         .auth-form .lead {
             color: var(--text-2);
-            margin: 0 0 26px;
+            margin: 0 0 20px;
+            font-size: 12.5px;
+        }
+
+        .auth-form .field {
+            margin-bottom: 12px;
+        }
+
+        .auth-form .input-icon-wrap input {
+            min-height: 40px;
             font-size: 13.5px;
+        }
+
+        .auth-form .login-submit-btn {
+            min-height: 40px;
+            margin-top: 6px;
         }
 
         .auth-meta {
@@ -196,8 +214,8 @@ ob_start();
             align-items: center;
             justify-content: center;
             gap: 8px;
-            margin-top: 22px;
-            font-size: 12px;
+            margin-top: 16px;
+            font-size: 11.5px;
             color: var(--text-3);
         }
     </style>
@@ -205,6 +223,7 @@ ob_start();
 
 <body>
     <main class="auth" aria-label="Halaman login">
+        <div class="auth-card">
         <!-- Panel brand -->
         <section class="auth-brand" aria-hidden="true">
             <div class="auth-brand-top">
@@ -216,20 +235,20 @@ ob_start();
             </div>
 
             <div>
-                <h2>Perencanaan tenaga kerja, dalam satu tempat.</h2>
-                <p>Request OS, approval supervisor, jadwal mingguan, dan absensi shift — terhubung otomatis.</p>
+                <h2>Perencanaan tenaga kerja dalam satu tempat.</h2>
+                <p>Request OS, approval supervisor, jadwal employee, dan absensi shift — terhubung otomatis.</p>
                 <ul class="auth-feats">
                     <li>
                         <span class="material-symbols-outlined">fact_check</span>
-                        <span><b>Request OS &amp; kuota vacant</b>Ajukan kebutuhan MP per divisi dan shift.</span>
+                        <span>Request OS &amp; kuota vacant</span>
                     </li>
                     <li>
                         <span class="material-symbols-outlined">verified</span>
-                        <span><b>Approval supervisor</b>Disetujui langsung masuk jadwal &amp; absensi.</span>
+                        <span>Approval supervisor otomatis</span>
                     </li>
                     <li>
                         <span class="material-symbols-outlined">how_to_reg</span>
-                        <span><b>Clock-in &amp; rekap MPP</b>Pantau pemenuhan kehadiran setiap shift.</span>
+                        <span>Clock-in &amp; rekap MPP</span>
                     </li>
                 </ul>
             </div>
@@ -249,7 +268,6 @@ ob_start();
                 </button>
             </div>
 
-            <div class="auth-form-wrap">
                 <div class="auth-form">
                     <img class="auth-logo" src="assets/image/logo_text-BademdvM.jpg" alt="PT. Inovasi Eka Gemilang">
                     <h1>Masuk ke akun Anda</h1>
@@ -288,8 +306,8 @@ ob_start();
                         <span>Sistem aktif · v<?= $appVer ?></span>
                     </div>
                 </div>
-            </div>
         </section>
+        </div>
     </main>
 
     <script>
