@@ -33,5 +33,5 @@ Options -Indexes
     # 4. Route halaman SPA -> index.php
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteCond %{REQUEST_FILENAME} !-d
-    RewriteRule ^(dashboard|absensi|jadwal|request-os|wa|rekap|operator|bagian|pengaturan)/?$ index.php [L,QSA]
+    RewriteRule ^(dashboard|absensi|jadwal|request_os|request-os|wa|rekap|operator|bagian|pengaturan)/?$ index.php [L,QSA]
 </IfModule>

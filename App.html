@@ -17,7 +17,7 @@
         absensi: '<span class="material-symbols-outlined">how_to_reg</span>',
         jadwal_ieg: '<span class="material-symbols-outlined">event_note</span>',
         jadwal: '<span class="material-symbols-outlined">calendar_month</span>',
-        wa: '<span class="material-symbols-outlined">chat</span>',
+        request_os: '<span class="material-symbols-outlined">chat</span>',
         req_approval: '<span class="material-symbols-outlined">fact_check</span>',
         rekap: '<span class="material-symbols-outlined">summarize</span>',
         operator: '<span class="material-symbols-outlined">badge</span>',
@@ -30,8 +30,8 @@
 
     const PAGES = [
         { id: 'dashboard', label: 'Dashboard MPP', short: 'Dashboard', roles: ['ADMIN', 'SUPERVISOR', 'VIEWER'], bottom: true },
-        { id: 'wa', label: 'Request OS', short: 'Request OS', roles: ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'], bottom: true },
-        { id: 'req_approval', label: 'Approval Request OS', short: 'Approval OS', roles: ['SUPERVISOR'], bottom: true },
+        { id: 'request_os', label: 'Request OS', short: 'Request OS', roles: ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'], bottom: true },
+        { id: 'req_approval', label: 'Approval Request OS', short: 'Approval OS', roles: ['ADMIN', 'SUPERVISOR'], bottom: true },
         { id: 'jadwal_ieg', label: 'Jadwal IEG', short: 'Jadwal IEG', roles: ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'], bottom: true },
         { id: 'absensi', label: 'Absensi Shift', short: 'Absensi', roles: ['ADMIN', 'SUPERVISOR', 'LEADER'], bottom: true },
         { id: 'jadwal', label: 'Jadwal Employee', short: 'Jadwal', roles: ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'], bottom: true },
@@ -305,6 +305,7 @@
     function openSide(on) { $('#sidebar').classList.toggle('open', on); $('#scrim').classList.toggle('show', on); }
 
     function go(page) {
+        if (page === 'wa') page = 'request_os'; // id lama
         const allowed = allowedPages();
         const p = allowed.find(x => x.id === page) || allowed[0] || PAGES[0];
         S.page = p.id;
@@ -359,7 +360,7 @@
         $$('[data-dshift]').forEach(b => b.onclick = () => { S.dash.shift = b.dataset.dshift; $$('[data-dshift]').forEach(x => x.classList.toggle('on', x === b)); loadDash(); });
         $('#dNow').onclick = () => { S.dash.tanggal = null; S.dash.shift = null; refresh(); };
         if ($('#dAbs')) $('#dAbs').onclick = () => { S.abs = { tanggal: S.dash.tanggal, shift: S.dash.shift }; go('absensi'); };
-        $('#dWa').onclick = () => { S.wa = { tanggal: S.dash.tanggal, shift: S.dash.shift }; go('wa'); };
+        $('#dWa').onclick = () => { S.wa = { tanggal: S.dash.tanggal, shift: S.dash.shift }; go('request_os'); };
         await loadDash();
         S.timer = setInterval(() => loadDash(true), 60000);
     }
@@ -407,7 +408,8 @@
             });
             h += '</div></div>';
         }
-        $('#dBody').innerHTML = h + '<div id="dReq"></div>';
+        $('#dBody').innerHTML = '<div id="dPending"></div>' + h + '<div id="dReq"></div>';
+        if (isAdmin()) loadPendingBanner();
         call('rekapMpp', { from: S.dash.tanggal, to: S.dash.tanggal }, { silent: true }).then(r => {
             if (S.page !== 'dashboard' || !$('#dReq')) return;
             $('#dReq').innerHTML = '<div class="card"><div class="card-head"><h2>Request MPP outsourcing · ' + fmtShort(S.dash.tanggal) + '</h2><button class="btn sm ghost" onclick="go(\'rekap\')">Rekap MPP →</button></div>' +
@@ -415,6 +417,23 @@
                     '<div class="sub">Terisi ' + x.terisi + (x.vacant ? ' · VACANT ' + x.vacant : '') + ' · Hadir ' + (x.hadir === null ? '—' : x.hadir) + '</div></div>').join('') + '</div>'
                     : '<div class="muted small">Belum ada request yang disubmit untuk tanggal ini.</div>') + '</div>';
         }).catch(() => { });
+    }
+
+    // Pita "Request OS menunggu approval" di Dashboard
+    async function loadPendingBanner() {
+        try {
+            const res = await call('orderList', { status: 'PENDING' }, { silent: true });
+            const box = $('#dPending');
+            if (!box || S.page !== 'dashboard') return;
+            const n = (res.items || []).length;
+            box.innerHTML = n
+                ? '<div class="alert warn" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:0">' +
+                  '<span class="material-symbols-outlined">pending_actions</span>' +
+                  '<span style="flex:1;min-width:200px"><b>' + n + ' Request OS menunggu approval Supervisor.</b></span>' +
+                  '<button type="button" class="btn xs primary" id="dPendingGo">Lihat daftar</button></div>'
+                : '';
+            if ($('#dPendingGo')) $('#dPendingGo').onclick = () => { reqAppFilter = 'PENDING'; go('req_approval'); };
+        } catch (e) { /* abaikan */ }
     }
 
     /* =========================== ABSENSI (CHECKLIST MASUK / CLOCK-IN) =========================== */
@@ -496,7 +515,7 @@
         const approvalNoteHtml = absData.approvalStatus === 'PENDING'
             ? '<div class="alert warn" style="margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">' +
               '<span><b>Request OS untuk Shift ini masih menunggu Approval Supervisor.</b> Jadwal &amp; daftar hadir otomatis masuk setelah di-Approve Supervisor.</span>' +
-              '<button type="button" class="btn xs primary" onclick="go(\'wa\')">Buka Request OS →</button></div>'
+              '<button type="button" class="btn xs primary" onclick="go(\'request_os\')">Buka Request OS →</button></div>'
             : (absData.approvalStatus === 'APPROVED'
                 ? '<div class="row" style="margin-bottom:8px;gap:6px"><span class="chip xs ok"><span class="material-symbols-outlined">check_circle</span> Request OS Approved oleh ' + esc(absData.approvedBy || 'Supervisor') + '</span></div>'
                 : '');
@@ -530,7 +549,7 @@
             $('#aBody').innerHTML = '<div class="card empty"><div class="big"><span class="material-symbols-outlined">inbox</span></div><p>Tidak ada karyawan pada filter ini.</p>' +
                 '<div class="row" style="justify-content:center;margin-top:10px;gap:8px">' +
                 '<button class="btn sm primary" id="aShowAllBtn">Tampilkan Semua Karyawan</button>' +
-                '<button class="btn sm ghost" onclick="go(\'wa\')">Buka Request OS →</button></div></div>';
+                '<button class="btn sm ghost" onclick="go(\'request_os\')">Buka Request OS →</button></div></div>';
             if ($('#aShowAllBtn')) $('#aShowAllBtn').onclick = () => { absMode = 'ALL'; renderAbsList(); };
             return;
         }
@@ -1327,7 +1346,7 @@
             '<input type="date" id="wTgl" value="' + S.wa.tanggal + '" aria-label="Tanggal">' + shiftSeg(S.wa.shift, 'wshift') +
             '<div class="seg"><button data-otype="REQ" class="' + (S.wa.type === 'REQ' ? 'on' : '') + '">Request OS</button><button data-otype="REAL" class="' + (S.wa.type === 'REAL' ? 'on' : '') + '">Realisasi Absen</button></div>' +
             '<span class="spacer"></span>' +
-            (isSupervisor() ? '<button class="btn sm primary" id="wGoAppList"><span class="material-symbols-outlined">fact_check</span> Daftar Approval Request OS</button>' : '') +
+            (isAdmin() ? '<button class="btn sm primary" id="wGoAppList"><span class="material-symbols-outlined">fact_check</span> Daftar Approval Request OS</button>' : '') +
             '<button class="btn sm ghost" id="wGoAbs"><span class="material-symbols-outlined">how_to_reg</span> Clock-In Absensi</button>' +
             '<button class="btn sm ghost" id="wGoJad"><span class="material-symbols-outlined">calendar_month</span> Jadwal Employee</button>' +
             '<button class="btn sm ghost" id="wRekap"><span class="material-symbols-outlined">download</span> Unduh rekap</button></div>' +
@@ -1945,6 +1964,7 @@
 
     function markOrder(reload) {
         if (!odEditable()) return;
+        if (OD && OD.afterSubmit) { refreshOrderPreview(true); return; } // jangan timpa request yang baru disubmit
         odDirty = true;
         clearTimeout(odTimer);
         odTimer = setTimeout(() => flushOrder(reload), reload ? 0 : 500);
@@ -1958,7 +1978,7 @@
                 tanggal: OD.tanggal, shift: OD.kode, request: OD.request, req: OD.req, jamExtra: OD.jamExtra,
                 realIds: OD.realIds, realAuto: OD.realAuto
             }, { silent: true });
-            if (S.page !== 'wa' || v.tanggal !== OD.tanggal || v.kode !== OD.kode) return;
+            if (S.page !== 'request_os' || v.tanggal !== OD.tanggal || v.kode !== OD.kode) return;
             OD.textReq = v.textReq; OD.textReal = v.textReal;
             OD.shareReq = v.shareReq; OD.shareReal = v.shareReal;
             OD.belumAbsen = v.belumAbsen; OD.groups = v.groups;
@@ -1969,28 +1989,71 @@
     }
 
     function orderPayload() {
+        // Form baru dikosongkan setelah submit: kirim daftar yang SUDAH disubmit (Kirim WA / Approve
+        // menyimpan ulang daftar ini — jangan sampai tertimpa daftar kosong)
+        const keep = !!(OD.afterSubmit && odLastSubmit && odLastSubmit.tanggal === OD.tanggal && odLastSubmit.kode === OD.kode);
         return {
             tanggal: OD.tanggal,
             dates: odSelectedDates.length ? odSelectedDates : [OD.tanggal],
             shift: OD.kode,
-            request: OD.request,
-            req: OD.req,
+            request: keep ? odLastSubmit.request : OD.request,
+            req: keep ? odLastSubmit.req : OD.req,
             jamExtra: OD.jamExtra,
             realIds: OD.realIds,
             realAuto: OD.realAuto
         };
     }
 
+    // Request terakhir yang berhasil disubmit (untuk menggabungkan request tambahan pada tanggal & shift yang sama)
+    let odLastSubmit = null;
+
+    function mergeReq(a, b) {
+        const out = a.map(x => Object.assign({}, x));
+        b.forEach(x => {
+            const ex = out.find(y => y.id === x.id);
+            if (!ex) out.push(Object.assign({}, x));
+            else if (String(x.id).indexOf('VAC_') === 0) ex.qty = Math.max(1, +(ex.qty || 1)) + Math.max(1, +(x.qty || 1));
+        });
+        return out;
+    }
+
     async function submitOrder() {
         clearTimeout(odTimer); odDirty = false;
+        const payload = Object.assign(orderPayload(), { type: S.wa.type });
+        const isReq = S.wa.type === 'REQ';
+        // Form sudah dikosongkan setelah submit sebelumnya: nama baru DITAMBAHKAN ke request yang sudah ada
+        if (isReq && OD.afterSubmit && odLastSubmit && odLastSubmit.tanggal === OD.tanggal && odLastSubmit.kode === OD.kode) {
+            if (!OD.req.length) return toast('Belum ada nama baru yang dicentang untuk request tambahan.', 'warn');
+            payload.req = mergeReq(odLastSubmit.req, OD.req);
+            payload.request = (+odLastSubmit.request || 0) + (+OD.request || 0);
+        }
         try {
-            const v = await call('orderSubmit', Object.assign(orderPayload(), { type: S.wa.type }));
-            OD = v; drawOrder();
+            const v = await call('orderSubmit', payload);
+            OD = v;
+            if (isReq) {
+                // Kosongkan checklist untuk request berikutnya. Data yang disubmit tetap tersimpan di server.
+                odLastSubmit = { tanggal: v.tanggal, kode: v.kode, req: (v.req || []).map(x => Object.assign({}, x)), request: v.request };
+                OD.req = []; OD.request = 0; OD.afterSubmit = true;
+                odSelectedDates = [OD.tanggal]; odQ = '';
+            }
+            drawOrder();
             toast(v.approvalStatus === 'APPROVED'
                 ? 'Request OS disubmit & otomatis Approved — langsung masuk Jadwal Employee & Absensi.'
                 : 'Request OS berhasil dikirim ke Supervisor untuk di-Approve!', 'ok');
         } catch (e) { fail(e); }
     }
+
+    // Setelah submit: tampilkan keterangan di atas form yang sudah dikosongkan
+    const drawOrderBase = drawOrder;
+    drawOrder = function () {
+        drawOrderBase();
+        if (OD && OD.afterSubmit && $('#odLeft')) {
+            $('#odLeft').insertAdjacentHTML('afterbegin',
+                '<div class="alert ok" style="display:flex;align-items:center;gap:8px;margin-top:0">' +
+                '<span class="material-symbols-outlined">check_circle</span>' +
+                '<span>Request OS berhasil disubmit' + (odLastSubmit ? ' (' + odLastSubmit.req.length + ' nama)' : '') + '. Form dikosongkan — centang nama lagi untuk request tambahan pada tanggal &amp; shift ini.</span></div>');
+        }
+    };
 
     async function approveOrder() {
         clearTimeout(odTimer); odDirty = false;
@@ -2129,7 +2192,7 @@
         S.rk = S.rk || { from: monday(S.master.today), to: addDays(monday(S.master.today), 6) };
         $('#view').innerHTML =
             '<div class="toolbar"><button class="btn sm" id="rkPrev" aria-label="Sebelumnya"><span class="material-symbols-outlined" style="font-size:16px">chevron_left</span></button><input type="date" id="rkFrom" value="' + S.rk.from + '"><span class="muted">s/d</span><input type="date" id="rkTo" value="' + S.rk.to + '"><button class="btn sm" id="rkNext" aria-label="Berikutnya"><span class="material-symbols-outlined" style="font-size:16px">chevron_right</span></button>' +
-            '<span class="spacer"></span><button class="btn sm primary" onclick="go(\'wa\')"><span class="material-symbols-outlined">edit_calendar</span> Buat Request OS</button><button class="btn sm" id="rkXls"><span class="material-symbols-outlined">download</span> Excel</button></div><div id="rkBody"><div class="empty">Memuat…</div></div>';
+            '<span class="spacer"></span><button class="btn sm primary" onclick="go(\'request_os\')"><span class="material-symbols-outlined">edit_calendar</span> Buat Request OS</button><button class="btn sm" id="rkXls"><span class="material-symbols-outlined">download</span> Excel</button></div><div id="rkBody"><div class="empty">Memuat…</div></div>';
         const shiftBy = d => { S.rk.from = addDays(S.rk.from, d); S.rk.to = addDays(S.rk.to, d); $('#rkFrom').value = S.rk.from; $('#rkTo').value = S.rk.to; loadRekap(); };
         $('#rkPrev').onclick = () => shiftBy(-7);
         $('#rkNext').onclick = () => shiftBy(7);
@@ -2157,7 +2220,7 @@
             '<div class="kpi"><div class="lbl">Total Hadir (Clock-In)</div><div class="val">' + t.hadir + '</div><div class="sub">dari ' + t.requestReal + ' Request MP</div></div>' +
             '</div>';
         if (!d.rows.length) {
-            h += '<div class="card empty"><div class="big"><span class="material-symbols-outlined">summarize</span></div><p>Belum ada Request OS atau jadwal pada rentang tanggal ini.</p><button class="btn primary" onclick="go(\'wa\')">Buka Request OS</button></div>';
+            h += '<div class="card empty"><div class="big"><span class="material-symbols-outlined">summarize</span></div><p>Belum ada Request OS atau jadwal pada rentang tanggal ini.</p><button class="btn primary" onclick="go(\'request_os\')">Buka Request OS</button></div>';
             $('#rkBody').innerHTML = h; return;
         }
         h += '<div class="card" style="padding:0;overflow:hidden"><div class="card-head" style="padding:16px 18px 12px;margin:0;border-bottom:1px solid var(--line)"><h2><span class="material-symbols-outlined" style="vertical-align:middle;margin-right:6px;color:var(--primary)">analytics</span>Ringkasan Rekap MPP per Shift</h2><span class="small muted">Klik baris untuk membuka Request OS</span></div>' +
@@ -2232,7 +2295,7 @@
         h += '</tbody></table></div></div>';
 
         $('#rkBody').innerHTML = h;
-        $$('.rk-row').forEach(tr => tr.onclick = () => { S.wa = { tanggal: tr.dataset.t, shift: tr.dataset.s, type: 'REQ' }; go('wa'); });
+        $$('.rk-row').forEach(tr => tr.onclick = () => { S.wa = { tanggal: tr.dataset.t, shift: tr.dataset.s, type: 'REQ' }; go('request_os'); });
         $$('[data-rk-abs]').forEach(btn => btn.onclick = () => {
             const p = btn.dataset.rkAbs.split('|');
             S.abs = { tanggal: p[0], shift: p[1] };
@@ -2487,7 +2550,7 @@
             '<label class="field"><span>Keterangan bila kurang</span><input name="wa_ket_kurang" value="' + esc(s.wa_ket_kurang) + '"></label></div>' +
             '<label class="field"><span>Pengisi nama kosong di request</span><input name="wa_vacant" value="' + esc(s.wa_vacant) + '"></label>' +
             '</details>' +
-            '<div class="row" style="margin-top:8px"><button class="btn primary">Simpan WhatsApp</button><button type="button" class="btn" onclick="go(\'wa\')">Buka halaman WA</button></div></form></div>' +
+            '<div class="row" style="margin-top:8px"><button class="btn primary">Simpan WhatsApp</button><button type="button" class="btn" onclick="go(\'request_os\')">Buka halaman WA</button></div></form></div>' +
 
             '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;margin-right:6px">group</span>Pengguna</h2><button class="btn sm primary" id="uAdd"><span class="material-symbols-outlined">person_add</span> Pengguna</button></div><div id="uList" class="table-wrap" style="border:0"></div></div>' +
             '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;margin-right:6px">history</span>Log aktivitas</h2><button class="btn sm" id="aLoad">Tampilkan 100 terakhir</button></div><div id="auList"></div></div>' + +
@@ -2604,7 +2667,9 @@
     /* =========================== APPROVAL REQUEST OS (DAFTAR NAMA & APPROVAL SUPERVISOR) =========================== */
     let reqAppFilter = 'ALL';
     async function renderReqApproval() {
-        $('#pageSub').textContent = 'Daftar Nama Karyawan Request OS & Status Approval Supervisor';
+        $('#pageSub').textContent = canApprove()
+            ? 'Daftar Nama Karyawan Request OS & Status Approval Supervisor'
+            : 'Pantau Request OS & status Approval Supervisor (hanya lihat)';
         $('#view').innerHTML =
             '<div class="toolbar">' +
             '<div class="seg">' +
@@ -2614,7 +2679,7 @@
             '<button type="button" data-ra-st="REJECTED" class="' + (reqAppFilter === 'REJECTED' ? 'on' : '') + '">Ditolak</button>' +
             '</div>' +
             '<span class="spacer"></span>' +
-            '<button type="button" class="btn sm primary" onclick="go(\'wa\')"><span class="material-symbols-outlined">add_circle</span> Buat / Edit Request OS</button>' +
+            '<button type="button" class="btn sm primary" onclick="go(\'request_os\')"><span class="material-symbols-outlined">add_circle</span> Buat / Edit Request OS</button>' +
             '<button type="button" class="btn sm ghost" onclick="go(\'jadwal\')"><span class="material-symbols-outlined">calendar_month</span> Jadwal Employee →</button>' +
             '</div>' +
             '<div id="raBody"><div class="empty">Memuat daftar Request OS…</div></div>';
@@ -2637,7 +2702,7 @@
 
         if (!items.length) {
             box.innerHTML = '<div class="card empty"><div class="big"><span class="material-symbols-outlined">inbox</span></div><p>Belum ada data Request OS pada filter ini.</p>' +
-                '<button class="btn primary" onclick="go(\'wa\')">Buat Request OS Baru</button></div>';
+                '<button class="btn primary" onclick="go(\'request_os\')">Buat Request OS Baru</button></div>';
             return;
         }
 
@@ -2712,7 +2777,7 @@
         $$('[data-ra-open]', box).forEach(b => b.onclick = () => {
             const [dt, sh] = b.dataset.raOpen.split('|');
             S.wa = { tanggal: dt, shift: sh, type: 'REQ' };
-            go('wa');
+            go('request_os');
         });
         $$('[data-ra-approve]', box).forEach(b => b.onclick = async () => {
             const [dt, sh] = b.dataset.raApprove.split('|');
@@ -2890,7 +2955,7 @@
 
     const RENDER = {
         dashboard: renderDashboard, absensi: renderAbsensi, jadwal_ieg: renderJadwalIeg, jadwal: renderJadwal,
-        wa: renderWa, req_approval: renderReqApproval,
+        request_os: renderWa, req_approval: renderReqApproval,
         operator: renderOperator, bagian: renderBagian, pengaturan: renderPengaturan, rekap: renderRekap,
         akses: renderAkses, maintenance: renderMaintenance
     };
@@ -2898,7 +2963,7 @@
     document.addEventListener('click', e => {
         const t = e.target.closest('[data-page],[data-menu],[data-theme-toggle],[data-close]');
         if (!t) return;
-        if (t.dataset.page) { e.preventDefault(); if (S.page === 'absensi') flushAbs(); if (S.page === 'wa') flushOrder(); go(t.dataset.page); }
+        if (t.dataset.page) { e.preventDefault(); if (S.page === 'absensi') flushAbs(); if (S.page === 'request_os') flushOrder(); go(t.dataset.page); }
         else if (t.hasAttribute('data-menu')) openSide(true);
         else if (t.hasAttribute('data-theme-toggle')) toggleTheme();
         else if (t.hasAttribute('data-close')) closeModal();

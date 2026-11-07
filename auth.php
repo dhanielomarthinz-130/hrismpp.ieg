@@ -53,12 +53,13 @@ function maintenance_on(): bool {
 
 // ---------------------------------------------------------------- Control Akses Menu
 // ID menu yang bisa diatur aksesnya (menu khusus super admin tidak termasuk).
-const MENU_IDS = ['dashboard', 'wa', 'req_approval', 'jadwal_ieg', 'absensi', 'jadwal', 'rekap', 'operator', 'bagian', 'pengaturan'];
+const MENU_IDS = ['dashboard', 'request_os', 'req_approval', 'jadwal_ieg', 'absensi', 'jadwal', 'rekap', 'operator', 'bagian', 'pengaturan'];
 
 /** Konfigurasi akses: ['roles' => [ROLE => [menu...]], 'users' => [username => [menu...]]] */
 function menu_access_config(): array {
     $raw = json_decode((string)get_setting('menu_access', ''), true);
-    $clean = fn($list) => array_values(array_intersect(MENU_IDS, is_array($list) ? $list : []));
+    // id lama 'wa' -> 'request_os'
+    $clean = fn($list) => array_values(array_intersect(MENU_IDS, array_map(fn($m) => $m === 'wa' ? 'request_os' : $m, is_array($list) ? $list : [])));
     $out = ['roles' => [], 'users' => []];
     foreach ((array)($raw['roles'] ?? []) as $r => $list) {
         $r = strtoupper((string)$r);
@@ -85,7 +86,7 @@ function menu_access_save(array $p, array $currentUser): array {
     $cfg = ['roles' => [], 'users' => []];
     foreach ((array)($p['roles'] ?? []) as $r => $list) {
         $r = strtoupper((string)$r);
-        if (in_array($r, ROLES, true)) $cfg['roles'][$r] = array_values(array_intersect(MENU_IDS, (array)$list));
+        if (in_array($r, ROLES, true)) $cfg['roles'][$r] = array_values(array_intersect(MENU_IDS, array_map(fn($m) => $m === 'wa' ? 'request_os' : $m, (array)$list)));
     }
     $hide = super_usernames();
     foreach ((array)($p['users'] ?? []) as $u => $list) {
