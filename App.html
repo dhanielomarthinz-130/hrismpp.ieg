@@ -1983,7 +1983,9 @@
         try {
             const v = await call('orderSubmit', Object.assign(orderPayload(), { type: S.wa.type }));
             OD = v; drawOrder();
-            toast('Request OS berhasil dikirim ke Supervisor untuk di-Approve!', 'ok');
+            toast(v.approvalStatus === 'APPROVED'
+                ? 'Request OS disubmit & otomatis Approved — langsung masuk Jadwal Employee & Absensi.'
+                : 'Request OS berhasil dikirim ke Supervisor untuk di-Approve!', 'ok');
         } catch (e) { fail(e); }
     }
 
@@ -2831,6 +2833,18 @@
         drawMaintenance(await call('maintenance', {}));
     }
 
+    function mtAutoApproveCard(on) {
+        return '<div class="card" style="max-width:760px">' +
+            '<div class="card-head"><h2><span class="material-symbols-outlined">verified</span>Approval Supervisor otomatis</h2>' +
+            '<span class="chip ' + (on ? 'ok' : '') + '">' + (on ? 'Aktif' : 'Nonaktif') + '</span></div>' +
+            '<p class="muted" style="margin-top:0">' + (on
+                ? 'Request OS yang disubmit langsung berstatus Approved dan otomatis masuk ke Jadwal Employee &amp; Absensi tanpa menunggu Supervisor.'
+                : 'Request OS yang disubmit menunggu Approval Supervisor terlebih dahulu sebelum masuk ke Jadwal Employee &amp; Absensi.') + '</p>' +
+            '<p class="small muted">Request OS yang sudah berstatus menunggu sebelum fitur ini diaktifkan tetap perlu di-Approve manual.</p>' +
+            '<button class="btn ' + (on ? '' : 'primary') + '" id="aaToggle"><span class="material-symbols-outlined">' + (on ? 'pause_circle' : 'verified') + '</span> ' +
+            (on ? 'Nonaktifkan approval otomatis' : 'Aktifkan approval otomatis') + '</button></div>';
+    }
+
     function drawMaintenance(d) {
         const on = !!d.aktif;
         const key = String(d.key || '');
@@ -2845,7 +2859,19 @@
             '<input readonly id="mtUrl" value="' + esc(url) + '"><button type="button" class="btn sm" id="mtCopy"><span class="material-symbols-outlined">content_copy</span> Salin</button></div>' +
             '<small>Buka alamat ini untuk menampilkan form login ketika maintenance aktif.</small></label>' +
             '<button class="btn ' + (on ? 'primary' : 'danger') + '" id="mtToggle"><span class="material-symbols-outlined">' + (on ? 'play_circle' : 'construction') + '</span> ' +
-            (on ? 'Nonaktifkan maintenance' : 'Aktifkan maintenance') + '</button></div>';
+            (on ? 'Nonaktifkan maintenance' : 'Aktifkan maintenance') + '</button></div>' +
+            mtAutoApproveCard(!!d.autoApprove);
+        $('#aaToggle').onclick = async () => {
+            const aa = !!d.autoApprove;
+            if (!aa && !await confirmBox('Aktifkan approval otomatis?', 'Setiap Request OS yang disubmit akan langsung Approved tanpa menunggu Supervisor, dan langsung masuk ke Jadwal Employee & Absensi.', 'Aktifkan', 'primary')) return;
+            try {
+                const r = await call('setAutoApprove', { aktif: !aa });
+                d.autoApprove = r.autoApprove;
+                S.master.autoApprove = r.autoApprove;
+                toast(r.autoApprove ? 'Approval Supervisor otomatis diaktifkan.' : 'Approval otomatis dimatikan. Request OS kembali menunggu Supervisor.', 'ok');
+                drawMaintenance(d);
+            } catch (e) { fail(e); }
+        };
         $('#mtCopy').onclick = async () => toast(await copyText(url) ? 'Alamat disalin.' : 'Gagal menyalin.', 'ok');
         $('#mtToggle').onclick = async () => {
             if (!on && !await confirmBox('Aktifkan maintenance?', 'Semua user selain super admin akan langsung dikeluarkan dan tidak bisa login.\nSimpan alamat login maintenance terlebih dahulu.', 'Aktifkan', 'danger')) return;

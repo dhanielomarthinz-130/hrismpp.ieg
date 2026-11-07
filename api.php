@@ -119,7 +119,14 @@ try {
         // Maintenance (khusus super admin)
         'maintenance'     => function () use ($user) {
             require_super($user);
-            return ['aktif' => maintenance_on(), 'key' => MAINTENANCE_KEY];
+            return ['aktif' => maintenance_on(), 'key' => MAINTENANCE_KEY, 'autoApprove' => auto_approve_on()];
+        },
+        'setAutoApprove'  => function () use ($payload, $user) {
+            require_super($user);
+            $on = !empty($payload['aktif']);
+            set_settings(['auto_approve' => $on ? '1' : '0']);
+            audit_log($user['username'], 'AUTO_APPROVE', $on ? 'Aktif' : 'Nonaktif');
+            return ['autoApprove' => $on];
         },
         'accessGet'       => function () use ($user) {
             require_super($user);
@@ -131,7 +138,7 @@ try {
             $on = !empty($payload['aktif']);
             set_settings(['maintenance' => $on ? '1' : '0']);
             audit_log($user['username'], 'MAINTENANCE', $on ? 'Aktif' : 'Nonaktif');
-            return ['aktif' => $on, 'key' => MAINTENANCE_KEY];
+            return ['aktif' => $on, 'key' => MAINTENANCE_KEY, 'autoApprove' => auto_approve_on()];
         },
 
         // Order MPP (WhatsApp & Approval Supervisor)

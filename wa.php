@@ -850,6 +850,8 @@ function order_submit(array $p, array $currentUser): array {
         }
     }
 
+    $autoApprove = $type === 'REQ' && auto_approve_on();
+
     foreach ($targetDates as $dt) {
         $pDate = $p;
         $pDate['tanggal'] = $dt;
@@ -859,21 +861,37 @@ function order_submit(array $p, array $currentUser): array {
         if ($type === 'REQ') {
             $data['req_submit_at'] = $now;
             $data['req_submit_by'] = $currentUser['username'];
-            // Masuk ke antrean Approval Supervisor terlebih dahulu sebelum masuk ke Jadwal Employee & Absensi
-            $data['approval_status'] = 'PENDING';
-            $data['approved_at'] = null;
-            $data['approved_by'] = null;
+            if ($autoApprove) {
+                // Approval Supervisor otomatis aktif: langsung APPROVED
+                $data['approval_status'] = 'APPROVED';
+                $data['approved_at'] = $now;
+                $data['approved_by'] = 'Otomatis';
+                $data['approval_note'] = 'Approval otomatis oleh sistem';
+            } else {
+                // Masuk ke antrean Approval Supervisor terlebih dahulu sebelum masuk ke Jadwal Employee & Absensi
+                $data['approval_status'] = 'PENDING';
+                $data['approved_at'] = null;
+                $data['approved_by'] = null;
+            }
         } else {
             $data['real_submit_at'] = $now;
             $data['real_submit_by'] = $currentUser['username'];
         }
         db_update('order_mpp', $data, 'tanggal = ? AND UPPER(shift) = ?', [$dt, $kode]);
 
+        if ($autoApprove) {
+            // Sama seperti Approve manual: langsung masuk Jadwal Employee & Absensi
+            $st = order_state_($dt, $kode);
+            sync_order_to_jadwal_($dt, $kode, $st['req'], $currentUser['username']);
+            write_rekap_mpp($dt, $kode, 'REQ', 'APPROVED', $currentUser['username']);
+            continue;
+        }
+
         // Update RekapMPP
         write_rekap_mpp($dt, $kode, $type, $type === 'REQ' ? 'MENUNGGU APPROVAL' : 'SUBMIT', $currentUser['username']);
     }
 
-    audit_log($currentUser['username'], "SUBMIT_$type", implode(',', $targetDates) . " $kode (PENDING APPROVAL)");
+    audit_log($currentUser['username'], "SUBMIT_$type", implode(',', $targetDates) . " $kode" . ($autoApprove ? ' (APPROVED OTOMATIS)' : ($type === 'REQ' ? ' (PENDING APPROVAL)' : '')));
 
     return order_view_($tanggal, $kode, $currentUser);
 }

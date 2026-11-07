@@ -99,6 +99,11 @@ function menu_access_save(array $p, array $currentUser): array {
     return $cfg;
 }
 
+/** Approval Supervisor otomatis: Request OS yang disubmit langsung berstatus APPROVED. */
+function auto_approve_on(): bool {
+    return (string)db_val("SELECT value FROM settings WHERE key_name = 'auto_approve'", [], '0') === '1';
+}
+
 /** Username semua akun super admin (untuk disembunyikan dari daftar/audit). */
 function super_usernames(): array {
     return array_map('strtolower', array_column(db_all("SELECT username FROM users WHERE UPPER(role) = ?", [ROLE_SUPER]), 'username'));
