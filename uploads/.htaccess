@@ -1,0 +1,30 @@
+# Folder upload: hanya gambar dengan nama acak yang boleh diakses. Tidak ada eksekusi skrip.
+Options -Indexes
+DirectoryIndex disabled
+
+# Tolak semua file secara bawaan
+<FilesMatch ".*">
+    Require all denied
+</FilesMatch>
+
+# Izinkan hanya foto dengan nama acak 32 hex
+<FilesMatch "^[a-f0-9]{32}\.(jpg|png|webp)$">
+    Require all granted
+</FilesMatch>
+
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set Content-Security-Policy "default-src 'none'; img-src 'self'; sandbox"
+</IfModule>
+
+# Jangan pernah jalankan skrip dari folder ini
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php8.c>
+    php_flag engine off
+</IfModule>
+RemoveHandler .php .phtml .php3 .php4 .php5 .php7 .php8 .phar .pl .py .cgi .sh

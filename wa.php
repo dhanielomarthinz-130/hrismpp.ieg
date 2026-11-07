@@ -458,7 +458,7 @@ function parse_req_names_from_row_(array $row, array $opById): array {
     $kode = strtoupper((string)($row['shift'] ?? 'S1'));
     $sh = $sMap[$kode] ?? ['mulai' => '08:00', 'selesai' => '16:00'];
     $defJam = $sh['mulai'] . '-' . $sh['selesai'];
-    $jamExtra = array_values(array_filter(explode(',', (string)($row['jam_extra'] ?? ''))));
+    $jamExtra = array_values(array_filter(explode(',', (string)($row['jam_extra'] ?? '')), fn($j) => (bool)preg_match('/^\d{2}:\d{2}-\d{2}:\d{2}$/', trim($j))));
 
     $items = [];
     if (!empty($row['req_ids'])) {
@@ -704,7 +704,7 @@ function sync_order_to_jadwal_(string $tanggal, string $kode, array $reqList, st
             $existingVacOps = db_all("SELECT id FROM operator WHERE UPPER(bagian) = ? AND UPPER(nama) LIKE '%VACANT%' ORDER BY id ASC", [$bKode]);
 
             while (count($existingVacOps) < $needQty) {
-                $maxNum = (int)db_val("SELECT MAX(CAST(SUBSTR(id, 3) AS INTEGER)) FROM operator WHERE id LIKE 'OP%'");
+                $maxNum = (int)substr(next_operator_id(), 2) - 1;
                 $newId = 'OP' . str_pad($maxNum + 1, 4, '0', STR_PAD_LEFT);
                 db_insert('operator', [
                     'id'        => $newId,
@@ -769,18 +769,58 @@ function order_get(array $p, array $currentUser): array {
     return order_view_($tanggal, $kode, $currentUser);
 }
 
+/** Hanya Admin / Supervisor / Leader (dan super admin) yang boleh mengubah Request OS. */
+function order_assert_writer_(array $u): void {
+    if (empty($u['super']) && !in_array($u['role'], ['ADMIN', 'SUPERVISOR', 'LEADER'], true)) {
+        throw new RuntimeException('Akses ditolak: Anda hanya dapat melihat Request OS.');
+    }
+}
+
+/** Bersihkan daftar request dari payload: id valid, qty vacant 1–50, bagian harus ada & boleh diedit user. */
+function order_clean_req_(array $reqList, array $u): array {
+    $ops = [];
+    foreach (db_all("SELECT id, bagian FROM operator") as $o) $ops[(string)$o['id']] = strtoupper((string)$o['bagian']);
+    $bags = [];
+    foreach (db_all("SELECT kode FROM bagian") as $b) $bags[strtoupper((string)$b['kode'])] = true;
+    $out = [];
+    foreach (array_slice($reqList, 0, 500) as $x) {
+        if (!is_array($x)) continue;
+        $id = trim((string)($x['id'] ?? ''));
+        if ($id === '') continue;
+        if (str_starts_with($id, 'VAC_')) {
+            $bag = strtoupper(substr($id, 4));
+            if (!isset($bags[$bag])) continue;
+        } else {
+            if (!isset($ops[$id])) continue;
+            $bag = $ops[$id];
+        }
+        if (!can_edit_bagian($u, $bag)) {
+            throw new RuntimeException("Anda tidak berhak menambahkan karyawan bagian $bag ke Request OS.");
+        }
+        $x['id'] = $id;
+        $x['qty'] = max(1, min(50, (int)($x['qty'] ?? 1)));
+        $x['jam'] = (string)($x['jam'] ?? '');
+        $out[] = $x;
+    }
+    return $out;
+}
+
 function order_save(array $p, array $currentUser): array {
+    order_assert_writer_($currentUser);
     $cur = current_shift_();
     $tanggal = !empty($p['tanggal']) ? (string)$p['tanggal'] : $cur['tanggal'];
     $kode = !empty($p['shift']) ? strtoupper((string)$p['shift']) : $cur['kode'];
     assert_editable_date($currentUser, $tanggal);
 
     $sMap = shift_map_();
-    $sh = $sMap[$kode] ?? ['mulai' => '08:00', 'selesai' => '16:00'];
+    if (!isset($sMap[$kode])) throw new InvalidArgumentException('Shift tidak valid.');
+    $sh = $sMap[$kode];
     $defJam = $sh['mulai'] . '-' . $sh['selesai'];
 
-    $jamExtra = array_values(array_filter(array_map('trim', $p['jamExtra'] ?? [])));
-    $reqList = is_array($p['req'] ?? null) ? $p['req'] : [];
+    $jamExtraIn = is_array($p['jamExtra'] ?? null) ? $p['jamExtra'] : [];
+    $jamExtra = array_values(array_unique(array_filter(array_map(fn($j) => trim((string)$j), $jamExtraIn),
+        fn($j) => (bool)preg_match('/^\d{2}:\d{2}-\d{2}:\d{2}$/', $j))));
+    $reqList = order_clean_req_(is_array($p['req'] ?? null) ? $p['req'] : [], $currentUser);
 
     // Format reqIds string (mendukung VAC_BAGIAN*QTY:JAM)
     $reqArr = [];
@@ -800,7 +840,7 @@ function order_save(array $p, array $currentUser): array {
     $realIds = is_array($p['realIds'] ?? null) ? implode(',', array_filter(array_map('trim', $p['realIds']))) : '';
 
     $now = date('Y-m-d H:i:s');
-    $ex = db_row("SELECT id, approval_status FROM order_mpp WHERE tanggal = ? AND UPPER(shift) = ?", [$tanggal, $kode]);
+    $ex = db_row("SELECT id, approval_status, req_ids FROM order_mpp WHERE tanggal = ? AND UPPER(shift) = ?", [$tanggal, $kode]);
 
     $data = [
         'tanggal'    => $tanggal,
@@ -821,9 +861,16 @@ function order_save(array $p, array $currentUser): array {
         db_insert('order_mpp', $data);
     }
 
-    // Hanya sinkronkan ke jadwal bila status sudah APPROVED
-    if ($ex && strtoupper((string)($ex['approval_status'] ?? '')) === 'APPROVED') {
-        sync_order_to_jadwal_($tanggal, $kode, $reqList, $currentUser['username']);
+    // Order yang sudah APPROVED: hanya disinkronkan ke jadwal bila daftar nama berubah.
+    // Bila yang mengubah bukan Supervisor (dan approval otomatis mati), status kembali PENDING.
+    if ($ex && strtoupper((string)($ex['approval_status'] ?? '')) === 'APPROVED'
+        && (string)($ex['req_ids'] ?? '') !== $reqIdsStr) {
+        if (can_approve_mpp($currentUser) || auto_approve_on()) {
+            sync_order_to_jadwal_($tanggal, $kode, $reqList, $currentUser['username']);
+        } else {
+            db_update('order_mpp', ['approval_status' => 'PENDING', 'approved_at' => null, 'approved_by' => null], 'id = ?', [$ex['id']]);
+            write_rekap_mpp($tanggal, $kode, 'REQ', 'MENUNGGU APPROVAL', $currentUser['username']);
+        }
     }
 
     return order_view_($tanggal, $kode, $currentUser);
@@ -1061,7 +1108,7 @@ function order_shared(array $p, array $currentUser): array {
             if ($curApp !== 'APPROVED') {
                 $data['approval_status'] = 'PENDING';
             } else {
-                sync_order_to_jadwal_($dt, $kode, $reqList, $currentUser['username']);
+                sync_order_to_jadwal_($dt, $kode, order_state_($dt, $kode)['req'], $currentUser['username']);
             }
         } else {
             $data['real_sent_at'] = $now;
@@ -1216,6 +1263,13 @@ function wa_status(array $p, array $currentUser): array {
 function rekap_mpp(array $p, array $currentUser): array {
     $from = !empty($p['from']) ? (string)$p['from'] : date('Y-m-d', strtotime('-7 days'));
     $to = !empty($p['to']) ? (string)$p['to'] : date('Y-m-d');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
+        throw new InvalidArgumentException('Rentang tanggal tidak valid.');
+    }
+    if ($from > $to) { [$from, $to] = [$to, $from]; }
+    if ((strtotime($to) - strtotime($from)) / 86400 > 366) {
+        throw new InvalidArgumentException('Rentang rekap maksimal 1 tahun.');
+    }
     $rawRows = db_all("SELECT * FROM rekap_mpp WHERE tanggal BETWEEN ? AND ? ORDER BY tanggal DESC, shift ASC", [$from, $to]);
 
     $sMap = shift_map_();

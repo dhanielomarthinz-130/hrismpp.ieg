@@ -57,3 +57,4 @@ jobs:
             README.md
             database.sql
             config.local.example.php
+            uploads/foto/**

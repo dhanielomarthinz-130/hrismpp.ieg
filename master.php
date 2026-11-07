@@ -128,7 +128,8 @@ function operators_(): array {
             'ket'      => (string)($r['ket'] ?? ''),
             'pola'     => (int)$r['pola'] === 5 ? 5 : 6,
             'employer' => (string)($r['employer'] ?? ''),
-            'role'     => (string)($r['role'] ?? '')
+            'role'     => (string)($r['role'] ?? ''),
+            'foto'     => foto_url($r['foto'] ?? '')
         ];
     }
 
@@ -147,8 +148,8 @@ function kode_list_(): array {
     $rows = db_all("SELECT * FROM kode_jadwal ORDER BY urutan ASC, kode ASC");
     $out = [];
     foreach ($rows as $r) {
-        $mulai = (string)($r['mulai'] ?? '');
-        $selesai = (string)($r['selesai'] ?? '');
+        $mulai = preg_match('/^\d{2}:\d{2}$/', (string)($r['mulai'] ?? '')) ? (string)$r['mulai'] : '';
+        $selesai = preg_match('/^\d{2}:\d{2}$/', (string)($r['selesai'] ?? '')) ? (string)$r['selesai'] : '';
         $hasTime = preg_match('/^\d{2}:\d{2}$/', $mulai) && preg_match('/^\d{2}:\d{2}$/', $selesai);
         $s = $hasTime ? time_to_min($mulai) : null;
         $e = $hasTime ? time_to_min($selesai) : null;
@@ -165,7 +166,7 @@ function kode_list_(): array {
             'jam'      => (float)$r['jam'],
             'kerja'    => (int)$r['kerja'] === 1,
             'shift'    => strtoupper((string)($r['shift'] ?? '')),
-            'warna'    => (string)($r['warna'] ?: '#FFFFFF'),
+            'warna'    => preg_match('/^#[0-9A-Fa-f]{6}$/', (string)($r['warna'] ?? '')) ? (string)$r['warna'] : '#FFFFFF',
             'urutan'   => (int)$r['urutan']
         ];
     }
@@ -461,7 +462,7 @@ function save_operator(array $p, array $currentUser): array {
 
     $isNew = !$ex;
     if ($isNew) {
-        $maxNum = (int)db_val("SELECT MAX(CAST(SUBSTR(id, 3) AS INTEGER)) FROM operator WHERE id LIKE 'OP%'");
+        $maxNum = (int)substr(next_operator_id(), 2) - 1;
         $id = 'OP' . str_pad($maxNum + 1, 4, '0', STR_PAD_LEFT);
     }
 
@@ -496,6 +497,11 @@ function save_operator(array $p, array $currentUser): array {
     return ['id' => $id];
 }
 
+/** Lepas tautan user yang menunjuk ke operator yang dihapus. */
+function db_exec_unlink_operator_(string $id): void {
+    db_update('users', ['operator_id' => ''], 'operator_id = ?', [$id]);
+}
+
 function delete_operator(array $p, array $currentUser): array {
     $id = trim((string)($p['id'] ?? ''));
     $row = db_row("SELECT * FROM operator WHERE id = ?", [$id]);
@@ -511,6 +517,8 @@ function delete_operator(array $p, array $currentUser): array {
     }
 
     db_delete('operator', 'id = ?', [$id]);
+    db_exec_unlink_operator_($id);
+    foto_delete_file($row['foto'] ?? '');
     audit_log($currentUser['username'], 'HAPUS_OPERATOR', $id . ' ' . $row['nama']);
     return ['mode' => 'hapus'];
 }
@@ -598,18 +606,33 @@ function kode_simpan(array $p, array $currentUser): bool {
     if (!is_array($kodes)) throw new InvalidArgumentException('Data kode tidak valid.');
 
     foreach ($kodes as $k) {
+        if (!is_array($k)) continue;
         $kode = strtoupper(trim((string)($k['kode'] ?? '')));
         if (!$kode) continue;
+        if (!preg_match('/^[A-Z0-9_]{1,10}$/', $kode)) {
+            throw new InvalidArgumentException("Kode jadwal \"$kode\" tidak valid (huruf/angka, maks 10 karakter).");
+        }
+        $mulai = trim((string)($k['mulai'] ?? ''));
+        $selesai = trim((string)($k['selesai'] ?? ''));
+        foreach ([$mulai, $selesai] as $t) {
+            if ($t !== '' && !preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $t)) {
+                throw new InvalidArgumentException("Jam pada kode $kode harus berformat HH:MM.");
+            }
+        }
+        $warna = trim((string)($k['warna'] ?? ''));
+        if (!preg_match('/^#[0-9A-Fa-f]{6}$/', $warna)) $warna = '#FFFFFF';
+        $shift = strtoupper(trim((string)($k['shift'] ?? '')));
+        if (!in_array($shift, ['', 'S1', 'S2'], true) && !preg_match('/^[A-Z0-9_]{1,10}$/', $shift)) $shift = '';
         $ex = db_row("SELECT * FROM kode_jadwal WHERE kode = ?", [$kode]);
         $data = [
-            'label'   => (string)($k['label'] ?: $kode),
-            'nama'    => (string)($k['nama'] ?: $kode),
-            'mulai'   => (string)($k['mulai'] ?? ''),
-            'selesai' => (string)($k['selesai'] ?? ''),
-            'jam'     => (float)($k['jam'] ?? 8.0),
+            'label'   => mb_substr(trim((string)($k['label'] ?? '')) ?: $kode, 0, 20),
+            'nama'    => mb_substr(trim((string)($k['nama'] ?? '')) ?: $kode, 0, 60),
+            'mulai'   => $mulai,
+            'selesai' => $selesai,
+            'jam'     => max(0, min(24, (float)($k['jam'] ?? 8.0))),
             'kerja'   => !empty($k['kerja']) ? 1 : 0,
-            'shift'   => strtoupper((string)($k['shift'] ?? '')),
-            'warna'   => (string)($k['warna'] ?: '#FFFFFF'),
+            'shift'   => $shift,
+            'warna'   => strtoupper($warna),
             'urutan'  => (int)($k['urutan'] ?? 99)
         ];
         if ($ex) {

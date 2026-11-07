@@ -3,12 +3,13 @@
  * api.php : Router API pusat untuk request JSON dari frontend.
  */
 header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Token');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('X-Content-Type-Options: nosniff');
+header('Cache-Control: no-store');
+header('Referrer-Policy: same-origin');
+// Tanpa header CORS: API hanya untuk halaman aplikasi ini sendiri (same-origin)
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
+    http_response_code(204);
     exit;
 }
 
@@ -19,6 +20,7 @@ require_once __DIR__ . '/master.php';
 require_once __DIR__ . '/absensi.php';
 require_once __DIR__ . '/mingguan.php';
 require_once __DIR__ . '/wa.php';
+require_once __DIR__ . '/export.php';
 
 // Tangkap input JSON
 $rawInput = file_get_contents('php://input');
@@ -44,7 +46,7 @@ if (!$token && isset($_SERVER['HTTP_AUTHORIZATION'])) {
     }
 }
 if (!$token) {
-    $token = $payload['token'] ?? $_GET['token'] ?? '';
+    $token = (string)($payload['token'] ?? '');
 }
 
 try {
@@ -68,6 +70,11 @@ try {
 
     // Aksi di bawah ini memerlukan otentikasi login
     $user = auth_check($token);
+
+    // Akun yang wajib ganti password hanya boleh mengakses aksi berikut
+    if (!empty($user['mustChange']) && !in_array($action, ['changePassword', 'logout', 'me', 'master'], true)) {
+        throw new RuntimeException('Silakan ganti password Anda terlebih dahulu.');
+    }
 
     $admin = function (callable $fn) use ($user) {
         return function () use ($fn, $user) { require_admin($user); return $fn(); };
@@ -98,7 +105,9 @@ try {
         'mingguSalin'     => fn() => jadwal_salin($payload, $user),
         'mingguKunci'     => fn() => jadwal_kunci($payload, $user),
         'setJadwal'       => fn() => set_jadwal_cell($payload, $user),
-        'kodeSimpan'      => fn() => kode_simpan($payload, $user),
+        'kodeSimpan'      => $admin(fn() => kode_simpan($payload, $user)),
+        'mingguExcel'     => fn() => minggu_export($payload, $user),
+        'mingguImport'    => fn() => minggu_import($payload, $user),
 
         // Master Operator & Bagian
         'saveOperator'    => $admin(fn() => save_operator($payload, $user)),
@@ -115,6 +124,10 @@ try {
         'saveUser'        => $admin(fn() => save_user($payload, $user)),
         'deleteUser'      => $admin(fn() => delete_user((string)($payload['username'] ?? ''), $user)),
         'audit'           => $admin(fn() => get_audit($user)),
+
+        // Foto profil (user sendiri) & foto operator (Admin/Supervisor)
+        'fotoProfil'      => fn() => profile_set_foto($user, isset($payload['data']) ? (string)$payload['data'] : null),
+        'fotoOperator'    => $admin(fn() => operator_set_foto((string)($payload['id'] ?? ''), isset($payload['data']) ? (string)$payload['data'] : null, $user)),
 
         // Maintenance (khusus super admin)
         'maintenance'     => function () use ($user) {
@@ -151,6 +164,9 @@ try {
         'orderReject'     => fn() => order_reject($payload, $user),
         'orderShared'     => fn() => order_shared($payload, $user),
         'rekapMpp'        => fn() => rekap_mpp($payload, $user),
+        'rekapExcel'      => fn() => rekap_export($payload, $user),
+        'botToken'        => $admin(fn() => bot_token_new($user)),
+        'waGroups'        => $admin(fn() => []), // daftar grup hanya tersedia lewat bot WhatsApp eksternal
         'waStatus'        => fn() => wa_status($payload, $user),
         'waLog'           => fn() => wa_log($payload, $user),
         'waAuto'          => function () use ($payload, $user) {
@@ -170,10 +186,15 @@ try {
 
 } catch (Throwable $e) {
     $isAuthErr = !empty($e->auth) || ($e->getMessage() === 'Sesi berakhir, silakan login ulang.');
+    // Pesan validasi/bisnis aman ditampilkan; error internal (database, PHP) hanya dicatat di log server
+    $safe = ($e instanceof InvalidArgumentException || $e instanceof RuntimeException) && !($e instanceof PDOException);
+    if (!$safe) {
+        error_log('[HRIS API] ' . $action . ': ' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+    }
     http_response_code($isAuthErr ? 401 : 400);
     echo json_encode([
         'ok'    => false,
-        'error' => $e->getMessage(),
+        'error' => $safe ? $e->getMessage() : 'Terjadi kesalahan pada server. Silakan coba lagi atau hubungi Admin.',
         'auth'  => $isAuthErr
     ]);
 }

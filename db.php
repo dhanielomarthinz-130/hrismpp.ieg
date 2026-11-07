@@ -278,17 +278,36 @@ function init_db_tables(PDO $pdo, string $driver): void {
         locked_by VARCHAR(50) NOT NULL
     );");
 
+    // Pembatasan percobaan login (anti brute-force)
+    $pdo->exec("CREATE TABLE IF NOT EXISTS login_attempts (
+        id $autoInc,
+        kunci VARCHAR(80) NOT NULL,
+        waktu VARCHAR(30) NOT NULL
+    );");
+
+    // Auto-migrate kolom foto profil & tautan user -> operator
+    $addCol = function (string $table, string $col, string $def) use ($pdo, $isSqlite) {
+        try {
+            $cols = $isSqlite
+                ? array_column($pdo->query("PRAGMA table_info($table)")->fetchAll(), 'name')
+                : array_column($pdo->query("SHOW COLUMNS FROM $table")->fetchAll(), 'Field');
+            if (!in_array($col, $cols, true)) {
+                $pdo->exec("ALTER TABLE $table ADD COLUMN $col $def");
+            }
+        } catch (Throwable $e) {
+            error_log("Migrasi kolom $table.$col gagal: " . $e->getMessage());
+        }
+    };
+    $addCol('users', 'foto', 'VARCHAR(80) NULL');
+    $addCol('users', 'operator_id', 'VARCHAR(30) NULL');
+    $addCol('operator', 'foto', 'VARCHAR(80) NULL');
+
     // Seeding data awal bila tabel users kosong
     $userCount = (int)$pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
     if ($userCount === 0) {
         seed_default_data($pdo);
     } else {
-        // Pastikan akun Supervisor tersedia dan nama aplikasi terbaru diterapkan
-        $spvExists = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE LOWER(username) = 'supervisor'")->fetchColumn();
-        if ($spvExists === 0) {
-            $stmtSpv = $pdo->prepare("INSERT INTO users (username, nama, role, bagian, password_hash, aktif, must_change) VALUES (?, ?, ?, ?, ?, 1, 0)");
-            $stmtSpv->execute(['supervisor', 'Supervisor Inventory', 'SUPERVISOR', '', password_hash('spv123', PASSWORD_DEFAULT)]);
-        }
+        // Catatan keamanan: akun bawaan TIDAK dibuat ulang bila sudah dihapus admin.
         $pdo->exec("UPDATE settings SET value = 'HRIS Inventory PT.Inovasi Eka Gemilang' WHERE key_name = 'app_nama' AND value IN ('HRIS MPP — IEG', 'HRIS PP Inventory PT.Inovasi Eka Gemilang')");
     }
 
@@ -321,6 +340,16 @@ function init_db_tables(PDO $pdo, string $driver): void {
     }
 }
 
+/** ID operator berikutnya (OP0001, OP0002, …) — dihitung di PHP agar jalan di SQLite & MySQL. */
+function next_operator_id(): string {
+    $max = 0;
+    foreach (db_all("SELECT id FROM operator WHERE id LIKE 'OP%'") as $r) {
+        $n = (int)substr((string)$r['id'], 2);
+        if ($n > $max) $max = $n;
+    }
+    return 'OP' . str_pad((string)($max + 1), 4, '0', STR_PAD_LEFT);
+}
+
 /** Daftar employer yang diizinkan. */
 const EMPLOYERS = ['IEG', 'RKA'];
 
@@ -335,9 +364,9 @@ function normalize_employer($v): string {
 function seed_default_data(PDO $pdo): void {
     // 1. Akun Pengguna Bawaan (admin, supervisor & leader)
     $stmt = $pdo->prepare("INSERT INTO users (username, nama, role, bagian, password_hash, aktif, must_change) VALUES (?, ?, ?, ?, ?, 1, ?)");
-    $stmt->execute(['admin', 'Administrator', 'ADMIN', '', password_hash('admin123', PASSWORD_DEFAULT), 0]);
-    $stmt->execute(['supervisor', 'Supervisor Inventory', 'SUPERVISOR', '', password_hash('spv123', PASSWORD_DEFAULT), 0]);
-    $stmt->execute(['leader', 'Leader / PIC Shift', 'LEADER', '', password_hash('leader123', PASSWORD_DEFAULT), 0]);
+    $stmt->execute(['admin', 'Administrator', 'ADMIN', '', password_hash('admin123', PASSWORD_DEFAULT), 1]);
+    $stmt->execute(['supervisor', 'Supervisor Inventory', 'SUPERVISOR', '', password_hash('spv123', PASSWORD_DEFAULT), 1]);
+    $stmt->execute(['leader', 'Leader / PIC Shift', 'LEADER', '', password_hash('leader123', PASSWORD_DEFAULT), 1]);
 
     // 2. Shift Bawaan
     $stmt = $pdo->prepare("INSERT INTO shift (kode, nama, mulai, selesai, kirim, urutan, kirim_req) VALUES (?, ?, ?, ?, ?, ?, ?)");

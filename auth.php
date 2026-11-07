@@ -3,6 +3,7 @@
  * auth.php : Otentikasi pengguna, token sesi, ganti password, kelola user, dan audit trail.
  */
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/foto.php';
 
 // Peran yang boleh dipilih/dikelola lewat menu Pengaturan. SUPERADMIN sengaja tidak termasuk.
 const ROLES = ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'];
@@ -27,6 +28,8 @@ function public_user(array $row): array {
         'role'     => $isSuper ? 'ADMIN' : $role,
         'bagian'   => $isSuper ? [] : $bagianList,
         'super'    => $isSuper,
+        'foto'       => foto_url(user_foto_name($row)),
+        'operatorId' => $isSuper ? '' : (string)($row['operator_id'] ?? ''),
     ];
 }
 
@@ -139,25 +142,34 @@ function login(string $username, string $password): array {
         throw new InvalidArgumentException('Username dan password wajib diisi.');
     }
 
-    $row = db_row("SELECT * FROM users WHERE LOWER(username) = ?", [$username]);
-    if (!$row || (int)$row['aktif'] !== 1) {
+    if (mb_strlen($password) > 200) {
         throw new RuntimeException('Username atau password salah.');
     }
 
-    // Saat maintenance aktif, hanya super admin yang boleh masuk
+    $ip = (string)($_SERVER['REMOTE_ADDR'] ?? 'cli');
+    login_throttle_check_($username, $ip);
+
+    $row = db_row("SELECT * FROM users WHERE LOWER(username) = ?", [$username]);
+    $ok = false;
+    if ($row && (int)$row['aktif'] === 1) {
+        $ok = password_matches_($password, (string)$row['password_hash'], (int)$row['id']);
+    } else {
+        // Samakan waktu respons agar tidak bisa menebak username yang ada
+        password_verify($password, '$2y$10$abcdefghijklmnopqrstuuG2Jp3rEw2tVhPjm6gG1yDtd8m0uuq3m');
+    }
+    if (!$ok) {
+        login_fail_($username, $ip);
+        throw new RuntimeException('Username atau password salah.');
+    }
+    login_clear_($username);
+
+    // Saat maintenance aktif, hanya super admin yang boleh masuk (dicek setelah password benar)
     if (maintenance_on() && strtoupper((string)$row['role']) !== ROLE_SUPER) {
         throw new RuntimeException('Sistem sedang dalam maintenance. Silakan coba lagi nanti.');
     }
 
-    // Cek password hash
-    if (!password_verify($password, $row['password_hash'])) {
-        // Fallback untuk password lama bila ada plain text/md5 dari sheet
-        if ($password !== $row['password_hash'] && md5($password) !== $row['password_hash']) {
-            throw new RuntimeException('Username atau password salah.');
-        }
-        // Rehash password ke bcrypt bila cocok dengan fallback
-        db_update('users', ['password_hash' => password_hash($password, PASSWORD_DEFAULT)], 'id = ?', [$row['id']]);
-    }
+    // Bersihkan sesi kedaluwarsa
+    db_query("DELETE FROM user_tokens WHERE expires_at < ?", [date('Y-m-d H:i:s')]);
 
     $token = bin2hex(random_bytes(32));
     $now = date('Y-m-d H:i:s');
@@ -181,13 +193,60 @@ function login(string $username, string $password): array {
     ];
 }
 
+/**
+ * Cocokkan password. Hash modern (bcrypt/argon) wajib lewat password_verify.
+ * Format lama (md5 32-hex / teks biasa) hanya diterima bila kolom BUKAN hash modern —
+ * mencegah login dengan mengirim string hash itu sendiri sebagai password.
+ */
+function password_matches_(string $password, string $hash, int $userId): bool {
+    $info = password_get_info($hash);
+    if (!empty($info['algo'])) {
+        if (!password_verify($password, $hash)) return false;
+        if (password_needs_rehash($hash, PASSWORD_DEFAULT)) {
+            db_update('users', ['password_hash' => password_hash($password, PASSWORD_DEFAULT)], 'id = ?', [$userId]);
+        }
+        return true;
+    }
+    if ($hash === '' || $hash[0] === '$') return false;
+    $legacyOk = (strlen($hash) === 32 && ctype_xdigit($hash))
+        ? hash_equals(strtolower($hash), md5($password))
+        : hash_equals($hash, $password);
+    if ($legacyOk) {
+        db_update('users', ['password_hash' => password_hash($password, PASSWORD_DEFAULT)], 'id = ?', [$userId]);
+    }
+    return $legacyOk;
+}
+
+const LOGIN_MAX_USER = 5;    // gagal per username per 15 menit
+const LOGIN_MAX_IP   = 20;   // gagal per IP per 15 menit
+
+function login_throttle_check_(string $username, string $ip): void {
+    $since = date('Y-m-d H:i:s', time() - 900);
+    db_query("DELETE FROM login_attempts WHERE waktu < ?", [date('Y-m-d H:i:s', time() - 86400)]);
+    $u = (int)db_val("SELECT COUNT(*) FROM login_attempts WHERE kunci = ? AND waktu >= ?", ['u:' . $username, $since]);
+    $i = (int)db_val("SELECT COUNT(*) FROM login_attempts WHERE kunci = ? AND waktu >= ?", ['ip:' . $ip, $since]);
+    if ($u >= LOGIN_MAX_USER || $i >= LOGIN_MAX_IP) {
+        throw new RuntimeException('Terlalu banyak percobaan login yang gagal. Silakan coba lagi dalam 15 menit.');
+    }
+}
+
+function login_fail_(string $username, string $ip): void {
+    $now = date('Y-m-d H:i:s');
+    db_insert('login_attempts', ['kunci' => 'u:' . mb_substr($username, 0, 70), 'waktu' => $now]);
+    db_insert('login_attempts', ['kunci' => 'ip:' . mb_substr($ip, 0, 70), 'waktu' => $now]);
+}
+
+function login_clear_(string $username): void {
+    db_query("DELETE FROM login_attempts WHERE kunci = ?", ['u:' . $username]);
+}
+
 function auth_check(?string $token): array {
     if (!$token) {
         throw new AuthException('Sesi berakhir, silakan login ulang.');
     }
 
     $now = date('Y-m-d H:i:s');
-    $sess = db_row("SELECT t.*, u.username, u.nama, u.role, u.bagian, u.aktif, u.must_change 
+    $sess = db_row("SELECT t.*, u.username, u.nama, u.role, u.bagian, u.aktif, u.must_change, u.foto, u.operator_id 
                     FROM user_tokens t 
                     JOIN users u ON t.user_id = u.id 
                     WHERE t.token = ? AND t.expires_at > ?", [$token, $now]);
@@ -205,7 +264,9 @@ function auth_check(?string $token): array {
     $newExpires = date('Y-m-d H:i:s', time() + SESSION_LIFETIME);
     db_update('user_tokens', ['expires_at' => $newExpires], 'token = ?', [$token]);
 
-    return public_user($sess);
+    $u = public_user($sess);
+    $u['mustChange'] = (int)$sess['must_change'] === 1;
+    return $u;
 }
 
 function logout(?string $token, array $currentUser): bool {
@@ -217,8 +278,11 @@ function logout(?string $token, array $currentUser): bool {
 }
 
 function change_password(array $currentUser, string $oldPw, string $newPw): bool {
-    if (mb_strlen($newPw) < 6) {
-        throw new InvalidArgumentException('Password baru minimal 6 karakter.');
+    if (mb_strlen($newPw) < 8) {
+        throw new InvalidArgumentException('Password baru minimal 8 karakter.');
+    }
+    if (mb_strlen($newPw) > 200) {
+        throw new InvalidArgumentException('Password terlalu panjang.');
     }
     if ($newPw === $oldPw) {
         throw new InvalidArgumentException('Password baru harus berbeda dari yang lama.');
@@ -249,6 +313,7 @@ function list_users(): array {
         $u['aktif'] = (int)$r['aktif'] === 1;
         $u['mustChange'] = (int)$r['must_change'] === 1;
         $u['lastLogin'] = (string)($r['last_login'] ?? '');
+        $u['operatorId'] = (string)($r['operator_id'] ?? '');
         $out[] = $u;
     }
     return $out;
@@ -276,12 +341,19 @@ function save_user(array $p, array $currentUser): bool {
 
     if ($isNew && isset($p['isNew']) && $p['isNew'] === false) throw new RuntimeException('Pengguna tidak ditemukan.');
     if (!$isNew && isset($p['isNew']) && $p['isNew'] === true) throw new RuntimeException('Username sudah dipakai.');
-    if ($isNew && mb_strlen((string)($p['password'] ?? '')) < 6) throw new RuntimeException('Password awal minimal 6 karakter.');
+    if ($isNew && mb_strlen((string)($p['password'] ?? '')) < 8) throw new RuntimeException('Password awal minimal 8 karakter.');
+    if (!empty($p['password']) && mb_strlen((string)$p['password']) < 8) throw new RuntimeException('Password minimal 8 karakter.');
     if (!$isNew && $username === strtolower($currentUser['username']) && $role !== 'ADMIN') {
         throw new RuntimeException('Tidak bisa menurunkan peran akun sendiri.');
     }
 
     $nama = trim((string)($p['nama'] ?? '')) ?: $username;
+
+    // Tautan ke data operator (foto profil user = foto operator tersebut)
+    $operatorId = trim((string)($p['operatorId'] ?? ''));
+    if ($operatorId !== '' && !db_val("SELECT COUNT(*) FROM operator WHERE id = ?", [$operatorId])) {
+        throw new InvalidArgumentException('Operator yang ditautkan tidak ditemukan.');
+    }
     $aktif = isset($p['aktif']) && ($p['aktif'] === false || $p['aktif'] === 0 || $p['aktif'] === '0') ? 0 : 1;
 
     if ($isNew) {
@@ -294,15 +366,17 @@ function save_user(array $p, array $currentUser): bool {
             'password_hash' => password_hash($newPw, PASSWORD_DEFAULT),
             'aktif'         => $aktif,
             'must_change'   => 1,
-            'last_login'    => ''
+            'last_login'    => '',
+            'operator_id'   => $operatorId
         ]);
         audit_log($currentUser['username'], 'TAMBAH_USER', "$username ($role)");
     } else {
         $data = [
-            'nama'   => $nama,
-            'role'   => $role,
-            'bagian' => $bagianStr,
-            'aktif'  => $aktif,
+            'nama'        => $nama,
+            'role'        => $role,
+            'bagian'      => $bagianStr,
+            'aktif'       => $aktif,
+            'operator_id' => $operatorId,
         ];
         if (!empty($p['password'])) {
             $data['password_hash'] = password_hash((string)$p['password'], PASSWORD_DEFAULT);
@@ -326,6 +400,7 @@ function delete_user(string $username, array $currentUser): bool {
 
     db_delete('user_tokens', 'user_id = ?', [$row['id']]);
     db_delete('users', 'id = ?', [$row['id']]);
+    foto_delete_file($row['foto'] ?? '');
     audit_log($currentUser['username'], 'HAPUS_USER', $username);
     return true;
 }

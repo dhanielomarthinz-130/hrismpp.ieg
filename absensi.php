@@ -7,7 +7,10 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/master.php';
 
 function assert_editable_date(array $user, string $tanggal): void {
-    if ($user['role'] === 'ADMIN') return;
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $tanggal) || !strtotime($tanggal)) {
+        throw new InvalidArgumentException('Tanggal tidak valid.');
+    }
+    if (!empty($user['super']) || in_array($user['role'], ['ADMIN', 'SUPERVISOR'], true)) return;
     $diffDays = (int)round((strtotime($tanggal) - strtotime(date('Y-m-d'))) / 86400);
     if ($diffDays > 1 || $diffDays < -1) {
         throw new RuntimeException('Leader hanya bisa mengubah data kemarin, hari ini, atau besok. Hubungi Admin.');
@@ -82,7 +85,7 @@ function get_absensi(array $p, array $currentUser): array {
             foreach ($vacByBag as $bKode => $needQty) {
                 $existingVacOps = db_all("SELECT * FROM operator WHERE UPPER(bagian) = ? AND UPPER(nama) LIKE '%VACANT%' ORDER BY id ASC", [$bKode]);
                 while (count($existingVacOps) < $needQty) {
-                    $maxNum = (int)db_val("SELECT MAX(CAST(SUBSTR(id, 3) AS INTEGER)) FROM operator WHERE id LIKE 'OP%'");
+                    $maxNum = (int)substr(next_operator_id(), 2) - 1;
                     $newId = 'OP' . str_pad($maxNum + 1, 4, '0', STR_PAD_LEFT);
                     $newRow = [
                         'id'        => $newId,
@@ -312,13 +315,14 @@ function add_to_shift(array $p, array $currentUser): bool {
 
     $op = db_row("SELECT * FROM operator WHERE id = ?", [$id]);
     if (!$op) throw new RuntimeException('Operator tidak ditemukan.');
+    if (!isset(kode_map_()[$kode])) throw new InvalidArgumentException('Shift tidak valid.');
 
     $bt = strtoupper(trim((string)($p['bagianTugas'] ?? ''))) ?: strtoupper($op['bagian']);
-    if (!can_edit_bagian($currentUser, $bt)) {
-        throw new RuntimeException("Anda tidak berhak menambah operator ke bagian $bt.");
+    if (!can_edit_bagian($currentUser, $bt) || !can_edit_bagian($currentUser, $op['bagian'])) {
+        throw new RuntimeException("Anda tidak berhak menambah operator ini ke bagian $bt.");
     }
 
-    $ket = trim((string)($p['ket'] ?? '')) ?: 'Ditambahkan dari absensi';
+    $ket = mb_substr(trim((string)($p['ket'] ?? '')) ?: 'Ditambahkan dari absensi', 0, 200);
 
     // Upsert jadwal
     $ex = db_row("SELECT id FROM jadwal WHERE tanggal = ? AND operator_id = ?", [$tanggal, $id]);
@@ -394,14 +398,21 @@ function fill_vacant_slot(array $p, array $currentUser): array {
     assert_editable_date($currentUser, $tanggal);
 
     $vacOp = $vacId !== '' ? db_row("SELECT * FROM operator WHERE id = ?", [$vacId]) : null;
-    if ($bagian === '' && $vacOp) {
-        $bagian = strtoupper((string)$vacOp['bagian']);
+    // Slot yang diisi harus benar-benar operator VACANT
+    if (!$vacOp || stripos((string)$vacOp['nama'], 'vacant') === false) {
+        throw new InvalidArgumentException('Slot Vacant tidak ditemukan.');
     }
-    if ($bagian === '') {
-        $bagian = 'INBOUND';
-    }
+    $bagian = strtoupper((string)$vacOp['bagian']);
     if (!can_edit_bagian($currentUser, $bagian)) {
         throw new RuntimeException("Anda tidak berhak mengubah data bagian $bagian.");
+    }
+    if (mb_strlen($namaBaru) > 100) {
+        throw new InvalidArgumentException('Nama karyawan terlalu panjang.');
+    }
+    // Bila nama cocok dengan operator yang sudah ada, Leader harus berhak atas bagian operator tersebut
+    $dupOp = db_row("SELECT bagian FROM operator WHERE UPPER(TRIM(nama)) = ? AND UPPER(nama) NOT LIKE '%VACANT%' LIMIT 1", [$namaBaru]);
+    if ($dupOp && !can_edit_bagian($currentUser, $dupOp['bagian'])) {
+        throw new RuntimeException('Karyawan dengan nama tersebut terdaftar di bagian lain. Hubungi Admin.');
     }
 
     $now = date('Y-m-d H:i:s');
@@ -416,7 +427,7 @@ function fill_vacant_slot(array $p, array $currentUser): array {
                 db_update('operator', ['aktif' => 1], 'id = ?', [$targetOpId]);
             }
         } else {
-            $maxNum = (int)db_val("SELECT MAX(CAST(SUBSTR(id, 3) AS INTEGER)) FROM operator WHERE id LIKE 'OP%'");
+            $maxNum = (int)substr(next_operator_id(), 2) - 1;
             $targetOpId = 'OP' . str_pad($maxNum + 1, 4, '0', STR_PAD_LEFT);
             db_insert('operator', [
                 'id'        => $targetOpId,

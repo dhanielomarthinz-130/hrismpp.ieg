@@ -281,7 +281,7 @@
         $('#sideAppName').textContent = 'HRIS Inventory'; document.title = name;
         $('#sideUser').textContent = S.user.nama;
         $('#sideRole').textContent = S.user.role + (S.user.bagian.length ? ' · ' + S.user.bagian.join(', ') : '');
-        $('#sideAvatar').textContent = (S.user.nama || 'U').charAt(0).toUpperCase();
+        renderSideAvatar();
         let sec = '';
         $('#sideNav').innerHTML = allowedPages().map(p => {
             let h = '';
@@ -293,6 +293,7 @@
             '<a data-menu><span class="ico">' + ICONS.menu + '</span>Menu</a>';
         updateShiftChip();
         updateMtChip();
+        if (S.user.mustChange) setTimeout(() => changePasswordModal(true), 300);
         const allowed = allowedPages();
         const defPage = (allowed[0] || PAGES[0]).id;
         const want = (location.hash || '').replace('#', '') || store.get('hris_page') || defPage;
@@ -334,6 +335,86 @@
             $('.top-actions').insertBefore(c, $('#shiftNow'));
         }
         c.innerHTML = '<span class="material-symbols-outlined">construction</span>Maintenance aktif';
+    }
+
+    /* =========================== FOTO PROFIL & OPERATOR =========================== */
+    // Avatar: foto bila ada, selain itu huruf awal nama
+    function avatarHtml(nama, foto) {
+        return foto ? '<img src="' + esc(foto) + '" alt="" loading="lazy">' : esc(String(nama || '?').trim().charAt(0).toUpperCase() || '?');
+    }
+    function renderSideAvatar() {
+        $('#sideAvatar').innerHTML = avatarHtml(S.user.nama, S.user.foto);
+    }
+
+    // Pilih gambar dari perangkat lalu perkecil di browser (maks 512px, JPEG) sebelum diupload
+    function pickImage() {
+        return new Promise((resolve, reject) => {
+            const inp = document.createElement('input');
+            inp.type = 'file';
+            inp.accept = 'image/jpeg,image/png,image/webp';
+            inp.onchange = () => {
+                const file = inp.files && inp.files[0];
+                if (!file) return resolve(null);
+                if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return reject(new Error('Pilih gambar JPG, PNG, atau WEBP.'));
+                if (file.size > 10 * 1024 * 1024) return reject(new Error('Ukuran foto maksimal 10 MB.'));
+                const url = URL.createObjectURL(file);
+                const img = new Image();
+                img.onload = () => {
+                    const max = 512, scale = Math.min(1, max / Math.max(img.width, img.height));
+                    const c = document.createElement('canvas');
+                    c.width = Math.max(1, Math.round(img.width * scale));
+                    c.height = Math.max(1, Math.round(img.height * scale));
+                    const ctx = c.getContext('2d');
+                    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+                    ctx.drawImage(img, 0, 0, c.width, c.height);
+                    URL.revokeObjectURL(url);
+                    resolve(c.toDataURL('image/jpeg', 0.85));
+                };
+                img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Gambar tidak dapat dibaca.')); };
+                img.src = url;
+            };
+            inp.click();
+        });
+    }
+
+    function fotoEditorHtml(id, nama, foto) {
+        return '<div class="foto-edit" id="' + id + '">' +
+            '<span class="foto-ava">' + avatarHtml(nama, foto) + '</span>' +
+            '<span class="foto-act"><button type="button" class="btn sm" data-foto-pick><span class="material-symbols-outlined">photo_camera</span> ' + (foto ? 'Ganti foto' : 'Unggah foto') + '</button>' +
+            '<button type="button" class="btn sm ghost' + (foto ? '' : ' hidden') + '" data-foto-del><span class="material-symbols-outlined">delete</span> Hapus</button>' +
+            '<small class="muted">JPG/PNG/WEBP · otomatis diperkecil</small></span></div>';
+    }
+
+    function profileModal() {
+        const opRec = S.user.operatorId ? (S.master.operators || []).find(x => x.id === S.user.operatorId) : null;
+        const op = opRec ? '<p class="small muted" style="margin:0 0 12px;text-align:center">Terhubung ke data operator <b>' + esc(opRec.nama) + '</b> — foto ini juga menjadi foto operator tersebut.</p>' : '';
+        openModal({
+            title: 'Profil saya',
+            body: '<div style="text-align:center;margin-bottom:6px"><b style="font-size:15px">' + esc(S.user.nama) + '</b><div class="small muted">' + esc(S.user.username) + '</div></div>' +
+                op + fotoEditorHtml('pfFoto', S.user.nama, S.user.foto),
+            onOpen: body => {
+                const box = $('#pfFoto', body);
+                const apply = (url) => {
+                    S.user.foto = url; renderSideAvatar();
+                    $('.foto-ava', box).innerHTML = avatarHtml(S.user.nama, url);
+                    $('[data-foto-del]', box).classList.toggle('hidden', !url);
+                    $('[data-foto-pick]', box).lastChild.textContent = url ? ' Ganti foto' : ' Unggah foto';
+                };
+                $('[data-foto-pick]', box).onclick = async () => {
+                    try {
+                        const data = await pickImage(); if (!data) return;
+                        const r = await call('fotoProfil', { data: data });
+                        apply(r.foto); toast('Foto profil diperbarui.', 'ok');
+                        loadMaster().then(() => { if (S.page === 'operator') drawOps(); }).catch(() => { });
+                    } catch (e) { fail(e); }
+                };
+                $('[data-foto-del]', box).onclick = async () => {
+                    if (!await confirmBox('Hapus foto profil?', 'Foto akan dihapus permanen.', 'Hapus', 'danger')) return profileModal();
+                    try { const r = await call('fotoProfil', { data: '' }); apply(r.foto); toast('Foto profil dihapus.', 'ok'); profileModal(); } catch (e) { fail(e); }
+                };
+            },
+            buttons: [{ label: 'Tutup' }]
+        });
     }
 
     /* =========================== DASHBOARD =========================== */
@@ -739,7 +820,7 @@
             body: '<p class="muted small">' + esc(absData.tanggalLabel) + '. Operator tetap di bagiannya sendiri.</p>' +
                 '<label class="field"><span>Cari operator</span><input id="mQ" placeholder="Ketik nama…"></label>' +
                 '<label class="field"><span>Operator</span><select name="operatorId" id="mOp" size="6" style="min-height:160px">' +
-                av.filter(o => canEdit(o.bagian)).map(o => '<option value="' + o.id + '">' + esc(o.nama) + ' — ' + esc(bagName(o.bagian)) + ' (hari ini: ' + o.jadwalHariIni + ')</option>').join('') + '</select></label>' +
+                av.filter(o => canEdit(o.bagian)).map(o => '<option value="' + o.id + '">' + esc(o.nama) + ' — ' + esc(bagName(o.bagian)) + ' (hari ini: ' + esc(o.jadwalHariIni) + ')</option>').join('') + '</select></label>' +
                 (isAdmin() ? '<label class="check"><input type="checkbox" name="force"> Tetap simpan walau melanggar batas jam</label>' : ''),
             onOpen: body => {
                 $('#mQ', body).oninput = e => {
@@ -951,7 +1032,7 @@
                 ev.codes.map((k, i) => {
                     const kk = kodeOf(k), changed = (r.id + '|' + J.dates[i].d) in J.pending;
                     return '<td class="c-day"><button class="kc' + (changed ? ' changed' : '') + (k ? '' : ' empty') + '" data-i="' + i + '"' + (ed ? '' : ' disabled') +
-                        ' style="' + (kk ? 'background:' + kk.warna + ';color:' + textColor(kk.warna) : '') + '" title="' + esc(kk ? kk.nama + (kk.kerja ? ' ' + kk.mulai + '–' + kk.selesai + ' · ' + kk.jam + ' jam' : '') : 'Kosong') + (r.ket[i] ? ' · ' + r.ket[i] : '') + '">' + esc(kk ? kk.label : (k || '·')) + '</button></td>';
+                        ' style="' + (kk ? 'background:' + kk.warna + ';color:' + textColor(kk.warna) : '') + '" title="' + esc(kk ? kk.nama + (kk.kerja ? ' ' + kk.mulai + '–' + kk.selesai + ' · ' + kk.jam + ' jam' : '') : 'Kosong') + (r.ket[i] ? ' · ' + esc(r.ket[i]) : '') + '">' + esc(kk ? kk.label : (k || '·')) + '</button></td>';
                 }).join('') +
                 '<td class="c-jam' + (ev.jam > J.maxJam ? ' bad' : '') + '" title="' + esc(ev.warn.join('\n')) + '">' + ev.jam + '</td>' +
                 '<td class="c-hari' + (ev.warn.some(w => /hari kerja|istirahat/.test(w)) ? ' bad' : '') + '" title="' + esc(ev.warn.join('\n')) + '">' + ev.hari + '/' + r.pola + (ev.warn.length ? ' !' : '') + '</td></tr>';
@@ -1139,7 +1220,7 @@
 
             const activeKodeObj = kodeOf(curKode);
             h += '<div class="alert info small" style="margin-top:10px">';
-            h += '<span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px;margin-right:4px">info</span>Menerapkan shift <b>' + (activeKodeObj ? activeKodeObj.label : (curKode === '-' ? 'Kosong' : curKode)) + '</b> untuk karyawan yang dicentang pada <b>' + dayInfo.hari + ', ' + dayInfo.tgl + ' ' + BULAN[+curDate.slice(5, 7) - 1] + '</b>.';
+            h += '<span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px;margin-right:4px">info</span>Menerapkan shift <b>' + esc(activeKodeObj ? activeKodeObj.label : (curKode === '-' ? 'Kosong' : curKode)) + '</b> untuk karyawan yang dicentang pada <b>' + dayInfo.hari + ', ' + dayInfo.tgl + ' ' + BULAN[+curDate.slice(5, 7) - 1] + '</b>.';
             h += '</div>';
             h += '</div>';
             return h;
@@ -1442,7 +1523,7 @@
         if (isReq && !ro) {
             h += '<details class="more" id="odJamBox"' + (OD.jamExtra.length ? ' open' : '') + '><summary>Jam masuk berbeda (opsional)</summary>' +
                 '<p class="small muted" style="margin:6px 0">Contoh: 1 orang masuk 06:00–14:00 di Shift 1. Tambahkan jamnya, lalu pilih jam di samping nama.</p>' +
-                '<div class="row" id="odJams">' + OD.jamExtra.map(j => '<span class="chip pri">' + esc(j.replace('-', '–')) + ' <button class="x" data-rmjam="' + j + '" aria-label="Hapus"><span class="material-symbols-outlined">close</span></button></span>').join('') + '</div>' +
+                '<div class="row" id="odJams">' + OD.jamExtra.map(j => '<span class="chip pri">' + esc(j.replace('-', '–')) + ' <button class="x" data-rmjam="' + esc(j) + '" aria-label="Hapus"><span class="material-symbols-outlined">close</span></button></span>').join('') + '</div>' +
                 '<div class="row" style="margin-top:8px;align-items:flex-end"><label class="field" style="margin:0;flex:1 1 100px"><span>Mulai</span><input type="time" id="odJm" value="06:00"></label>' +
                 '<label class="field" style="margin:0;flex:1 1 100px"><span>Selesai</span><input type="time" id="odJs" value="14:00"></label><button class="btn sm" id="odAddJam">＋ Tambah</button></div></details>';
         }
@@ -1557,7 +1638,7 @@
                 allTagged.map(m => {
                     const hasNum = !!m.nomor;
                     return '<div class="wa-tag-row">' +
-                        '<div class="wa-tag-avatar ' + m.role.toLowerCase() + '">' + m.role + '</div>' +
+                        '<div class="wa-tag-avatar ' + (/^[a-z]+$/i.test(m.role) ? m.role.toLowerCase() : '') + '">' + esc(m.role) + '</div>' +
                         '<div class="wa-tag-info" style="flex:1;min-width:0">' +
                         '<div class="wa-tag-nama">' + (m.sapaan ? esc(m.sapaan) + ' ' : '') + '<b>' + esc(m.nama) + '</b></div>' +
                         '</div>' +
@@ -1763,7 +1844,7 @@
             if (isReq && isVacRow) {
                 const vQty = on ? Math.max(1, +(reqIdx[c.id].qty || 1)) : 0;
                 const jamSelHtml = (on && OD.jamExtra.length)
-                    ? '<select class="jam-sel" data-jam="' + c.id + '"' + (ro ? ' disabled' : '') + '>' + jams.map(j => '<option value="' + j + '"' + (reqIdx[c.id].jam === j ? ' selected' : '') + '>' + j.replace('-', '–') + '</option>').join('') + '</select>'
+                    ? '<select class="jam-sel" data-jam="' + c.id + '"' + (ro ? ' disabled' : '') + '>' + jams.map(j => '<option value="' + esc(j) + '"' + (reqIdx[c.id].jam === j ? ' selected' : '') + '>' + esc(j.replace('-', '–')) + '</option>').join('') + '</select>'
                     : '';
                 h += '<div class="pick vacant-row' + (on ? ' is-picked' : '') + '">' +
                     '<label class="vac-check-label">' +
@@ -1780,7 +1861,7 @@
             }
             let extra = '';
             if (isReq) {
-                if (on && OD.jamExtra.length) extra = '<select class="jam-sel" data-jam="' + c.id + '"' + (ro ? ' disabled' : '') + '>' + jams.map(j => '<option value="' + j + '"' + (reqIdx[c.id].jam === j ? ' selected' : '') + '>' + j.replace('-', '–') + '</option>').join('') + '</select>';
+                if (on && OD.jamExtra.length) extra = '<select class="jam-sel" data-jam="' + c.id + '"' + (ro ? ' disabled' : '') + '>' + jams.map(j => '<option value="' + esc(j) + '"' + (reqIdx[c.id].jam === j ? ' selected' : '') + '>' + esc(j.replace('-', '–')) + '</option>').join('') + '</select>';
                 else if (c.status) extra = stChip(c);
                 else if (c.terjadwal) extra = '<span class="chip xs ok">' + esc(c.jadwal) + '</span>';
             } else {
@@ -2174,7 +2255,7 @@
             '<span class="small muted">' + esc(prov) + ' · ' + jad + (s.next && s.next.at ? ' · berikutnya ' + esc(s.next.at.slice(11)) + (s.next.type ? ' ' + (s.next.type === 'REQ' ? 'request' : 'realisasi') : '') : '') + '</span>' +
             (isAdmin() ? '<button class="btn sm ghost" id="wAuto">' + (s.auto ? 'Matikan' : 'Aktifkan') + '</button><button class="btn sm ghost" onclick="go(\'pengaturan\')" title="Pengaturan"><span class="material-symbols-outlined">settings</span></button>' : '');
         if ($('#wAuto')) $('#wAuto').onclick = async () => {
-            try { await call('waAuto', { on: !s.auto }); toast(!s.auto ? 'Kirim otomatis aktif.' : 'Kirim otomatis dimatikan.', 'ok'); loadWaStatus(); } catch (e) { fail(e); }
+            try { await call('waAuto', { aktif: !s.auto }); toast(!s.auto ? 'Kirim otomatis aktif.' : 'Kirim otomatis dimatikan.', 'ok'); loadWaStatus(); } catch (e) { fail(e); }
         };
     }
     async function loadWaLog() {
@@ -2337,10 +2418,10 @@
         const act = o => isAdmin() ? '<button class="btn sm" data-edit="' + o.id + '">Ubah</button>' : '';
         $('#oBody').innerHTML =
             '<div class="only-wide"><div class="table-wrap" style="border:0"><table class="tbl"><thead><tr><th>Nama</th><th>NIK</th><th>Role</th><th>Bagian</th><th>Employer</th><th>Grup</th><th>Pola</th><th>Libur</th><th>Status</th><th></th></tr></thead><tbody>' +
-            list.map(o => '<tr><td><b>' + esc(o.nama) + '</b></td><td>' + esc(o.nik) + '</td><td class="small">' + esc(o.role) + '</td><td>' + esc(bagName(o.bagian)) + '</td><td><span class="chip xs ' + (o.employer === 'IEG' ? 'pri' : '') + '">' + esc(o.employer || 'RKA') + '</span></td><td>' + esc(GRUP_LABEL[o.grup] || o.grup) + '</td><td>' + o.pola + ' hari</td><td>' + liburLabel(o.libur) + '</td>' +
+            list.map(o => '<tr><td><span class="op-name"><span class="op-ava">' + avatarHtml(o.nama, o.foto) + '</span><b>' + esc(o.nama) + '</b></span></td><td>' + esc(o.nik) + '</td><td class="small">' + esc(o.role) + '</td><td>' + esc(bagName(o.bagian)) + '</td><td><span class="chip xs ' + (o.employer === 'IEG' ? 'pri' : '') + '">' + esc(o.employer || 'RKA') + '</span></td><td>' + esc(GRUP_LABEL[o.grup] || o.grup) + '</td><td>' + o.pola + ' hari</td><td>' + liburLabel(o.libur) + '</td>' +
                 '<td><span class="chip ' + (o.aktif ? 'ok' : '') + '">' + (o.aktif ? 'Aktif' : 'Nonaktif') + '</span></td><td class="act">' + act(o) + '</td></tr>').join('') +
             '</tbody></table></div></div>' +
-            '<div class="only-narrow">' + list.map(o => '<div class="list-item"><div class="grow"><b>' + esc(o.nama) + '</b><span class="small muted">' + esc(bagName(o.bagian)) + ' · ' + esc(GRUP_LABEL[o.grup] || o.grup) + ' · ' + o.pola + ' hari · libur ' + liburLabel(o.libur) + '</span></div>' +
+            '<div class="only-narrow">' + list.map(o => '<div class="list-item"><span class="op-ava lg">' + avatarHtml(o.nama, o.foto) + '</span><div class="grow"><b>' + esc(o.nama) + '</b><span class="small muted">' + esc(bagName(o.bagian)) + ' · ' + esc(GRUP_LABEL[o.grup] || o.grup) + ' · ' + o.pola + ' hari · libur ' + liburLabel(o.libur) + '</span></div>' +
                 (o.aktif ? '' : '<span class="chip">Nonaktif</span>') + act(o) + '</div>').join('') + '</div>';
         $$('[data-edit]').forEach(b => b.onclick = () => opModal(S.master.operators.find(o => o.id === b.dataset.edit)));
     }
@@ -2349,9 +2430,10 @@
         o = o || { nama: '', nik: '', bagian: S.op.bagian || (S.master.bagian[0] || {}).kode, grup: 'A', libur: '', hp: '', aktif: true, tglMasuk: '', ket: '', pola: 6, employer: 'RKA', role: '' };
         const emp = String(o.employer || '').trim().toUpperCase() === 'IEG' ? 'IEG' : 'RKA';
         const lib = String(o.libur).split(',');
+        let fotoPending; // undefined = tidak berubah, '' = hapus, data URL = foto baru
         openModal({
             title: isNew ? 'Tambah operator' : 'Ubah operator',
-            body: '<label class="field"><span>Nama lengkap *</span><input name="nama" value="' + esc(o.nama) + '" required></label>' +
+            body: fotoEditorHtml('opFoto', o.nama, o.foto) + '<label class="field"><span>Nama lengkap *</span><input name="nama" value="' + esc(o.nama) + '" required></label>' +
                 '<div class="grid2"><label class="field"><span>NIK / ID karyawan</span><input name="nik" value="' + esc(o.nik) + '"><small>Opsional</small></label>' +
                 '<label class="field"><span>No HP / WA</span><input name="hp" inputmode="tel" value="' + esc(o.hp) + '"></label></div>' +
                 '<div class="grid2"><label class="field"><span>Bagian *</span><select name="bagian">' + S.master.bagian.map(b => '<option value="' + b.kode + '"' + (o.bagian === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') + '</select></label>' +
@@ -2364,7 +2446,18 @@
                 '<div class="grid2"><label class="field"><span>Tanggal masuk</span><input type="date" name="tglMasuk" value="' + esc(o.tglMasuk) + '"></label>' +
                 '<label class="field"><span>Keterangan</span><input name="ket" value="' + esc(o.ket) + '"></label></div>' +
                 '<label class="check"><input type="checkbox" name="aktif"' + (o.aktif ? ' checked' : '') + '> Aktif</label>',
-            onOpen: body => $$('[data-pola]', body).forEach(b => b.onclick = () => { $$('[data-pola]', body).forEach(x => x.classList.toggle('on', x === b)); $('[name=pola]', body).value = b.dataset.pola; }),
+            onOpen: body => {
+                $$('[data-pola]', body).forEach(b => b.onclick = () => { $$('[data-pola]', body).forEach(x => x.classList.toggle('on', x === b)); $('[name=pola]', body).value = b.dataset.pola; });
+                const box = $('#opFoto', body);
+                const show = (url) => {
+                    $('.foto-ava', box).innerHTML = avatarHtml($('[name=nama]', body).value || o.nama, url);
+                    $('[data-foto-del]', box).classList.toggle('hidden', !url);
+                };
+                $('[data-foto-pick]', box).onclick = async () => {
+                    try { const data = await pickImage(); if (!data) return; fotoPending = data; show(data); } catch (e) { fail(e); }
+                };
+                $('[data-foto-del]', box).onclick = () => { fotoPending = ''; show(''); };
+            },
             buttons: (isNew ? [] : [{
                 label: 'Hapus', cls: 'danger', onClick: async () => {
                     if (!await confirmBox('Hapus operator?', o.nama + ' akan dihapus (atau dinonaktifkan bila sudah punya riwayat jadwal/absensi).', 'Hapus', 'danger')) return;
@@ -2374,7 +2467,11 @@
                 label: 'Simpan', cls: 'primary', onClick: async () => {
                     const f = formData($('#modalBody'));
                     f.id = isNew ? '' : o.id;
-                    try { await call('saveOperator', f); closeModal(); toast('Operator disimpan.', 'ok'); await loadMaster(); drawOps(); } catch (e) { fail(e); }
+                    try {
+                        const r = await call('saveOperator', f);
+                        if (fotoPending !== undefined) await call('fotoOperator', { id: r.id || o.id, data: fotoPending });
+                        closeModal(); toast('Operator disimpan.', 'ok'); await loadMaster(); renderSideAvatar(); drawOps();
+                    } catch (e) { fail(e); }
                 }
             }])
         });
@@ -2649,6 +2746,9 @@
                 ].map(r => '<option value="' + r[0] + '"' + (u.role === r[0] ? ' selected' : '') + '>' + r[1] + '</option>').join('') + '</select></label>' +
                 '<div class="field"><span>Bagian yang dipegang (Leader)</span><div class="days-pick">' + S.master.bagian.map(b => '<label><input type="checkbox" data-multi="1" name="bagian" value="' + b.kode + '"' + (u.bagian.indexOf(b.kode) >= 0 ? ' checked' : '') + '>' + esc(b.nama) + '</label>').join('') + '</div><small>Kosong = semua bagian.</small></div>' +
                 '<label class="field"><span>' + (isNew ? 'Password awal *' : 'Reset password') + '</span><input type="password" name="password" autocomplete="new-password" placeholder="' + (isNew ? 'min 6 karakter' : 'kosongkan bila tidak diubah') + '"><small>Pengguna wajib mengganti saat login pertama.</small></label>' +
+                '<label class="field"><span>Data operator terkait</span><select name="operatorId"><option value="">— Tidak ditautkan —</option>' +
+                S.master.operators.filter(op => !/vacant/i.test(op.nama)).map(op => '<option value="' + esc(op.id) + '"' + (u.operatorId === op.id ? ' selected' : '') + '>' + esc(op.nama + ' · ' + bagName(op.bagian)) + '</option>').join('') +
+                '</select><small>Bila ditautkan, foto profil user ini memakai foto operator tersebut.</small></label>' +
                 '<label class="check"><input type="checkbox" name="aktif"' + (u.aktif ? ' checked' : '') + '> Aktif</label>',
             buttons: (isNew ? [] : [{
                 label: 'Hapus', cls: 'danger', onClick: async () => {
@@ -2986,6 +3086,7 @@
     $('#scrim').onclick = () => openSide(false);
     $('#btnLogout').onclick = () => doLogout(false);
     $('#btnPw').onclick = () => changePasswordModal(false);
+    $('#btnProfile').onclick = () => profileModal();
     $('#btnRefresh').onclick = refresh;
     window.addEventListener('beforeunload', () => { flushAbs(); flushOrder(); });
     boot();

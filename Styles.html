@@ -1023,16 +1023,36 @@
         display: flex;
         gap: 10px;
         align-items: center;
-        padding: 6px 8px 10px;
+        width: 100%;
+        padding: 8px;
+        margin-bottom: 4px;
+        border: 0;
+        border-radius: var(--r);
+        background: transparent;
         color: #FFFFFF;
+        text-align: left;
+        cursor: pointer;
+    }
+
+    @media (hover: hover) {
+        .side-user:hover {
+            background: var(--side-hover);
+        }
     }
 
     .side-user .user-meta {
         flex: 1;
         min-width: 0;
+        display: block;
+    }
+
+    .side-user-ico {
+        font-size: 17px !important;
+        color: var(--side-muted);
     }
 
     .side-user #sideUser {
+        display: block;
         font-weight: 600;
         font-size: 13px;
         white-space: nowrap;
@@ -1060,6 +1080,83 @@
         font-size: 13px;
         color: #FFFFFF;
         flex: none;
+        overflow: hidden;
+    }
+
+    /* Foto (avatar) — dipakai sidebar, daftar operator & editor foto */
+    .avatar img,
+    .op-ava img,
+    .foto-ava img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+    }
+
+    .op-name {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+    }
+
+    .op-ava {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        overflow: hidden;
+        flex: none;
+        display: inline-grid;
+        place-items: center;
+        background: var(--primary-soft);
+        color: var(--primary);
+        font-weight: 700;
+        font-size: 12px;
+    }
+
+    .op-ava.lg {
+        width: 40px;
+        height: 40px;
+        font-size: 15px;
+    }
+
+    .foto-edit {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 12px;
+        margin-bottom: 14px;
+        border: 1px dashed var(--line-strong);
+        border-radius: var(--r-lg);
+        background: var(--surface-2);
+    }
+
+    .foto-ava {
+        width: 72px;
+        height: 72px;
+        border-radius: 50%;
+        overflow: hidden;
+        flex: none;
+        display: grid;
+        place-items: center;
+        background: var(--grad);
+        color: #FFFFFF;
+        font-weight: 700;
+        font-size: 26px;
+        box-shadow: 0 0 0 3px var(--surface), 0 0 0 4px var(--border);
+    }
+
+    .foto-act {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+    }
+
+    .foto-act small {
+        flex-basis: 100%;
+        font-size: 11.5px;
     }
 
     .side-link {

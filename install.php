@@ -7,7 +7,9 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/db.php';
 
 $remote = $_SERVER['REMOTE_ADDR'] ?? '';
-$isLocal = in_array($remote, ['127.0.0.1', '::1'], true);
+// Lokal hanya bila langsung dari komputer server (bukan diteruskan proxy)
+$isLocal = in_array($remote, ['127.0.0.1', '::1'], true)
+    && empty($_SERVER['HTTP_X_FORWARDED_FOR']) && empty($_SERVER['HTTP_X_REAL_IP']);
 
 $msg = '';
 $err = '';
@@ -49,7 +51,9 @@ try {
     }
 } catch (Throwable $e) {
     $dbStatus = 'Gagal terhubung';
-    $err = $err ?: $e->getMessage();
+    // Detail error hanya ditampilkan di komputer server
+    $err = $err ?: ($isLocal ? $e->getMessage() : 'Koneksi database gagal. Periksa konfigurasi server.');
+    error_log('[HRIS install] ' . $e->getMessage());
 }
 $h = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
 ?>

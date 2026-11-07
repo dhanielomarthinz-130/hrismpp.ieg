@@ -260,8 +260,19 @@ function jadwal_simpan(array $p, array $currentUser): array {
     foreach (operators_() as $o) $ops[$o['id']] = $o;
     $km = kode_map_();
 
+    $isAdmSpv = !empty($currentUser['super']) || in_array($currentUser['role'], ['ADMIN', 'SUPERVISOR'], true);
     foreach ($changes as $c) {
-        $id = (string)$c['operatorId'];
+        if (!is_array($c)) throw new InvalidArgumentException('Data perubahan tidak valid.');
+        $id = (string)($c['operatorId'] ?? '');
+        $cd = (string)($c['tanggal'] ?? '');
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $cd) || !strtotime($cd)) {
+            throw new InvalidArgumentException('Tanggal jadwal tidak valid.');
+        }
+        // Kunci minggu dicek untuk SETIAP tanggal yang diubah (bukan hanya minggu dari parameter tanggal)
+        $lk = week_lock_(monday_of($cd));
+        if ($lk && !$isAdmSpv) {
+            throw new RuntimeException("Jadwal minggu " . monday_of($cd) . " sudah dikunci oleh {$lk['by']}.");
+        }
         $op = $ops[$id] ?? null;
         if (!$op) throw new RuntimeException("Operator $id tidak ditemukan.");
         if ($onlyIeg && !is_ieg_operator_($op)) {
@@ -412,6 +423,10 @@ function jadwal_isi(array $p, array $currentUser): array {
     }
     $tgl = !empty($p['tanggal']) ? (string)$p['tanggal'] : date('Y-m-d');
     $monday = monday_of($tgl);
+    $lock = week_lock_($monday);
+    if ($lock && empty($currentUser['super']) && !in_array($currentUser['role'], ['ADMIN', 'SUPERVISOR'], true)) {
+        throw new RuntimeException("Jadwal minggu ini sudah dikunci oleh {$lock['by']}. Hubungi Admin / Supervisor.");
+    }
     $dates = week_dates($monday);
     $bagian = strtoupper(trim((string)($p['bagian'] ?? '')));
     $timpa = !empty($p['timpa']);
@@ -464,7 +479,7 @@ function jadwal_isi(array $p, array $currentUser): array {
                 } else {
                     // Rolling group A & B
                     $diffWeeks = (int)floor((strtotime($d) - strtotime($anchor)) / (7 * 86400));
-                    $phase = (($diffWeeks / $periode) % 2 + 2) % 2;
+                    $phase = (((int)floor($diffWeeks / $periode)) % 2 + 2) % 2;
                     $aShift = $phase === 0 ? 'S1' : 'S2';
                     $shiftCode = ($g === 'A') ? $aShift : ($aShift === 'S1' ? 'S2' : 'S1');
                 }
