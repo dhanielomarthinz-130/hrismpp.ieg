@@ -278,7 +278,7 @@
         $('#shell').classList.remove('hidden');
         const name = S.master.settings.app_nama || 'HRIS Inventory';
         // Sidebar: nama PT sudah tampil di baris bawahnya, jadi cukup nama aplikasinya
-        $('#sideAppName').textContent = name.replace(/\s+PT.*$/i, '') || name; document.title = name;
+        $('#sideAppName').textContent = 'HRIS Inventory'; document.title = name;
         $('#sideUser').textContent = S.user.nama;
         $('#sideRole').textContent = S.user.role + (S.user.bagian.length ? ' · ' + S.user.bagian.join(', ') : '');
         $('#sideAvatar').textContent = (S.user.nama || 'U').charAt(0).toUpperCase();
@@ -2555,7 +2555,7 @@
         };
         loadUsers();
     }
-    function enterShellSoft() { const n = S.master.settings.app_nama; $('#sideAppName').textContent = n.replace(/\s+PT.*$/i, '') || n; document.title = n; }
+    function enterShellSoft() { $('#sideAppName').textContent = 'HRIS Inventory'; document.title = S.master.settings.app_nama; }
 
     let usersCache = [];
     async function loadUsers() {
