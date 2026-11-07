@@ -1,7 +1,7 @@
 <?php
 /**
  * login.php : Halaman Form Login Dedicated (Clean URL: /login)
- * HRIS PP Inventory PT. Inovasi Eka Gemilang
+ * HRIS Inventory PT. Inovasi Eka Gemilang
  */
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/db.php';
@@ -18,14 +18,14 @@ ob_start();
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="theme-color" content="#F4F5F8">
+    <meta name="theme-color" content="#4F46E5">
     <link rel="icon" type="image/png" href="assets/image/logo-IEG.png">
     <link rel="apple-touch-icon" href="assets/image/logo-IEG.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200">
-    <title>Masuk · HRIS PP Inventory PT. Inovasi Eka Gemilang</title>
+    <title>Masuk · HRIS Inventory PT. Inovasi Eka Gemilang</title>
     <!-- INCLUDE_STYLES -->
     <style>
         .auth {
@@ -211,7 +211,7 @@ ob_start();
                 <div class="logo-mark"><img src="assets/image/logo-IEG.png" alt=""></div>
                 <div>
                     <b>PT. Inovasi Eka Gemilang</b>
-                    <small>HRIS PP Inventory</small>
+                    <small>HRIS Inventory</small>
                 </div>
             </div>
 
@@ -310,7 +310,7 @@ ob_start();
                 document.getElementById('themeLabel').textContent = t === 'morning' ? 'Evening' : 'Morning';
                 document.getElementById('themeIcon').textContent = t === 'morning' ? 'dark_mode' : 'light_mode';
                 const meta = document.querySelector('meta[name=theme-color]');
-                if (meta) meta.content = t === 'morning' ? '#F4F5F8' : '#0B0D13';
+                if (meta) meta.content = t === 'morning' ? '#4F46E5' : '#12171C';
             }
             setTheme(savedTheme);
             document.getElementById('themeBtn').addEventListener('click', function () {

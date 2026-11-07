@@ -12,7 +12,7 @@ if (is_file(__DIR__ . '/config.local.php')) {
     require __DIR__ . '/config.local.php';
 }
 
-define('APP_NAME', 'HRIS PP Inventory PT.Inovasi Eka Gemilang');
+define('APP_NAME', 'HRIS Inventory PT.Inovasi Eka Gemilang');
 define('APP_VERSION', '2.0.0');
 
 /**

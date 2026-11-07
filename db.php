@@ -289,8 +289,20 @@ function init_db_tables(PDO $pdo, string $driver): void {
             $stmtSpv = $pdo->prepare("INSERT INTO users (username, nama, role, bagian, password_hash, aktif, must_change) VALUES (?, ?, ?, ?, ?, 1, 0)");
             $stmtSpv->execute(['supervisor', 'Supervisor Inventory', 'SUPERVISOR', '', password_hash('spv123', PASSWORD_DEFAULT)]);
         }
-        $pdo->exec("UPDATE settings SET value = 'HRIS PP Inventory PT.Inovasi Eka Gemilang' WHERE key_name = 'app_nama' AND value = 'HRIS MPP — IEG'");
+        $pdo->exec("UPDATE settings SET value = 'HRIS Inventory PT.Inovasi Eka Gemilang' WHERE key_name = 'app_nama' AND value IN ('HRIS MPP — IEG', 'HRIS PP Inventory PT.Inovasi Eka Gemilang')");
     }
+
+    // Employer hanya IEG atau RKA. Operator yang sudah ada (kosong / "LPK RKA" / lainnya) -> RKA.
+    $pdo->exec("UPDATE operator SET employer = 'IEG' WHERE UPPER(TRIM(employer)) = 'IEG' AND employer <> 'IEG'");
+    $pdo->exec("UPDATE operator SET employer = 'RKA' WHERE employer IS NULL OR employer NOT IN ('IEG', 'RKA')");
+}
+
+/** Daftar employer yang diizinkan. */
+const EMPLOYERS = ['IEG', 'RKA'];
+
+/** Normalisasi employer: "ieg" -> IEG, selain itu (kosong, "LPK RKA", dll.) -> RKA. */
+function normalize_employer($v): string {
+    return strtoupper(trim((string)$v)) === 'IEG' ? 'IEG' : 'RKA';
 }
 
 /**
@@ -354,15 +366,16 @@ function seed_default_data(PDO $pdo): void {
         ['OP0011', '', 'VACANT', 'INBOUND', 'S1', '6', '', 1, 6, '', 'Tetap Shift 1'],
         ['OP0012', '', 'VACANT', 'INBOUND', 'S2', '6', '', 1, 6, '', 'Tetap Shift 2']
     ];
-    $stmt = $pdo->prepare("INSERT INTO operator (id, nik, nama, bagian, grup, libur, hp, aktif, pola, ket, role) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt = $pdo->prepare("INSERT INTO operator (id, nik, nama, bagian, grup, libur, hp, aktif, pola, ket, role, employer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     foreach ($ops as $o) {
+        $o[] = 'RKA';
         $stmt->execute($o);
     }
 
     // 6. Settings Bawaan
     $monday = date('Y-m-d', strtotime('monday this week'));
     $settings = [
-        ['app_nama', 'HRIS PP Inventory PT.Inovasi Eka Gemilang', 'Nama aplikasi di header'],
+        ['app_nama', 'HRIS Inventory PT.Inovasi Eka Gemilang', 'Nama aplikasi di header'],
         ['max_jam_minggu', '49', 'Batas jam kerja per 7 hari berjalan'],
         ['min_istirahat', '8', 'Jeda istirahat minimal antar shift (jam)'],
         ['batas_mode', 'MINGGU', 'Batas jam per Senin-Minggu atau Berjalan'],

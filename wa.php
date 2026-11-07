@@ -718,7 +718,7 @@ function sync_order_to_jadwal_(string $tanggal, string $kode, array $reqList, st
                     'tgl_masuk' => '',
                     'ket'       => 'Slot Vacant ' . $bKode,
                     'pola'      => 6,
-                    'employer'  => 'LPK RKA',
+                    'employer'  => 'RKA',
                     'role'      => 'Operator Vacant'
                 ]);
                 $existingVacOps[] = ['id' => $newId];
@@ -859,7 +859,7 @@ function order_submit(array $p, array $currentUser): array {
         if ($type === 'REQ') {
             $data['req_submit_at'] = $now;
             $data['req_submit_by'] = $currentUser['username'];
-            // Masuk ke antrean Approval Supervisor terlebih dahulu sebelum masuk ke Jadwal Mingguan & Absensi
+            // Masuk ke antrean Approval Supervisor terlebih dahulu sebelum masuk ke Jadwal Employee & Absensi
             $data['approval_status'] = 'PENDING';
             $data['approved_at'] = null;
             $data['approved_by'] = null;
@@ -918,7 +918,7 @@ function order_approve(array $p, array $currentUser): array {
         }
         db_update('order_mpp', $upd, 'tanggal = ? AND UPPER(shift) = ?', [$dt, $kode]);
 
-        // Saat di-Approve oleh Supervisor, BARU masuk ke data Jadwal Mingguan & Absensi!
+        // Saat di-Approve oleh Supervisor, BARU masuk ke data Jadwal Employee & Absensi!
         sync_order_to_jadwal_($dt, $kode, $st['req'], $currentUser['username']);
         write_rekap_mpp($dt, $kode, 'REQ', 'APPROVED', $currentUser['username']);
     }

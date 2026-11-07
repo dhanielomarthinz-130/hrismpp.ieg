@@ -477,7 +477,7 @@ function save_operator(array $p, array $currentUser): array {
         'tgl_masuk' => (string)($p['tglMasuk'] ?? ''),
         'ket'       => (string)($p['ket'] ?? ''),
         'pola'      => (int)($p['pola'] ?? 6) === 5 ? 5 : 6,
-        'employer'  => (string)($p['employer'] ?? ''),
+        'employer'  => normalize_employer($p['employer'] ?? ''),
         'role'      => (string)($p['role'] ?? '')
     ];
 

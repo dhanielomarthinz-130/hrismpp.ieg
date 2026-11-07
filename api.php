@@ -85,7 +85,7 @@ try {
         'removeFromShift' => fn() => remove_from_shift($payload, $user),
         'fillVacant'      => fn() => fill_vacant_slot($payload, $user),
 
-        // Jadwal Mingguan
+        // Jadwal Employee
         'jadwal'          => fn() => jadwal_minggu($payload, $user),
         'minggu'          => fn() => jadwal_minggu($payload, $user),
         'mingguSimpan'    => fn() => jadwal_simpan($payload, $user),

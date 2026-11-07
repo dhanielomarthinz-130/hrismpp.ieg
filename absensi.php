@@ -96,7 +96,7 @@ function get_absensi(array $p, array $currentUser): array {
                         'tgl_masuk' => '',
                         'ket'       => 'Slot Vacant ' . $bKode,
                         'pola'      => 6,
-                        'employer'  => 'LPK RKA',
+                        'employer'  => 'RKA',
                         'role'      => 'Operator Vacant'
                     ];
                     db_insert('operator', $newRow);
@@ -430,7 +430,7 @@ function fill_vacant_slot(array $p, array $currentUser): array {
                 'tgl_masuk' => $tanggal,
                 'ket'       => 'Pengisi Slot Vacant',
                 'pola'      => 6,
-                'employer'  => 'LPK RKA',
+                'employer'  => 'RKA',
                 'role'      => 'Operator'
             ]);
         }

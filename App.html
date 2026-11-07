@@ -32,7 +32,7 @@
         { id: 'req_approval', label: 'Approval Request OS', short: 'Approval OS', roles: ['SUPERVISOR'], bottom: true },
         { id: 'jadwal_ieg', label: 'Jadwal IEG', short: 'Jadwal IEG', roles: ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'], bottom: true },
         { id: 'absensi', label: 'Absensi Shift', short: 'Absensi', roles: ['ADMIN', 'SUPERVISOR', 'LEADER'], bottom: true },
-        { id: 'jadwal', label: 'Jadwal Mingguan', short: 'Jadwal', roles: ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'], bottom: true },
+        { id: 'jadwal', label: 'Jadwal Employee', short: 'Jadwal', roles: ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'], bottom: true },
         { id: 'rekap', label: 'Rekap MPP', short: 'Rekap', roles: ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'], bottom: true },
         { id: 'operator', label: 'Operator', roles: ['ADMIN', 'SUPERVISOR'], sec: 'Master data' },
         { id: 'bagian', label: 'Bagian & Target', roles: ['ADMIN', 'SUPERVISOR'] },
@@ -182,7 +182,7 @@
         $$('.theme-label').forEach(el => el.textContent = t === 'morning' ? 'Evening' : 'Morning');
         $$('[data-theme-toggle] .theme-icon').forEach(el => el.textContent = t === 'morning' ? 'dark_mode' : 'light_mode');
         const meta = document.querySelector('meta[name=theme-color]');
-        if (meta) meta.content = t === 'morning' ? '#F4F5F8' : '#0B0D13';
+        if (meta) meta.content = t === 'morning' ? '#4F46E5' : '#12171C';
     }
     function toggleTheme() { applyTheme(document.documentElement.getAttribute('data-theme') === 'morning' ? 'evening' : 'morning'); }
 
@@ -261,8 +261,9 @@
     function enterShell() {
         $('#login').classList.add('hidden');
         $('#shell').classList.remove('hidden');
-        const name = S.master.settings.app_nama || 'HRIS MPP';
-        $('#sideAppName').textContent = name; document.title = name;
+        const name = S.master.settings.app_nama || 'HRIS Inventory';
+        // Sidebar: nama PT sudah tampil di baris bawahnya, jadi cukup nama aplikasinya
+        $('#sideAppName').textContent = name.replace(/\s+PT.*$/i, '') || name; document.title = name;
         $('#sideUser').textContent = S.user.nama;
         $('#sideRole').textContent = S.user.role + (S.user.bagian.length ? ' · ' + S.user.bagian.join(', ') : '');
         $('#sideAvatar').textContent = (S.user.nama || 'U').charAt(0).toUpperCase();
@@ -762,7 +763,7 @@
             '<div class="toolbar" id="wkActs"></div>' +
             '<div class="brushbar" id="wkBrush"></div>' +
             '<div id="wkBody"><div class="empty">Memuat…</div></div>' +
-            '<div class="savebar hidden" id="wkSave"><span id="wkSaveTxt"></span><span class="spacer"></span><button class="btn sm ghost" id="wkUndo">Batal</button><button class="btn sm primary" id="wkDo"><span class="material-symbols-outlined">check_circle</span> ' + (jOnlyIeg ? 'Submit &amp; Masuk Jadwal Mingguan' : 'Simpan') + '</button></div>';
+            '<div class="savebar hidden" id="wkSave"><span id="wkSaveTxt"></span><span class="spacer"></span><button class="btn sm ghost" id="wkUndo">Batal</button><button class="btn sm primary" id="wkDo"><span class="material-symbols-outlined">check_circle</span> ' + (jOnlyIeg ? 'Submit &amp; Masuk Jadwal Employee' : 'Simpan') + '</button></div>';
         const moveWeek = async n => { if (!await confirmDiscard()) return; S.jad.tanggal = addDays(monday(S.jad.tanggal), n); $('#wkDate').value = S.jad.tanggal; loadWeek(); };
         $('#wkPrev').onclick = () => moveWeek(-7);
         $('#wkNext').onclick = () => moveWeek(7);
@@ -799,8 +800,8 @@
             (editable ? '<button class="btn sm grad" id="wkAuto"><span class="material-symbols-outlined">bolt</span> Isi otomatis (pola 5/6 hari)</button>' : '') +
             (editable ? '<button class="btn sm primary" id="wkBatch"><span class="material-symbols-outlined">calendar_month</span> Input Tanggal &amp; Divisi</button><button class="btn sm" id="wkCopy"><span class="material-symbols-outlined">content_copy</span> Salin minggu lalu</button>' : '') +
             (isAdmin() && !locked && !jOnlyIeg ? '<button class="btn sm" id="wkPaste"><span class="material-symbols-outlined">content_paste</span> Tempel dari Excel</button>' : '') +
-            (jOnlyIeg && editable ? '<button class="btn sm ok" id="wkSubmitTop"><span class="material-symbols-outlined">check_circle</span> Submit ke Jadwal Mingguan</button>' : '') +
-            (jOnlyIeg ? '<button class="btn sm ghost" id="wkGoFull"><span class="material-symbols-outlined">calendar_month</span> Lihat Jadwal Mingguan →</button>' : '') +
+            (jOnlyIeg && editable ? '<button class="btn sm ok" id="wkSubmitTop"><span class="material-symbols-outlined">check_circle</span> Submit ke Jadwal Employee</button>' : '') +
+            (jOnlyIeg ? '<button class="btn sm ghost" id="wkGoFull"><span class="material-symbols-outlined">calendar_month</span> Lihat Jadwal Employee →</button>' : '') +
             (!editable && !jOnlyIeg ? '<span class="chip pri"><span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;margin-right:4px">visibility</span>Mode View Saja (Terisi otomatis dari Submit Jadwal IEG &amp; Approval Request OS)</span>' : '') +
             '<button class="btn sm ghost" id="wkXls"><span class="material-symbols-outlined">download</span> Excel</button>' +
             (isAdmin() && !jOnlyIeg ? '<button class="btn sm ghost" id="wkLock"><span class="material-symbols-outlined">' + (J.lock ? 'lock_open' : 'lock') + '</span> ' + (J.lock ? 'Buka kunci' : 'Kunci minggu') + '</button>' : '') +
@@ -811,7 +812,7 @@
         if ($('#wkPaste')) $('#wkPaste').onclick = pasteWeekModal;
         if ($('#wkSubmitTop')) $('#wkSubmitTop').onclick = () => {
             if (!Object.keys(J.pending || {}).length) {
-                toast('Semua jadwal IEG minggu ini sudah tersimpan & tampil di Jadwal Mingguan!', 'ok');
+                toast('Semua jadwal IEG minggu ini sudah tersimpan & tampil di Jadwal Employee!', 'ok');
                 return;
             }
             saveWeek(false);
@@ -993,7 +994,7 @@
             const r = await call('mingguSimpan', { tanggal: J.monday, changes: changes, force: force, onlyIeg: jOnlyIeg });
             if (!r.ok) return showWeekWarnings(r.warnings);
             toast(jOnlyIeg
-                ? 'Jadwal IEG (' + r.saved + ' sel) berhasil disubmit & otomatis masuk ke Jadwal Mingguan!'
+                ? 'Jadwal IEG (' + r.saved + ' sel) berhasil disubmit & otomatis masuk ke Jadwal Employee!'
                 : r.saved + ' sel disimpan' + (r.warnings && r.warnings.length ? ' (dengan ' + r.warnings.length + ' pengecualian)' : '') + '.', 'ok');
             loadWeek();
         } catch (e) { fail(e); }
@@ -1221,7 +1222,7 @@
                 label: '<span class="material-symbols-outlined" style="font-size:16px">bolt</span> Isi', cls: 'grad', onClick: async () => {
                     const f = formData($('#modalBody'));
                     f.onlyIeg = jOnlyIeg;
-                    try { const r = await call('mingguIsi', f); closeModal(); toast((r.operator || 0) + ' karyawan · ' + (r.entri || r.saved || 0) + ' sel terisi & masuk ke Jadwal Mingguan!', 'ok'); J.pending = {}; loadWeek(); } catch (e) { fail(e); }
+                    try { const r = await call('mingguIsi', f); closeModal(); toast((r.operator || 0) + ' karyawan · ' + (r.entri || r.saved || 0) + ' sel terisi & masuk ke Jadwal Employee!', 'ok'); J.pending = {}; loadWeek(); } catch (e) { fail(e); }
                 }
             }]
         });
@@ -1240,7 +1241,7 @@
                         const r = await call('mingguSalin', { tanggal: J.monday, timpa: f.timpa, bagian: S.jad.bagian, onlyIeg: jOnlyIeg });
                         closeModal();
                         if (r.ok === false) return showWeekWarnings(r.warnings);
-                        toast(r.info || r.saved + ' sel disalin & masuk ke Jadwal Mingguan.', 'ok'); loadWeek();
+                        toast(r.info || r.saved + ' sel disalin & masuk ke Jadwal Employee.', 'ok'); loadWeek();
                     } catch (e) { fail(e); }
                 }
             }]
@@ -1297,7 +1298,7 @@
             '<span class="spacer"></span>' +
             (isSupervisor() ? '<button class="btn sm primary" id="wGoAppList"><span class="material-symbols-outlined">fact_check</span> Daftar Approval Request OS</button>' : '') +
             '<button class="btn sm ghost" id="wGoAbs"><span class="material-symbols-outlined">how_to_reg</span> Clock-In Absensi</button>' +
-            '<button class="btn sm ghost" id="wGoJad"><span class="material-symbols-outlined">calendar_month</span> Jadwal Mingguan</button>' +
+            '<button class="btn sm ghost" id="wGoJad"><span class="material-symbols-outlined">calendar_month</span> Jadwal Employee</button>' +
             '<button class="btn sm ghost" id="wRekap"><span class="material-symbols-outlined">download</span> Unduh rekap</button></div>' +
             '<div id="waStatus" class="status-line"></div>' +
             '<div id="odPendingBar"></div>' +
@@ -1448,7 +1449,7 @@
                     b.disabled = true;
                     try {
                         const v = await call('orderApprove', { tanggal: dt, shift: sh, dates: [dt] });
-                        toast('Request OS (' + dt + ' · ' + shiftName(sh) + ') berhasil di-Approve! Data otomatis masuk ke Jadwal Mingguan & Absensi.', 'ok');
+                        toast('Request OS (' + dt + ' · ' + shiftName(sh) + ') berhasil di-Approve! Data otomatis masuk ke Jadwal Employee & Absensi.', 'ok');
                         if (dt === OD.tanggal && sh === OD.kode) { OD = v; drawOrder(); }
                         else loadOrder();
                     } catch (e) { b.disabled = false; fail(e); }
@@ -1464,12 +1465,12 @@
                 approvalBannerHtml = '<div class="approval-banner ok">' +
                     '<span class="material-symbols-outlined">verified</span>' +
                     '<div class="approval-banner-text"><b>Approved oleh Supervisor: ' + esc(appUserLabel) + '</b>' +
-                    '<small>Diajukan oleh: ' + esc(subUserLabel) + ' · Disetujui ' + esc((OD.approvedAt || '').slice(5, 16)) + ' · Data sudah masuk ke Jadwal Mingguan &amp; Absensi Shift</small></div></div>';
+                    '<small>Diajukan oleh: ' + esc(subUserLabel) + ' · Disetujui ' + esc((OD.approvedAt || '').slice(5, 16)) + ' · Data sudah masuk ke Jadwal Employee &amp; Absensi Shift</small></div></div>';
             } else if (appSt === 'PENDING') {
                 approvalBannerHtml = '<div class="approval-banner warn">' +
                     '<span class="material-symbols-outlined">pending_actions</span>' +
                     '<div class="approval-banner-text"><b>Waiting Approval Supervisor · ' + esc(spvUserLabel) + '</b>' +
-                    '<small>Diajukan oleh: <b>' + esc(subUserLabel) + '</b>' + (subAt ? ' (' + esc(subAt.slice(5, 16)) + ')' : '') + ' · Menunggu persetujuan Supervisor untuk masuk ke Jadwal Mingguan &amp; Absensi</small></div></div>';
+                    '<small>Diajukan oleh: <b>' + esc(subUserLabel) + '</b>' + (subAt ? ' (' + esc(subAt.slice(5, 16)) + ')' : '') + ' · Menunggu persetujuan Supervisor untuk masuk ke Jadwal Employee &amp; Absensi</small></div></div>';
             } else if (appSt === 'REJECTED') {
                 approvalBannerHtml = '<div class="approval-banner err">' +
                     '<span class="material-symbols-outlined">cancel</span>' +
@@ -1479,7 +1480,7 @@
                 approvalBannerHtml = '<div class="approval-banner draft">' +
                     '<span class="material-symbols-outlined">edit_note</span>' +
                     '<div class="approval-banner-text"><b>Draft Request OS</b>' +
-                    '<small>Pilih karyawan lalu klik <b>Submit ke Supervisor</b> (' + esc(spvUserLabel) + ') agar di-Approve &amp; masuk ke Jadwal Mingguan + Absensi.</small></div></div>';
+                    '<small>Pilih karyawan lalu klik <b>Submit ke Supervisor</b> (' + esc(spvUserLabel) + ') agar di-Approve &amp; masuk ke Jadwal Employee + Absensi.</small></div></div>';
             }
         }
 
@@ -1840,7 +1841,7 @@
             '<div class="row" style="gap:8px">' +
             (OD.canApprove && appSt !== 'APPROVED' ? '<button type="button" class="btn sm ok" id="resApproveBtn"><span class="material-symbols-outlined">verified</span> Approve Sekarang</button>' : '') +
             '<button type="button" class="btn sm primary" id="resGoAbs"><span class="material-symbols-outlined">how_to_reg</span> Clock-In Absensi →</button>' +
-            '<button type="button" class="btn sm" id="resGoJad"><span class="material-symbols-outlined">calendar_month</span> Jadwal Mingguan →</button>' +
+            '<button type="button" class="btn sm" id="resGoJad"><span class="material-symbols-outlined">calendar_month</span> Jadwal Employee →</button>' +
             '</div></div>' +
             '<div class="table-wrap" style="max-height:none"><table class="tbl"><thead><tr>' +
             '<th style="width:40px">No</th><th>Nama Karyawan</th><th>Divisi</th><th>Jam Kerja</th>' +
@@ -1965,7 +1966,7 @@
         try {
             const v = await call('orderApprove', orderPayload());
             OD = v; drawOrder();
-            toast('Request OS berhasil di-Approve! Data otomatis masuk ke Jadwal Mingguan & Absensi Shift.', 'ok');
+            toast('Request OS berhasil di-Approve! Data otomatis masuk ke Jadwal Employee & Absensi Shift.', 'ok');
         } catch (e) {
             if (btn) btn.disabled = false;
             fail(e);
@@ -2240,7 +2241,7 @@
         const act = o => isAdmin() ? '<button class="btn sm" data-edit="' + o.id + '">Ubah</button>' : '';
         $('#oBody').innerHTML =
             '<div class="only-wide"><div class="table-wrap" style="border:0"><table class="tbl"><thead><tr><th>Nama</th><th>NIK</th><th>Role</th><th>Bagian</th><th>Employer</th><th>Grup</th><th>Pola</th><th>Libur</th><th>Status</th><th></th></tr></thead><tbody>' +
-            list.map(o => '<tr><td><b>' + esc(o.nama) + '</b></td><td>' + esc(o.nik) + '</td><td class="small">' + esc(o.role) + '</td><td>' + esc(bagName(o.bagian)) + '</td><td>' + esc(o.employer) + '</td><td>' + esc(GRUP_LABEL[o.grup] || o.grup) + '</td><td>' + o.pola + ' hari</td><td>' + liburLabel(o.libur) + '</td>' +
+            list.map(o => '<tr><td><b>' + esc(o.nama) + '</b></td><td>' + esc(o.nik) + '</td><td class="small">' + esc(o.role) + '</td><td>' + esc(bagName(o.bagian)) + '</td><td><span class="chip xs ' + (o.employer === 'IEG' ? 'pri' : '') + '">' + esc(o.employer || 'RKA') + '</span></td><td>' + esc(GRUP_LABEL[o.grup] || o.grup) + '</td><td>' + o.pola + ' hari</td><td>' + liburLabel(o.libur) + '</td>' +
                 '<td><span class="chip ' + (o.aktif ? 'ok' : '') + '">' + (o.aktif ? 'Aktif' : 'Nonaktif') + '</span></td><td class="act">' + act(o) + '</td></tr>').join('') +
             '</tbody></table></div></div>' +
             '<div class="only-narrow">' + list.map(o => '<div class="list-item"><div class="grow"><b>' + esc(o.nama) + '</b><span class="small muted">' + esc(bagName(o.bagian)) + ' · ' + esc(GRUP_LABEL[o.grup] || o.grup) + ' · ' + o.pola + ' hari · libur ' + liburLabel(o.libur) + '</span></div>' +
@@ -2249,8 +2250,8 @@
     }
     function opModal(o) {
         const isNew = !o;
-        o = o || { nama: '', nik: '', bagian: S.op.bagian || (S.master.bagian[0] || {}).kode, grup: 'A', libur: '', hp: '', aktif: true, tglMasuk: '', ket: '', pola: 6, employer: '', role: '' };
-        const emps = S.master.operators.map(x => x.employer).filter((e, i, a) => e && a.indexOf(e) === i);
+        o = o || { nama: '', nik: '', bagian: S.op.bagian || (S.master.bagian[0] || {}).kode, grup: 'A', libur: '', hp: '', aktif: true, tglMasuk: '', ket: '', pola: 6, employer: 'RKA', role: '' };
+        const emp = String(o.employer || '').trim().toUpperCase() === 'IEG' ? 'IEG' : 'RKA';
         const lib = String(o.libur).split(',');
         openModal({
             title: isNew ? 'Tambah operator' : 'Ubah operator',
@@ -2260,7 +2261,7 @@
                 '<div class="grid2"><label class="field"><span>Bagian *</span><select name="bagian">' + S.master.bagian.map(b => '<option value="' + b.kode + '"' + (o.bagian === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') + '</select></label>' +
                 '<label class="field"><span>Grup rotasi *</span><select name="grup">' + Object.keys(GRUP_LABEL).map(k => '<option value="' + k + '"' + (o.grup === k ? ' selected' : '') + '>' + GRUP_LABEL[k] + '</option>').join('') + '</select></label></div>' +
                 '<div class="grid2"><label class="field"><span>Role & job desc</span><input name="role" value="' + esc(o.role) + '" placeholder="Staff Inventory"></label>' +
-                '<label class="field"><span>Employer</span><input name="employer" list="empList" value="' + esc(o.employer) + '" placeholder="IEG / LPK RKA"><datalist id="empList">' + emps.map(e => '<option value="' + esc(e) + '">').join('') + '</datalist></label></div>' +
+                '<label class="field"><span>Employer *</span><select name="employer">' + ['IEG', 'RKA'].map(e => '<option value="' + e + '"' + (emp === e ? ' selected' : '') + '>' + e + '</option>').join('') + '</select></label></div>' +
                 '<div class="field"><span>Pola kerja</span><div class="seg"><button type="button" data-pola="5" class="' + (o.pola === 5 ? 'on' : '') + '">5 hari kerja</button><button type="button" data-pola="6" class="' + (o.pola !== 5 ? 'on' : '') + '">6 hari kerja</button></div><input type="hidden" name="pola" value="' + (o.pola === 5 ? 5 : 6) + '">' +
                 '<small>5 hari = 2 hari OFF (bawaan Sabtu–Minggu). 6 hari = 1 hari OFF (bawaan Minggu) + HALF sehari sebelumnya.</small></div>' +
                 '<div class="field"><span>Hari libur rutin</span><div class="days-pick">' + [1, 2, 3, 4, 5, 6, 0].map(d => '<label><input type="checkbox" data-multi="1" name="libur" value="' + d + '"' + (lib.indexOf(String(d)) >= 0 ? ' checked' : '') + '>' + HARI3[d] + '</label>').join('') + '</div><small>Kosongkan untuk memakai bawaan pola (karyawan shift 6 hari dibagikan bergilir saat isi otomatis).</small></div>' +
@@ -2286,7 +2287,7 @@
         openModal({
             title: 'Import operator dari Excel',
             body: '<p class="small muted">Salin kolom dari Excel/Sheet lalu tempel di bawah (boleh dengan baris judul). Urutan kolom:</p>' +
-                '<p class="small mono">Nama | Bagian | Grup (A/B/S1/S2/NS) | NIK | No HP | Hari libur | Role | Employer | Pola (5/6)</p>' +
+                '<p class="small mono">Nama | Bagian | Grup (A/B/S1/S2/NS) | NIK | No HP | Hari libur | Role | Employer (IEG/RKA) | Pola (5/6)</p>' +
                 '<p class="small muted">Contoh: <span class="mono">Budi Santoso → PICKING → A → 1001 → 0812xxxx → Minggu</span></p>' +
                 '<textarea name="text" placeholder="Tempel di sini…"></textarea>' +
                 '<label class="check"><input type="checkbox" name="autoBagian" checked> Buat bagian baru otomatis bila belum terdaftar</label>' +
@@ -2412,11 +2413,11 @@
             '<div class="grid2"><label class="field"><span>Minggu acuan rotasi</span><input type="date" name="rotasi_anchor" value="' + esc(s.rotasi_anchor) + '"><small>Pada minggu ini grup A = Shift 1 (dibulatkan ke Senin).</small></label>' +
             '<label class="field"><span>Tukar shift setiap</span><select name="rotasi_periode">' + [1, 2, 3, 4].map(n => '<option value="' + n + '"' + (String(s.rotasi_periode) === String(n) ? ' selected' : '') + '>' + n + ' minggu</option>').join('') + '</select></label></div>' +
             '<div class="grid2"><label class="field"><span>Nama aplikasi</span><input name="app_nama" value="' + esc(s.app_nama) + '"></label>' +
-            '<label class="field"><span>Employer yang ikut Order MPP</span><input name="order_employer" value="' + esc(s.order_employer) + '" placeholder="LPK RKA"><small>Pisahkan koma. Kosong = semua karyawan.</small></label></div>' +
+            '<label class="field"><span>Employer yang ikut Order MPP</span><input name="order_employer" value="' + esc(s.order_employer) + '" placeholder="RKA"><small>Pisahkan koma. Kosong = semua karyawan.</small></label></div>' +
             '<button class="btn primary">Simpan aturan</button></form></div>' +
 
             '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;margin-right:6px">palette</span>Kode jadwal</h2><button type="button" class="btn sm" id="kAdd"><span class="material-symbols-outlined">add</span> Kode</button></div>' +
-            '<p class="small muted" style="margin-top:0">Dipakai di Jadwal Mingguan. "Dihitung sebagai" menentukan kode ini masuk Shift 1 atau Shift 2 untuk absensi, dashboard & Order MPP. Jam masuk berbeda (mis. LS 1 08:00–20:00) otomatis tampil di pesan request & tabel rekap.</p>' +
+            '<p class="small muted" style="margin-top:0">Dipakai di Jadwal Employee. "Dihitung sebagai" menentukan kode ini masuk Shift 1 atau Shift 2 untuk absensi, dashboard & Order MPP. Jam masuk berbeda (mis. LS 1 08:00–20:00) otomatis tampil di pesan request & tabel rekap.</p>' +
             '<div class="table-wrap"><table class="tbl kode-tbl"><thead><tr><th>Kode</th><th>Label</th><th>Nama</th><th>Hari kerja</th><th>Mulai</th><th>Selesai</th><th>Jam</th><th>Dihitung sebagai</th><th>Warna</th><th></th></tr></thead><tbody id="kRows"></tbody></table></div>' +
             '<div class="row" style="margin-top:10px"><button type="button" class="btn primary" id="kSave">Simpan kode jadwal</button></div></div>' +
 
@@ -2526,7 +2527,7 @@
         };
         loadUsers();
     }
-    function enterShellSoft() { $('#sideAppName').textContent = S.master.settings.app_nama; document.title = S.master.settings.app_nama; }
+    function enterShellSoft() { const n = S.master.settings.app_nama; $('#sideAppName').textContent = n.replace(/\s+PT.*$/i, '') || n; document.title = n; }
 
     let usersCache = [];
     async function loadUsers() {
@@ -2581,7 +2582,7 @@
             '</div>' +
             '<span class="spacer"></span>' +
             '<button type="button" class="btn sm primary" onclick="go(\'wa\')"><span class="material-symbols-outlined">add_circle</span> Buat / Edit Request OS</button>' +
-            '<button type="button" class="btn sm ghost" onclick="go(\'jadwal\')"><span class="material-symbols-outlined">calendar_month</span> Jadwal Mingguan →</button>' +
+            '<button type="button" class="btn sm ghost" onclick="go(\'jadwal\')"><span class="material-symbols-outlined">calendar_month</span> Jadwal Employee →</button>' +
             '</div>' +
             '<div id="raBody"><div class="empty">Memuat daftar Request OS…</div></div>';
 
@@ -2685,7 +2686,7 @@
             b.disabled = true;
             try {
                 await call('orderApprove', { tanggal: dt, shift: sh, dates: [dt] });
-                toast('Request OS (' + dt + ' · ' + shiftName(sh) + ') berhasil di-Approve! Data otomatis masuk ke Jadwal Mingguan & Absensi.', 'ok');
+                toast('Request OS (' + dt + ' · ' + shiftName(sh) + ') berhasil di-Approve! Data otomatis masuk ke Jadwal Employee & Absensi.', 'ok');
                 loadReqApprovalList();
             } catch (e) { b.disabled = false; fail(e); }
         });

@@ -243,7 +243,7 @@ function jadwal_minggu(array $p, array $currentUser): array {
 function jadwal_simpan(array $p, array $currentUser): array {
     $onlyIeg = !empty($p['onlyIeg']);
     if (!$onlyIeg && !in_array($currentUser['role'], ['ADMIN', 'SUPERVISOR'], true)) {
-        throw new RuntimeException('Jadwal Mingguan hanya dapat diubah melalui menu Jadwal IEG, Approval Request OS, atau oleh Admin / Supervisor.');
+        throw new RuntimeException('Jadwal Employee hanya dapat diubah melalui menu Jadwal IEG, Approval Request OS, atau oleh Admin / Supervisor.');
     }
     $tgl = !empty($p['tanggal']) ? (string)$p['tanggal'] : date('Y-m-d');
     $monday = monday_of($tgl);
@@ -503,7 +503,7 @@ function jadwal_isi(array $p, array $currentUser): array {
 
 function set_jadwal_cell(array $p, array $currentUser): bool {
     if (!in_array($currentUser['role'], ['ADMIN', 'SUPERVISOR'], true)) {
-        throw new RuntimeException('Jadwal Mingguan bersifat View-Only untuk role Anda.');
+        throw new RuntimeException('Jadwal Employee bersifat View-Only untuk role Anda.');
     }
     $id = trim((string)($p['operatorId'] ?? ''));
     $tgl = trim((string)($p['tanggal'] ?? ''));
