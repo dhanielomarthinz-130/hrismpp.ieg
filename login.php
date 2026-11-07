@@ -353,7 +353,7 @@ ob_start();
                         throw new Error(r && r.error ? r.error : 'Gagal masuk ke sistem');
                     }
                     localStorage.setItem('hris_token', r.data.token);
-                    const baseDir = location.pathname.replace(/\/(login(\.php)?|index\.php|Index\.html)$/i, '');
+                    const baseDir = location.pathname.replace(/\/(login(\.php)?|index\.php|Index\.html)\/?$/i, '').replace(/\/+$/, '');
                     window.location.href = (baseDir || '') + '/';
                 } catch (err) {
                     errBox.textContent = err.message || 'Username atau password salah.';

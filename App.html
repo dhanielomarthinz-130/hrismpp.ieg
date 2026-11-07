@@ -196,7 +196,9 @@
         showLogin();
     }
     function showLogin() {
-        const baseDir = location.pathname.replace(/\/(index\.php|Index\.html|login(\.php)?)$/i, '');
+        // Buang nama file & garis miring di akhir: "/" -> "", "/solihin_appsrcipt/" -> "/solihin_appsrcipt"
+        // (tanpa ini, di root domain hasilnya "//login" yang dibaca browser sebagai host "login")
+        const baseDir = location.pathname.replace(/\/(index\.php|Index\.html|login(\.php)?)\/?$/i, '').replace(/\/+$/, '');
         if (!/\/login$/i.test(location.pathname)) {
             window.location.replace((baseDir || '') + '/login');
             return;
