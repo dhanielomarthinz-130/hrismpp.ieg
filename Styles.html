@@ -3596,6 +3596,234 @@
         }
     }
 
+    /* ---------------------------------------------------------------- 9b Mobile (HP) */
+    .check + .field,
+    .check + .grid2 {
+        margin-top: 10px;
+    }
+
+    @media (max-width: 767px) {
+        .view {
+            padding: 12px 12px 28px;
+        }
+
+        /* Toolbar: setiap baris terisi penuh & rata, bukan tombol berserakan */
+        .toolbar {
+            gap: 8px;
+        }
+
+        .toolbar > * {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .toolbar > .spacer {
+            display: none;
+        }
+
+        .toolbar input[type="date"],
+        .toolbar select,
+        .toolbar input[type="search"],
+        .toolbar input[type="text"] {
+            flex: 1 1 140px;
+            width: auto;
+            min-width: 0;
+        }
+
+        .toolbar .seg {
+            display: flex;
+            flex-wrap: nowrap;
+        }
+
+        .toolbar .seg button {
+            flex: 1 1 0;
+            padding: 0 8px;
+        }
+
+        .toolbar .btn {
+            flex: 1 1 calc(50% - 4px);
+            justify-content: center;
+        }
+
+        /* Tombol ikon saja (panah sebelum/berikut, ditandai aria-label) tetap ringkas */
+        .toolbar .btn[aria-label] {
+            flex: 0 0 40px;
+            padding: 0;
+        }
+
+        /* Segmen (shift / jenis) berbagi baris dengan tanggal bila muat */
+        .toolbar .seg {
+            flex: 1 1 170px;
+        }
+
+        /* Segmen kedua (mis. Request OS / Realisasi) mendapat baris sendiri */
+        .toolbar .seg + .seg {
+            flex-basis: 100%;
+        }
+
+        /* Rentang tanggal "‹ tgl s/d tgl ›" muat satu baris */
+        .toolbar input[type="date"] {
+            flex: 1 1 110px;
+            padding-left: 8px;
+            padding-right: 4px;
+            font-size: 13px;
+        }
+
+        /* Label panjang tidak meluber keluar tombol */
+        .toolbar .btn {
+            overflow: hidden;
+        }
+
+        .toolbar .btn.ghost {
+            background: var(--surface);
+            border-color: var(--border);
+            color: var(--text);
+            box-shadow: var(--shadow-xs);
+        }
+
+        .toolbar > .chip {
+            flex: 0 1 auto;
+        }
+
+        .toolbar > span:not(.chip):not(.spacer):not(.seg) {
+            flex: 0 0 auto;
+        }
+
+        /* Kartu: judul & aksi rapi */
+        .card {
+            padding: 14px;
+            border-radius: 14px;
+        }
+
+        .card-head h2,
+        .card-head h3 {
+            font-size: 14px;
+        }
+
+        .kpis {
+            gap: 10px;
+        }
+
+        .kpi {
+            padding: 12px 14px;
+            min-height: 96px;
+        }
+
+        .kpi .val {
+            font-size: 24px;
+        }
+
+        .kpi.hero .val {
+            font-size: 28px;
+        }
+
+        /* Absensi: nama & tombol Clock-In satu baris */
+        .att:not(.vac-fill-row) {
+            grid-template-columns: minmax(0, 1fr) auto;
+            grid-template-areas:
+                "name pill"
+                "stat stat"
+                "extra extra";
+            align-items: center;
+            gap: 8px 10px;
+            padding: 12px 14px;
+        }
+
+        .att:not(.vac-fill-row) > .att-name {
+            grid-area: name;
+        }
+
+        .att:not(.vac-fill-row) > .clockin-pill {
+            grid-area: pill;
+            justify-self: end;
+        }
+
+        .att:not(.vac-fill-row) > .stat-btns {
+            grid-area: stat;
+        }
+
+        .att:not(.vac-fill-row) > .att-extra {
+            grid-area: extra;
+        }
+
+        .grp-head {
+            padding: 10px 12px;
+            font-size: 13px;
+        }
+
+        .abs-summary-bar {
+            padding: 12px 14px;
+        }
+
+        .abs-summary-bar .seg {
+            width: 100%;
+        }
+
+        .abs-summary-bar .seg button {
+            flex: 1 1 0;
+        }
+
+        /* Pil tanggal Request OS muat 7 kolom */
+        .od-week-pills {
+            gap: 4px;
+        }
+
+        .od-day-pill {
+            min-height: 44px;
+            padding: 4px 0;
+        }
+
+        .od-day-pill span {
+            font-size: 10px;
+        }
+
+        .od-day-pill b {
+            font-size: 11.5px;
+            letter-spacing: -0.02em;
+        }
+
+        .od-card-stat {
+            padding: 12px;
+        }
+
+        /* Baris status & tombol di halaman Request OS */
+        .status-line {
+            gap: 6px;
+            font-size: 12px;
+        }
+
+        /* Modal penuh lebar di HP */
+        .modal-body {
+            padding: 6px 16px 16px;
+        }
+
+        .modal-head {
+            padding: 14px 12px 8px 16px;
+        }
+
+        .modal-foot {
+            padding: 12px 16px calc(14px + env(safe-area-inset-bottom));
+        }
+
+        .modal-foot .btn {
+            flex: 1 1 0;
+        }
+
+        .foto-edit {
+            gap: 12px;
+        }
+
+        .foto-ava {
+            width: 60px;
+            height: 60px;
+            font-size: 22px;
+        }
+
+        .savebar {
+            bottom: calc(68px + env(safe-area-inset-bottom));
+        }
+    }
+
     /* ---------------------------------------------------------------- 10 Utilitas */
     .ico-inline {
         font-size: 18px !important;
