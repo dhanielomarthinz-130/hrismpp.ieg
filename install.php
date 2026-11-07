@@ -62,7 +62,8 @@ $h = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" type="image/png" href="assets/image/logo-IEG.png">
+    <link rel="icon" type="image/svg+xml" href="assets/image/favicon.svg">
+    <link rel="icon" type="image/png" sizes="180x180" href="assets/image/favicon-180.png">
     <title>Status Sistem · HRIS MPP</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
