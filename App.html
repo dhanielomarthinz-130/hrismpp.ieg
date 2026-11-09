@@ -3097,7 +3097,7 @@
     }
 
     function mtAutoApproveCard(on) {
-        return '<div class="card" style="max-width:760px">' +
+        return '<div class="card">' +
             '<div class="card-head"><h2><span class="material-symbols-outlined">verified</span>Approval Supervisor otomatis</h2>' +
             '<span class="chip ' + (on ? 'ok' : '') + '">' + (on ? 'Aktif' : 'Nonaktif') + '</span></div>' +
             '<p class="muted" style="margin-top:0">' + (on
@@ -3112,7 +3112,7 @@
         const on = !!d.aktif;
         const key = String(d.key || '');
         const url = location.origin + location.pathname.replace(/[^/]*$/, '') + 'maintenance/' + key.charAt(0).toUpperCase() + key.slice(1);
-        $('#mtBody').innerHTML = '<div class="card" style="max-width:760px">' +
+        $('#mtBody').innerHTML = '<div class="card">' +
             '<div class="card-head"><h2><span class="material-symbols-outlined">construction</span>Mode maintenance</h2>' +
             '<span class="chip ' + (on ? 'warn' : 'ok') + '">' + (on ? 'Aktif' : 'Nonaktif') + '</span></div>' +
             '<p class="muted" style="margin-top:0">' + (on
@@ -3124,7 +3124,7 @@
             '<button class="btn ' + (on ? 'primary' : 'danger') + '" id="mtToggle"><span class="material-symbols-outlined">' + (on ? 'play_circle' : 'construction') + '</span> ' +
             (on ? 'Nonaktifkan maintenance' : 'Aktifkan maintenance') + '</button></div>' +
             mtAutoApproveCard(!!d.autoApprove) +
-            '<div class="card" style="max-width:760px"><div class="card-head"><h2><span class="material-symbols-outlined">database</span>Database</h2>' +
+            '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined">database</span>Database</h2>' +
             '<button type="button" class="btn sm ghost" id="dbReload"><span class="material-symbols-outlined">refresh</span> Muat ulang</button></div>' +
             '<p class="small muted" style="margin-top:0">Lihat isi setiap tabel, hapus baris satu per satu, atau kosongkan tabel. Kolom sensitif disamarkan; akun super admin dilindungi.</p>' +
             '<div id="dbList"><div class="empty">Memuat…</div></div></div>';

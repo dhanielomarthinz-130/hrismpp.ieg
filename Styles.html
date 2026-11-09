@@ -31,7 +31,7 @@
         --violet: #7C3AED;
         --pink: #EC4899;
         --grad: linear-gradient(135deg, #4F46E5 0%, #7C3AED 55%, #EC4899 100%);
-        --th-bg: linear-gradient(90deg, #EEF2FF 0%, #FDF2F8 100%);
+        --th-bg: linear-gradient(#F4F5FF, #F4F5FF);
         --th-text: #3730A3;
 
         --side-bg: linear-gradient(180deg, #0F172A 0%, #1E1B4B 55%, #172554 100%);
@@ -94,7 +94,7 @@
         --violet: #A78BFA;
         --pink: #F472B6;
         --grad: linear-gradient(135deg, #6366F1 0%, #8B5CF6 55%, #EC4899 100%);
-        --th-bg: linear-gradient(90deg, rgba(79, 70, 229, 0.28) 0%, rgba(236, 72, 153, 0.18) 100%);
+        --th-bg: linear-gradient(rgba(99, 102, 241, 0.16), rgba(99, 102, 241, 0.16));
         --th-text: #C7D2FE;
 
         --side-bg: linear-gradient(180deg, #050811 0%, #0F172A 60%, #172554 100%);
@@ -1296,7 +1296,6 @@
         padding: 14px 12px 28px;
         outline: none;
         width: 100%;
-        max-width: 1600px;
         min-width: 0;
     }
 
@@ -3957,6 +3956,93 @@
 
         .savebar {
             bottom: calc(68px + env(safe-area-inset-bottom));
+        }
+
+        /* ---- Tampilan premium HP ---- */
+        .topbar {
+            padding: 8px 12px 8px 8px;
+        }
+
+        .top-title h1,
+        .top-title .t {
+            letter-spacing: -0.01em;
+        }
+
+        /* Navigasi bawah: kaca buram, garis halus, indikator aktif */
+        .bottom-nav {
+            background: color-mix(in srgb, var(--surface) 88%, transparent);
+            backdrop-filter: saturate(1.6) blur(16px);
+            -webkit-backdrop-filter: saturate(1.6) blur(16px);
+            border-top: 1px solid var(--line);
+            box-shadow: 0 -6px 24px rgba(15, 23, 42, 0.06);
+        }
+
+        .bottom-nav a {
+            min-height: 60px;
+            font-size: 10.5px;
+            letter-spacing: 0;
+        }
+
+        .bottom-nav a .ico {
+            width: 52px;
+            height: 28px;
+            border-radius: 14px;
+        }
+
+        .bottom-nav a.active .ico .material-symbols-outlined {
+            font-variation-settings: 'FILL' 1;
+        }
+
+        /* Kartu: sudut & bayangan halus, tanpa border tebal */
+        .card {
+            border-color: var(--line);
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 16px rgba(15, 23, 42, 0.04);
+        }
+
+        /* Daftar (operator, user, dll.): baris lega, keterangan satu baris */
+        .list-item {
+            padding: 12px 14px;
+            gap: 12px;
+            min-height: 64px;
+        }
+
+        .list-item .grow > .small,
+        .list-item .grow > span.muted {
+            display: block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-top: 2px;
+        }
+
+        .list-item b {
+            font-size: 14px;
+        }
+
+        .list-item .btn.sm {
+            flex: none;
+            min-height: 34px;
+        }
+
+        /* Kontrol form: tinggi sentuh nyaman & seragam */
+        .toolbar select,
+        .toolbar input[type="search"],
+        .toolbar input[type="text"],
+        .toolbar input[type="date"] {
+            min-height: 40px;
+            border-radius: 10px;
+        }
+
+        .toolbar .btn {
+            min-height: 40px;
+            border-radius: 10px;
+        }
+
+        /* Tabel di HP: geser halus, tepi kanan tidak terpotong kasar */
+        .table-wrap {
+            border-radius: 14px;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior-x: contain;
         }
     }
 
