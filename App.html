@@ -1021,12 +1021,16 @@
             J.dates.map(x => '<th class="c-day' + (x.isToday ? ' today' : '') + '" data-day-d="' + x.d + '"' + (editable ? ' title="Klik untuk input per tanggal ini" style="cursor:pointer"' : '') + '><span>' + x.hari.slice(0, 3) + '</span><b>' + x.tgl + '</b></th>').join('') +
             '<th class="c-jam" title="Total jam minggu ini (termasuk lembur)">Jam</th><th class="c-hari" title="Hari kerja / pola">Hari</th></tr></thead><tbody>';
         let no = 0;
+        const opById = {};
+        (S.master.operators || []).forEach(o => { opById[o.id] = o; });
         rows.forEach(r => {
             no++;
             const ev = evalRow(r);
+            const opRec = opById[r.id];
             const ed = r.canEdit && editable;
             h += '<tr data-op="' + r.id + '"><td class="c-no">' + no + '</td>' +
-                '<td class="c-nama"><b>' + esc(r.nama) + '</b><small>' + esc((GRUP_LABEL[r.grup] || r.grup) + ' · ' + r.pola + ' hari' + (r.employer ? ' · ' + r.employer : '')) + '</small></td>' +
+                '<td class="c-nama"><div class="wk-nm"><span class="op-ava' + (opRec ? ' clickable" data-view-foto="' + r.id + '" role="button" tabindex="0" title="Lihat foto' : '') + '">' + avatarHtml(r.nama, opRec ? opRec.foto : '') + '</span>' +
+                '<div class="wk-nm-txt"><b>' + esc(r.nama) + '</b><small>' + esc((GRUP_LABEL[r.grup] || r.grup) + ' · ' + r.pola + ' hari' + (r.employer ? ' · ' + r.employer : '')) + '</small></div></div></td>' +
                 '<td class="c-bag"><span class="badge-bag' + (editable ? ' clickable' : '') + '" data-op-bag="' + esc(r.bagian) + '" title="' + (editable ? 'Klik untuk input divisi ini' : '') + '">' + esc(bagName(r.bagian)) + '</span></td>' +
                 '<td class="c-nik wide-only">' + esc(r.nik) + '</td>' +
                 '<td class="c-role wide-only">' + esc(r.role) + '</td>' +
@@ -1057,6 +1061,11 @@
         h += '</tfoot></table></div>' +
             '<div class="legend">' + J.kodes.map(k => '<span class="cell" style="background:' + k.warna + ';color:' + textColor(k.warna) + '">' + esc(k.label) + '</span><span class="muted small">' + (k.kerja ? k.mulai + '–' + k.selesai + ' (' + k.jam + 'j)' : esc(k.nama)) + '</span>').join(' ') + '</div>';
         $('#wkBody').innerHTML = h;
+        $$('#wkBody [data-view-foto]').forEach(b => {
+            const open = () => fotoViewModal((S.master.operators || []).find(o => o.id === b.dataset.viewFoto));
+            b.onclick = open;
+            b.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+        });
         $$('#wkBody .kc:not([disabled])').forEach(b => {
             const tr = b.closest('tr'), r = J.rows.find(x => x.id === tr.dataset.op), i = +b.dataset.i;
             b.onmousedown = e => { if (jBrush) { e.preventDefault(); jPaint = true; setCell(r, i, jBrush === '-' ? '' : jBrush); } };
