@@ -544,6 +544,7 @@
 
     /* =========================== ABSENSI (CHECKLIST MASUK / CLOCK-IN) =========================== */
     let absQueue = {}, absTimer = null, absData = null, absMode = 'AUTO', absBagFilter = '';
+    const absOpen = {}; // grup divisi yang sedang dibuka di halaman Absensi
 
     async function renderAbsensi() {
         const c = S.master.current;
@@ -769,6 +770,7 @@
         const groups = {};
         rows.forEach(r => (groups[r.bagianTugas] = groups[r.bagianTugas] || []).push(r));
         const order = S.master.bagian.map(b => b.kode).filter(k => groups[k]).concat(Object.keys(groups).filter(k => !S.master.bagian.some(b => b.kode === k)));
+        const q = ($('#aQ') ? $('#aQ').value : '').trim(); // saat mencari, semua grup dibuka
         $('#aBody').innerHTML = availDatalist + order.map(k => {
             const list = groups[k].slice().sort((a, b) => {
                 const vacA = (a.isVacant || /vacant/i.test(a.nama)) ? 0 : 1; // Tampilkan slot VACANT di paling atas divisi agar langsung terlihat & dinamai
@@ -780,15 +782,32 @@
             const vacInGroup = list.length - namedList.length;
             const hadir = namedList.filter(r => r.status === 'H' || r.status === 'T').length;
             const editable = list.some(r => r.canEdit);
-            return '<div class="grp"><div class="grp-head">' +
-                '<span>' + esc(bagName(k)) + '</span>' +
+            const st = grpState(list);
+            const open = !!absOpen[k] || !!q;
+            return '<div class="grp ' + (st.done ? 'grp-done' : 'grp-todo') + (open ? ' open' : '') + '" data-grp="' + esc(k) + '"><div class="grp-head" role="button" tabindex="0" aria-expanded="' + open + '" title="Klik untuk buka / tutup">' +
+                '<span class="material-symbols-outlined grp-chev" aria-hidden="true">expand_more</span>' +
+                '<span class="grp-name">' + esc(bagName(k)) + '</span>' +
                 '<span class="chip pri" data-cnt="' + k + '">' + hadir + ' / ' + list.length + ' Masuk</span>' +
+                '<span class="chip xs grp-st">' + st.label + '</span>' +
                 (vacInGroup > 0 ? '<span class="chip xs warn">' + vacInGroup + ' Slot Vacant Belum Dinamai</span>' : '') +
                 '<span class="spacer"></span>' +
                 (editable && namedList.length ? '<button class="btn xs ghost" data-allh="' + k + '"><span class="material-symbols-outlined" style="font-size:15px">done_all</span> Clock-In Divisi</button>' : '') +
                 '</div><div class="grp-body">' +
                 list.map((r, idx) => absRow(r, idx)).join('') + '</div></div>';
         }).join('');
+
+        // Grup divisi bisa dibuka / ditutup (bawaan tertutup)
+        $$('#aBody .grp-head').forEach(h => {
+            const toggle = () => {
+                const g = h.closest('.grp'), k = g.dataset.grp;
+                const open = !g.classList.contains('open');
+                g.classList.toggle('open', open);
+                h.setAttribute('aria-expanded', open);
+                absOpen[k] = open;
+            };
+            h.onclick = e => { if (e.target.closest('button, input, a')) return; toggle(); };
+            h.onkeydown = e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === h) { e.preventDefault(); toggle(); } };
+        });
 
         $$('.clockin-check').forEach(cb => cb.onchange = () => {
             const id = cb.closest('.att').dataset.id;
@@ -881,6 +900,12 @@
             (r.canEdit && r.terjadwal ? '<button class="icon-btn" data-rm="' + r.operatorId + '" title="Keluarkan dari shift" aria-label="Keluarkan dari shift"><span class="material-symbols-outlined">close</span></button>' : '') + '</div></div>';
     }
 
+    // Status grup divisi: lengkap (hijau) bila semua sudah diabsen & tidak ada slot VACANT kosong; selain itu merah
+    function grpState(list) {
+        const belum = list.filter(r => (r.isVacant || /vacant/i.test(r.nama)) || !r.status).length;
+        return { done: list.length > 0 && belum === 0, label: belum ? belum + ' belum absen' : 'Lengkap' };
+    }
+
     function setStatus(id, s, force) {
         const r = absData.rows.find(x => x.operatorId === id);
         if (!r || !r.canEdit) return;
@@ -911,6 +936,14 @@
         const list = getFilteredAbsRows().filter(x => x.bagianTugas === r.bagianTugas);
         const cnt = $('[data-cnt="' + r.bagianTugas + '"]');
         if (cnt) cnt.textContent = list.filter(x => x.status === 'H' || x.status === 'T').length + ' / ' + list.length + ' Masuk';
+        const g = cnt && cnt.closest('.grp');
+        if (g) {
+            const st = grpState(list);
+            g.classList.toggle('grp-done', st.done);
+            g.classList.toggle('grp-todo', !st.done);
+            const sc = $('.grp-st', g);
+            if (sc) sc.textContent = st.label;
+        }
         updateAbsStats();
         queueAbs(id, {});
     }

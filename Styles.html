@@ -1916,6 +1916,68 @@
         background: var(--surface);
     }
 
+    /* Grup divisi Absensi: buka / tutup + warna status */
+    .grp[data-grp] > .grp-head {
+        cursor: pointer;
+        user-select: none;
+        border-left: 4px solid transparent;
+    }
+
+    .grp[data-grp]:not(.open) > .grp-head {
+        border-bottom: 0;
+    }
+
+    .grp[data-grp]:not(.open) > .grp-body {
+        display: none;
+    }
+
+    .grp-chev {
+        font-size: 20px !important;
+        transition: transform .18s cubic-bezier(.23, 1, .32, 1);
+        transform: rotate(-90deg);
+    }
+
+    .grp.open .grp-chev {
+        transform: none;
+    }
+
+    .grp.grp-todo {
+        border-color: var(--err-line);
+    }
+
+    .grp.grp-todo > .grp-head {
+        background: var(--err-bg);
+        background-image: none;
+        color: var(--err);
+        border-left-color: var(--err);
+    }
+
+    .grp.grp-todo .grp-st {
+        background: var(--err);
+        color: #fff;
+    }
+
+    .grp.grp-done {
+        border-color: var(--ok-line);
+    }
+
+    .grp.grp-done > .grp-head {
+        background: var(--ok-bg);
+        background-image: none;
+        color: var(--ok);
+        border-left-color: var(--ok);
+    }
+
+    .grp.grp-done .grp-st {
+        background: var(--ok);
+        color: #fff;
+    }
+
+    .grp-head:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: -2px;
+    }
+
     .att {
         display: grid;
         grid-template-columns: minmax(0, 1fr);
