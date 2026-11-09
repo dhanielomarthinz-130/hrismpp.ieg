@@ -1554,6 +1554,13 @@
 
     async function loadOrder() {
         OD = await call('order', { tanggal: S.wa.tanggal, shift: S.wa.shift });
+        // Request yang sudah disubmit (menunggu / sudah Approve) tidak dicentang ulang saat data dimuat lagi:
+        // checklist dikosongkan untuk request tambahan; daftar yang disubmit tetap tersimpan di server.
+        const st = String(OD.approvalStatus || '').toUpperCase();
+        if (OD.reqSubmitAt && (st === 'PENDING' || st === 'APPROVED') && (OD.req || []).length) {
+            odLastSubmit = { tanggal: OD.tanggal, kode: OD.kode, req: OD.req.map(x => Object.assign({}, x)), request: OD.request };
+            OD.req = []; OD.request = 0; OD.afterSubmit = true;
+        }
         if (!odSelectedDates.length || odSelectedDates.indexOf(OD.tanggal) < 0) {
             odSelectedDates = [OD.tanggal];
         }
