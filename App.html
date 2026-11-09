@@ -995,17 +995,14 @@
 
     function weekRows() {
         const q = (S.jad.q || '').toLowerCase();
-        const bagOrder = {};
-        (S.master.bagian || []).forEach((b, i) => { bagOrder[b.kode] = i; });
         return J.rows.filter(r => (!S.jad.bagian || r.bagian === S.jad.bagian) && (!S.jad.emp || r.employer === S.jad.emp) &&
             (!q || r.nama.toLowerCase().indexOf(q) >= 0 || String(r.nik).indexOf(q) >= 0))
             .sort((a, b) => {
                 const vacA = /vacant/i.test(a.nama) ? 1 : 0;
                 const vacB = /vacant/i.test(b.nama) ? 1 : 0;
                 if (vacA !== vacB) return vacA - vacB;
-                const ordA = a.bagian in bagOrder ? bagOrder[a.bagian] : 99;
-                const ordB = b.bagian in bagOrder ? bagOrder[b.bagian] : 99;
-                return (ordA - ordB) || (a.nama || '').localeCompare(b.nama || '');
+                // Urut nama A–Z (VACANT tetap di bawah)
+                return (a.nama || '').localeCompare(b.nama || '', 'id', { sensitivity: 'base' });
             });
     }
 
@@ -1160,8 +1157,6 @@
 
         function getEligibleOps() {
             const q = filterQ.trim().toLowerCase();
-            const bagOrder = {};
-            (S.master.bagian || []).forEach((b, i) => { bagOrder[b.kode] = i; });
             return J.rows.filter(r => {
                 if (curBag && r.bagian !== curBag) return false;
                 if (q && r.nama.toLowerCase().indexOf(q) < 0 && String(r.nik).indexOf(q) < 0) return false;
@@ -1170,9 +1165,8 @@
                 const vacA = /vacant/i.test(a.nama) ? 1 : 0;
                 const vacB = /vacant/i.test(b.nama) ? 1 : 0;
                 if (vacA !== vacB) return vacA - vacB;
-                const ordA = a.bagian in bagOrder ? bagOrder[a.bagian] : 99;
-                const ordB = b.bagian in bagOrder ? bagOrder[b.bagian] : 99;
-                return (ordA - ordB) || (a.nama || '').localeCompare(b.nama || '');
+                // Urut nama A–Z (VACANT tetap di bawah)
+                return (a.nama || '').localeCompare(b.nama || '', 'id', { sensitivity: 'base' });
             });
         }
 

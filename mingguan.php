@@ -113,10 +113,6 @@ function jadwal_minggu(array $p, array $currentUser): array {
         $ops = array_values(array_filter($ops, 'is_ieg_operator_'));
     }
     $bag = bagian_();
-    $bagOrder = [];
-    foreach ($bag as $i => $b) {
-        $bagOrder[$b['kode']] = $i;
-    }
 
     // Ambil jadwal rentang prevSun s/d dates[6]
     $jadRows = db_all("SELECT operator_id, tanggal, shift, sumber, ket FROM jadwal WHERE tanggal BETWEEN ? AND ?", [$prevSun, $dates[6]]);
@@ -191,15 +187,12 @@ function jadwal_minggu(array $p, array $currentUser): array {
         ];
     }
 
-    usort($rows, function ($a, $b) use ($bagOrder) {
+    usort($rows, function ($a, $b) {
         $vacA = stripos($a['nama'], 'vacant') !== false ? 1 : 0;
         $vacB = stripos($b['nama'], 'vacant') !== false ? 1 : 0;
         if ($vacA !== $vacB) return $vacA - $vacB;
 
-        $orderA = $bagOrder[$a['bagian']] ?? 99;
-        $orderB = $bagOrder[$b['bagian']] ?? 99;
-        if ($orderA !== $orderB) return $orderA - $orderB;
-
+        // Urut nama A–Z (VACANT tetap di bawah)
         return strcasecmp($a['nama'], $b['nama']);
     });
 
