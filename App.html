@@ -2877,7 +2877,22 @@
         $('#bAdd').onclick = () => bagModal(null);
         $$('[data-b]').forEach(x => x.onclick = () => bagModal(S.master.bagian.find(b => b.kode === x.dataset.b)));
     }
-    function bagModal(b) {
+    // Daftar Bagian / Divisi di halaman Pengaturan
+    function drawSetBagian() {
+        const box = $('#sbList');
+        if (!box) return;
+        const cnt = {};
+        S.master.operators.filter(o => o.aktif).forEach(o => cnt[o.bagian] = (cnt[o.bagian] || 0) + 1);
+        const list = S.master.bagian;
+        if (!list.length) { box.innerHTML = '<div class="empty">Belum ada bagian / divisi.</div>'; return; }
+        box.innerHTML = '<div class="table-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>Bagian / Divisi</th><th>Kode</th><th class="num">Target ' + esc(shiftName('S1')) + '</th><th class="num">Target ' + esc(shiftName('S2')) + '</th><th class="num">Operator aktif</th><th>Status</th><th></th></tr></thead><tbody>' +
+            list.map(b => '<tr><td><b>' + esc(b.nama) + '</b></td><td class="small muted">' + esc(b.kode) + '</td><td class="num">' + b.targetS1 + '</td><td class="num">' + b.targetS2 + '</td><td class="num">' + (cnt[b.kode] || 0) + '</td>' +
+                '<td><span class="chip ' + (b.aktif ? 'ok' : '') + '">' + (b.aktif ? 'Aktif' : 'Nonaktif') + '</span></td><td class="act"><button type="button" class="btn sm" data-sb="' + esc(b.kode) + '">Ubah</button></td></tr>').join('') +
+            '</tbody></table></div>';
+        $$('[data-sb]', box).forEach(x => x.onclick = () => bagModal(S.master.bagian.find(b => b.kode === x.dataset.sb), drawSetBagian));
+    }
+    function bagModal(b, onDone) {
+        const after = onDone || renderBagian;
         const isNew = !b;
         b = b || { kode: '', nama: '', targetS1: 0, targetS2: 0, urutan: S.master.bagian.length + 1, aktif: true };
         openModal({
@@ -2891,12 +2906,12 @@
             buttons: (isNew ? [] : [{
                 label: 'Hapus', cls: 'danger', onClick: async () => {
                     if (!await confirmBox('Hapus bagian?', b.nama, 'Hapus', 'danger')) return;
-                    try { await call('deleteBagian', { kode: b.kode }); toast('Bagian dihapus.', 'ok'); await loadMaster(); renderBagian(); } catch (e) { fail(e); }
+                    try { await call('deleteBagian', { kode: b.kode }); toast('Bagian dihapus.', 'ok'); closeModal(); await loadMaster(); after(); } catch (e) { fail(e); }
                 }
             }]).concat([{ label: 'Batal' }, {
                 label: 'Simpan', cls: 'primary', onClick: async () => {
                     const f = formData($('#modalBody')); f.isNew = isNew;
-                    try { await call('saveBagian', f); closeModal(); toast('Bagian disimpan.', 'ok'); await loadMaster(); renderBagian(); } catch (e) { fail(e); }
+                    try { await call('saveBagian', f); closeModal(); toast('Bagian disimpan.', 'ok'); await loadMaster(); after(); } catch (e) { fail(e); }
                 }
             }])
         });
@@ -2972,6 +2987,10 @@
             '<div class="grid2"><label class="field"><span>Nama aplikasi</span><input name="app_nama" value="' + esc(s.app_nama) + '"></label>' +
             '<label class="field"><span>Employer yang ikut Order MPP</span><input name="order_employer" value="' + esc(s.order_employer) + '" placeholder="RKA"><small>Hanya karyawan employer ini yang tampil di Request OS. Pisahkan koma (IEG / RKA). Kosong = RKA.</small></label></div>' +
             '<button class="btn primary">Simpan aturan</button></form></div>' +
+
+            '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;margin-right:6px">domain</span>Bagian / Divisi</h2><button type="button" class="btn sm primary" id="sbAdd"><span class="material-symbols-outlined">add_business</span> Tambah Bagian / Divisi</button></div>' +
+            '<p class="small muted" style="margin-top:0">Daftar bagian (divisi) dipakai di Operator, Jadwal, Request OS, Absensi & Dashboard. Target MPP per shift diatur di sini atau di menu Bagian &amp; Target.</p>' +
+            '<div id="sbList"></div></div>' +
 
             '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;margin-right:6px">palette</span>Kode jadwal</h2><button type="button" class="btn sm" id="kAdd"><span class="material-symbols-outlined">add</span> Kode</button></div>' +
             '<p class="small muted" style="margin-top:0">Dipakai di Jadwal Employee. "Dihitung sebagai" menentukan kode ini masuk Shift 1 atau Shift 2 untuk absensi, dashboard & Order MPP. Jam masuk berbeda (mis. LS 1 08:00–20:00) otomatis tampil di pesan request & tabel rekap.</p>' +
@@ -3077,6 +3096,8 @@
         $('#gGet').onclick = () => listGroups(false);
         $('#gRef').onclick = async () => { if (await confirmBox('Perbarui daftar grup?', 'Jalankan hanya saat baru bergabung/keluar grup. Terlalu sering bisa membuat nomor diblokir WhatsApp.', 'Perbarui')) listGroups(true); };
         $('#uAdd').onclick = () => userModal(null);
+        $('#sbAdd').onclick = () => bagModal(null, drawSetBagian);
+        drawSetBagian();
         $('#aLoad').onclick = async () => {
             const a = await call('audit');
             $('#auList').innerHTML = '<div class="table-wrap" style="max-height:360px"><table class="tbl"><thead><tr><th>Waktu</th><th>User</th><th>Aksi</th><th>Detail</th></tr></thead><tbody>' +
