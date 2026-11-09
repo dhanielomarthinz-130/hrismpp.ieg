@@ -1682,7 +1682,9 @@
         overflow: auto;
         border: 1px solid var(--border);
         border-radius: var(--r-lg);
-        max-height: 70vh;
+        /* Isi tinggi layar: dikurangi topbar + toolbar + padding halaman */
+        max-height: max(360px, calc(100vh - 175px));
+        max-height: max(360px, calc(100dvh - 175px));
         background: var(--surface);
     }
 

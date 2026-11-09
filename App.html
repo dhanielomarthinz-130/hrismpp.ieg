@@ -2339,7 +2339,7 @@
             '<select id="rkBagSel"><option value="">Semua Divisi</option>' + (S.master.bagian || []).map(b => '<option value="' + b.kode + '"' + (rkBagFilter === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') + '</select>' +
             '<input type="search" id="rkSearch" placeholder="Cari nama…" value="' + esc(rkQ) + '" style="width:180px">' +
             '</div></div>' +
-            '<div class="table-wrap" style="max-height:520px"><table class="tbl"><thead><tr>' +
+            '<div class="table-wrap"><table class="tbl"><thead><tr>' +
             '<th style="width:40px">No</th><th>Tanggal</th><th>Shift</th><th>Nama Karyawan</th><th>Divisi</th><th>Status Kehadiran</th><th>Jam Clock-In</th><th>Keterangan</th><th class="act">Aksi</th>' +
             '</tr></thead><tbody>';
 
