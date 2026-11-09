@@ -55,8 +55,7 @@ CREATE TABLE IF NOT EXISTS `operator` (
   `ket` TEXT NULL,
   `pola` TINYINT NOT NULL DEFAULT 6,
   `employer` VARCHAR(100) NULL,
-  `role` VARCHAR(100) NULL,
-  `forklift` TINYINT NOT NULL DEFAULT 0
+  `role` VARCHAR(100) NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 5. kode_jadwal

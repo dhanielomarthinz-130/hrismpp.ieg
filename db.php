@@ -301,7 +301,6 @@ function init_db_tables(PDO $pdo, string $driver): void {
     $addCol('users', 'foto', 'VARCHAR(80) NULL');
     $addCol('users', 'operator_id', 'VARCHAR(30) NULL');
     $addCol('operator', 'foto', 'VARCHAR(80) NULL');
-    $addCol('operator', 'forklift', 'TINYINT NOT NULL DEFAULT 0');
 
     // Seeding data awal bila tabel users kosong
     $userCount = (int)$pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
@@ -338,6 +337,18 @@ function init_db_tables(PDO $pdo, string $driver): void {
             }
         }
         $pdo->prepare("INSERT INTO settings (key_name, value, ket) VALUES ('migr_bagian_jabatan', '1', 'Migrasi bagian Associate/Supervisor/Admin')")->execute();
+    }
+
+    // Bagian "Operator Forklift" — ditambahkan SEKALI; target diatur admin dari menu Bagian.
+    $flagFk = $pdo->query("SELECT COUNT(*) FROM settings WHERE key_name = 'migr_bagian_forklift'")->fetchColumn();
+    if ((int)$flagFk === 0) {
+        $chk = $pdo->prepare("SELECT COUNT(*) FROM bagian WHERE UPPER(kode) = 'FORKLIFT' OR LOWER(nama) = 'operator forklift'");
+        $chk->execute();
+        if ((int)$chk->fetchColumn() === 0) {
+            $maxUrut = (int)$pdo->query("SELECT COALESCE(MAX(urutan), 0) FROM bagian")->fetchColumn();
+            $pdo->prepare("INSERT INTO bagian (kode, nama, target_s1, target_s2, urutan, aktif, judul_wa, mention, order_mpp) VALUES ('FORKLIFT', 'Operator Forklift', 0, 0, ?, 1, 'OPERATOR FORKLIFT', '', 1)")->execute([$maxUrut + 1]);
+        }
+        $pdo->prepare("INSERT INTO settings (key_name, value, ket) VALUES ('migr_bagian_forklift', '1', 'Migrasi bagian Operator Forklift')")->execute();
     }
 }
 
