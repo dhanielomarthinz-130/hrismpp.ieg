@@ -326,6 +326,7 @@
         $('#view').innerHTML = '';
         $('#view').scrollTop = 0; window.scrollTo(0, 0);
         if (roObserver) { roObserver.disconnect(); roObserver = null; }
+        initIconize();
         const fn = RENDER[p.id];
         if (fn) fn().then(() => applyReadOnly(p)).catch(fail);
     }
@@ -348,6 +349,35 @@
         }
     }
     let roObserver = null;
+
+    // Di HP, tombol toolbar yang punya ikon tampil ikon saja (teks jadi aria-label & tooltip).
+    // Berlaku otomatis di semua halaman, termasuk toolbar yang digambar belakangan.
+    function iconizeToolbars() {
+        $$('#view .toolbar .btn:not([data-keep-text])').forEach(b => {
+            const ico = $('.material-symbols-outlined', b);
+            if (!ico) return;
+            // Teks lepas (juga setelah isi tombol diganti) dibungkus ke .btn-txt
+            const loose = Array.from(b.childNodes).filter(n => n !== ico && !(n.classList && n.classList.contains('btn-txt')) && n.textContent.trim());
+            let txt = $('.btn-txt', b);
+            if (loose.length) {
+                if (!txt) { txt = document.createElement('span'); txt.className = 'btn-txt'; b.appendChild(txt); }
+                loose.forEach(n => txt.appendChild(n));
+            }
+            if (!txt) return;
+            const label = txt.textContent.replace(/\s+/g, ' ').trim();
+            if (!label) return;
+            // Label otomatis selalu mengikuti teks tombol; label buatan tangan tidak ditimpa
+            if (!b.hasAttribute('aria-label') || b.dataset.icAuto) { b.setAttribute('aria-label', label); b.dataset.icAuto = '1'; }
+            if (!b.title || b.dataset.icAuto) b.title = label;
+            b.classList.add('icon-only-m');
+        });
+    }
+    let iconObserver = null;
+    function initIconize() {
+        if (iconObserver) return;
+        iconObserver = new MutationObserver(iconizeToolbars);
+        iconObserver.observe($('#view'), { childList: true, subtree: true });
+    }
     function refresh() { loadMaster().then(() => { updateShiftChip(); updateMtChip(); go(S.page); }).catch(fail); }
     function updateMtChip() {
         let c = $('#mtChip');
@@ -1093,7 +1123,7 @@
             (editable ? '<button class="btn sm grad" id="wkAuto"><span class="material-symbols-outlined">bolt</span> Isi otomatis (pola 5/6 hari)</button>' : '') +
             (editable ? '<button class="btn sm primary" id="wkBatch"><span class="material-symbols-outlined">calendar_month</span> Input Tanggal &amp; Divisi</button><button class="btn sm" id="wkCopy"><span class="material-symbols-outlined">content_copy</span> Salin minggu lalu</button>' : '') +
             (isAdmin() && !locked && !jOnlyIeg ? '<button class="btn sm" id="wkPaste"><span class="material-symbols-outlined">content_paste</span> Tempel dari Excel</button>' : '') +
-            (jOnlyIeg ? '<button class="btn sm" id="wkSubmitTop"></button>' : '') +
+            (jOnlyIeg ? '<button class="btn sm" id="wkSubmitTop" data-keep-text="1"></button>' : '') +
             (jOnlyIeg ? '<button class="btn sm ghost" id="wkGoFull"><span class="material-symbols-outlined">calendar_month</span> Lihat Jadwal Employee →</button>' : '') +
             (!editable && !jOnlyIeg ? '<span class="chip pri"><span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;margin-right:4px">visibility</span>Mode View Saja (Terisi otomatis dari Submit Jadwal IEG &amp; Approval Request OS)</span>' : '') +
             '<button class="btn sm ghost" id="wkXls"><span class="material-symbols-outlined">download</span> Excel</button>' +
