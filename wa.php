@@ -6,6 +6,17 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/master.php';
 
+
+/** Employer yang ikut Request OS (Pengaturan "Employer yang ikut Order MPP"); kosong = RKA. */
+function order_employers_(): array {
+    $raw = (string)(settings_()['order_employer'] ?? '');
+    $list = [];
+    foreach (explode(',', $raw) as $e) {
+        if (trim($e) !== '') $list[] = normalize_employer($e);
+    }
+    return $list ? array_values(array_unique($list)) : ['RKA'];
+}
+
 function norm_hp(string $v): string {
     $s = preg_replace('/[^0-9]/', '', $v);
     if (str_starts_with($s, '0')) {
@@ -337,6 +348,7 @@ function order_state_(string $tanggal, string $kode): array {
     $candidates = [];
     $scheduledForShift = [];
     $scheduledVacantByBag = [];
+    $orderEmps = order_employers_();
 
     foreach ($ops as $o) {
         $jCode = $dayJadwal[$o['id']] ?? '-';
@@ -344,6 +356,11 @@ function order_state_(string $tanggal, string $kode): array {
         $refShift = ($kInfo && $kInfo['kerja']) ? $kInfo['shift'] : ($jCode === $kode ? $kode : '');
         $terjadwal = ($refShift === $kode || $jCode === $kode);
         $isVacOp = stripos($o['nama'], 'vacant') !== false;
+
+        // Request OS hanya untuk karyawan outsourcing (bawaan: RKA) — karyawan IEG tidak ditampilkan
+        if (!$isVacOp && !in_array(normalize_employer($o['employer'] ?? ''), $orderEmps, true)) {
+            continue;
+        }
 
         if ($isVacOp) {
             if ($terjadwal) {

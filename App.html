@@ -2739,7 +2739,7 @@
             '<div class="grid2"><label class="field"><span>Minggu acuan rotasi</span><input type="date" name="rotasi_anchor" value="' + esc(s.rotasi_anchor) + '"><small>Pada minggu ini grup A = Shift 1 (dibulatkan ke Senin).</small></label>' +
             '<label class="field"><span>Tukar shift setiap</span><select name="rotasi_periode">' + [1, 2, 3, 4].map(n => '<option value="' + n + '"' + (String(s.rotasi_periode) === String(n) ? ' selected' : '') + '>' + n + ' minggu</option>').join('') + '</select></label></div>' +
             '<div class="grid2"><label class="field"><span>Nama aplikasi</span><input name="app_nama" value="' + esc(s.app_nama) + '"></label>' +
-            '<label class="field"><span>Employer yang ikut Order MPP</span><input name="order_employer" value="' + esc(s.order_employer) + '" placeholder="RKA"><small>Pisahkan koma. Kosong = semua karyawan.</small></label></div>' +
+            '<label class="field"><span>Employer yang ikut Order MPP</span><input name="order_employer" value="' + esc(s.order_employer) + '" placeholder="RKA"><small>Hanya karyawan employer ini yang tampil di Request OS. Pisahkan koma (IEG / RKA). Kosong = RKA.</small></label></div>' +
             '<button class="btn primary">Simpan aturan</button></form></div>' +
 
             '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;margin-right:6px">palette</span>Kode jadwal</h2><button type="button" class="btn sm" id="kAdd"><span class="material-symbols-outlined">add</span> Kode</button></div>' +
