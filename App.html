@@ -67,7 +67,9 @@
     function isAdmin() { return role() === 'ADMIN' || role() === 'SUPERVISOR'; }
     function isSuper() { return !!(S.user && S.user.super); }
     function isSupervisor() { return role() === 'SUPERVISOR' || isSuper(); }
-    function canApprove() { return role() === 'SUPERVISOR' || isSuper(); }
+    // Control Akses: false bila menu diatur "lihat saja" untuk user ini
+    function menuEdit(page) { return isSuper() || !((S.master && S.master.roMenus) || []).includes(page); }
+    function canApprove() { return (role() === 'SUPERVISOR' || isSuper()) && menuEdit('req_approval'); }
     function isEditor() { return role() === 'ADMIN' || role() === 'SUPERVISOR' || role() === 'LEADER'; }
     function canEdit(bag) {
         if (isAdmin() || isSupervisor()) return true;
@@ -323,9 +325,29 @@
         openSide(false);
         $('#view').innerHTML = '';
         $('#view').scrollTop = 0; window.scrollTo(0, 0);
+        if (roObserver) { roObserver.disconnect(); roObserver = null; }
         const fn = RENDER[p.id];
-        if (fn) fn().catch(fail);
+        if (fn) fn().then(() => applyReadOnly(p)).catch(fail);
     }
+    // Halaman yang diatur "lihat saja": tampilkan penanda; Bagian & Pengaturan seluruh form dikunci
+    const RO_LOCK_ALL = ['bagian', 'pengaturan'];
+    const RO_MENUS = ['request_os', 'req_approval', 'jadwal_ieg', 'absensi', 'jadwal', 'operator', 'bagian', 'pengaturan'];
+    function applyReadOnly(p) {
+        if (S.page !== p.id || menuEdit(p.id) || !RO_MENUS.includes(p.id)) return;
+        const v = $('#view');
+        if (!$('.ro-banner', v)) v.insertAdjacentHTML('afterbegin', '<div class="alert info ro-banner"><span class="material-symbols-outlined">visibility</span><span><b>Mode lihat saja.</b> Akses Anda untuk menu ini tidak bisa mengedit.</span></div>');
+        if (RO_LOCK_ALL.includes(p.id)) {
+            const lock = () => $$('button, input, select, textarea', v).forEach(el => {
+                if (el.disabled || el.closest('.ro-banner, [data-ro-ok]') || el.type === 'search') return;
+                el.disabled = true;
+            });
+            lock();
+            // Bagian yang dimuat belakangan (daftar pengguna, log, dll.) ikut dikunci
+            roObserver = new MutationObserver(lock);
+            roObserver.observe(v, { childList: true, subtree: true });
+        }
+    }
+    let roObserver = null;
     function refresh() { loadMaster().then(() => { updateShiftChip(); updateMtChip(); go(S.page); }).catch(fail); }
     function updateMtChip() {
         let c = $('#mtChip');
@@ -533,8 +555,8 @@
             shiftSeg(S.abs.shift, 'ashift') +
             '<select id="aBag"><option value="">Semua Divisi</option>' + S.master.bagian.map(b => '<option value="' + b.kode + '"' + (absBagFilter === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') + '</select>' +
             '<input type="search" id="aQ" placeholder="Cari nama karyawan…" class="grow" style="flex:1 1 160px">' +
-            '<button class="btn sm grad" id="aAllClockIn"><span class="material-symbols-outlined">fact_check</span> Clock-In Semua</button>' +
-            '<button class="btn sm primary" id="aAdd"><span class="material-symbols-outlined">person_add</span> Tambah</button>' +
+            (menuEdit('absensi') ? '<button class="btn sm grad" id="aAllClockIn"><span class="material-symbols-outlined">fact_check</span> Clock-In Semua</button>' +
+            '<button class="btn sm primary" id="aAdd"><span class="material-symbols-outlined">person_add</span> Tambah</button>' : '') +
             '<button class="btn sm btn-wa" id="aShare"><span class="material-symbols-outlined">share</span> Share Absensi</button>' +
             '</div>' +
             '<div id="aStats"></div>' +
@@ -543,7 +565,7 @@
         $$('[data-ashift]').forEach(b => b.onclick = () => { flushAbs(); S.abs.shift = b.dataset.ashift; $$('[data-ashift]').forEach(x => x.classList.toggle('on', x === b)); loadAbs(); });
         $('#aBag').onchange = e => { absBagFilter = e.target.value; renderAbsList(); };
         $('#aQ').oninput = () => renderAbsList();
-        $('#aAllClockIn').onclick = () => {
+        if ($('#aAllClockIn')) $('#aAllClockIn').onclick = () => {
             const visible = getFilteredAbsRows();
             let count = 0, vacCount = 0;
             visible.forEach(r => {
@@ -560,7 +582,7 @@
                 if (firstInp) firstInp.focus();
             }
         };
-        $('#aAdd').onclick = addOperatorModal;
+        if ($('#aAdd')) $('#aAdd').onclick = addOperatorModal;
         $('#aShare').onclick = shareAbsensi;
         await loadAbs();
     }
@@ -569,6 +591,7 @@
         absData = await call('absensi', { tanggal: S.abs.tanggal, shift: S.abs.shift });
         // Absensi Shift dipakai PIC untuk mengabsen Employee RKA saja
         absData.rows = (absData.rows || []).filter(r => (r.employer || 'RKA') === 'RKA');
+        if (!menuEdit('absensi')) absData.rows.forEach(r => { r.canEdit = false; });
         $('#pageSub').textContent = 'Employee RKA · ' + absData.tanggalLabel + ' · ' + shiftName(absData.shift) + ' ' + shiftTime(absData.shift);
         renderAbsList();
     }
@@ -957,6 +980,7 @@
 
     function canEditWeek(locked) {
         if (locked) return false;
+        if (!menuEdit(jOnlyIeg ? 'jadwal_ieg' : 'jadwal')) return false;
         return jOnlyIeg ? isEditor() : isAdmin();
     }
 
@@ -1588,9 +1612,10 @@
         drawOrder();
     }
 
-    function odEditable() { return OD && OD.canEdit; }
+    function odEditable() { return OD && OD.canEdit && menuEdit('request_os'); }
 
     function drawOrder() {
+        if (OD && !menuEdit('req_approval')) OD.canApprove = false;
         const isReq = S.wa.type === 'REQ';
         $('#pageSub').textContent = OD.tanggalLabel + ' · ' + shiftName(OD.kode) + ' ' + shiftTime(OD.kode);
         const ro = !odEditable();
@@ -2533,13 +2558,15 @@
             '<input type="date" id="daTo" value="' + f.to + '" aria-label="Sampai tanggal">' +
             '<button class="btn sm" id="daNext" aria-label="Hari berikutnya"><span class="material-symbols-outlined" style="font-size:16px">chevron_right</span></button>' +
             '<div class="seg" id="daRange"><button type="button" data-dr="1">Hari ini</button><button type="button" data-dr="7">7 hari</button><button type="button" data-dr="M">Bulan ini</button></div>' +
+            '<div class="seg" id="daEmpSeg" role="group" aria-label="Employer">' + [['', 'Semua'], ['RKA', 'RKA'], ['IEG', 'IEG']].map(e => '<button type="button" data-de="' + e[0] + '" class="' + (f.employer === e[0] ? 'on' : '') + '">' + e[1] + '</button>').join('') + '</div>' +
+            '<span class="spacer"></span>' +
+            '<button class="btn sm btn-wa" id="daShare"><span class="material-symbols-outlined">share</span> Share Shift Hari Ini</button>' +
             '</div>' +
             '<div class="toolbar">' +
             '<input type="search" id="daQ" placeholder="Cari nama / NIK…" value="' + esc(f.q) + '" style="flex:1 1 160px">' +
             '<select id="daShift"><option value="">Semua shift</option>' + (S.master.shifts || []).map(s => '<option value="' + s.kode + '"' + (f.shift === s.kode ? ' selected' : '') + '>' + esc(s.nama) + '</option>').join('') + '</select>' +
             '<select id="daBag"><option value="">Semua divisi</option>' + S.master.bagian.map(b => '<option value="' + b.kode + '"' + (f.bagian === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') + '</select>' +
             '<select id="daSt"><option value="">Semua status</option>' + Object.keys(STATUS).map(k => '<option value="' + k + '"' + (f.status === k ? ' selected' : '') + '>' + STATUS[k] + '</option>').join('') + '</select>' +
-            '<select id="daEmp"><option value="">Semua employer</option>' + ['RKA', 'IEG'].map(e => '<option value="' + e + '"' + (f.employer === e ? ' selected' : '') + '>' + e + '</option>').join('') + '</select>' +
             '<button class="btn sm" id="daXls"><span class="material-symbols-outlined">download</span> Excel</button>' +
             '</div>' +
             '<div id="daStats"></div><div class="card" style="padding:0" id="daBody"><div class="empty">Memuat…</div></div>';
@@ -2560,7 +2587,12 @@
         $('#daShift').onchange = e => { f.shift = e.target.value; loadDataAbsen(); };
         $('#daBag').onchange = e => { f.bagian = e.target.value; loadDataAbsen(); };
         $('#daSt').onchange = e => { f.status = e.target.value; loadDataAbsen(); };
-        $('#daEmp').onchange = e => { f.employer = e.target.value; loadDataAbsen(); };
+        $$('[data-de]').forEach(b => b.onclick = () => {
+            f.employer = b.dataset.de;
+            $$('[data-de]').forEach(x => x.classList.toggle('on', x === b));
+            loadDataAbsen();
+        });
+        $('#daShare').onclick = daShareModal;
         $('#daXls').onclick = async () => {
             try {
                 const r = await call('absensiListXls', S.da);
@@ -2571,6 +2603,73 @@
             } catch (e) { fail(e); }
         };
         await loadDataAbsen();
+    }
+    // Share hasil absensi shift HARI INI (pilih shift & employer RKA / IEG)
+    function daShareModal() {
+        const cur = S.master.current || {};
+        let emp = S.da.employer || 'RKA';
+        openModal({
+            title: 'Share absensi hari ini',
+            body: '<p class="small muted" style="margin-top:0">' + esc(fmtTgl(S.master.today)) + '</p>' +
+                '<label class="field"><span>Shift</span><select id="dsShift">' + (S.master.shifts || []).map(s => '<option value="' + s.kode + '"' + (s.kode === cur.kode ? ' selected' : '') + '>' + esc(s.nama + ' (' + s.mulai + '–' + s.selesai + ')') + '</option>').join('') + '</select></label>' +
+                '<div class="field"><span>Employer</span><div class="seg" id="dsEmp">' + [['RKA', 'RKA'], ['IEG', 'IEG'], ['', 'Semua']].map(e => '<button type="button" data-dse="' + e[0] + '" class="' + (emp === e[0] ? 'on' : '') + '">' + e[1] + '</button>').join('') + '</div></div>' +
+                '<div id="dsInfo" class="small muted"></div>',
+            onOpen: body => {
+                $$('[data-dse]', body).forEach(b => b.onclick = () => { emp = b.dataset.dse; $$('[data-dse]', body).forEach(x => x.classList.toggle('on', x === b)); });
+            },
+            buttons: [{ label: 'Batal' }, {
+                label: 'Share', cls: 'btn-wa', onClick: async btn => {
+                    const shift = $('#dsShift').value;
+                    btn.disabled = true;
+                    try {
+                        const d = await call('absensiList', { from: S.master.today, to: S.master.today, shift: shift, employer: emp });
+                        if (!d.rows.length) {
+                            btn.disabled = false;
+                            return toast('Belum ada data absensi ' + (emp || 'RKA & IEG') + ' untuk ' + shiftName(shift) + ' hari ini.', 'warn');
+                        }
+                        closeModal();
+                        await shareText_(daCaption(d.rows, shift, emp), 'Absensi ' + shiftName(shift) + ' - ' + fmtTgl(S.master.today));
+                    } catch (e) { btn.disabled = false; fail(e); }
+                }
+            }]
+        });
+    }
+    function daCaption(rows, shift, emp) {
+        const cnt = k => rows.filter(r => r.status === k).length;
+        const hadir = cnt('H') + cnt('T');
+        const groups = {};
+        rows.forEach(r => (groups[r.bagian] = groups[r.bagian] || []).push(r));
+        const order = S.master.bagian.map(b => b.kode).filter(k => groups[k])
+            .concat(Object.keys(groups).filter(k => !S.master.bagian.some(b => b.kode === k)));
+        const now = new Date();
+        const jam = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+        const L = ['*LAPORAN ABSENSI ' + shiftName(shift).toUpperCase() + '*', '*Employee ' + (emp || 'RKA & IEG') + '*', '',
+            'Tanggal : ' + fmtTgl(S.master.today), 'Shift   : ' + shiftName(shift) + ' (' + shiftTime(shift) + ')', '',
+            '*Ringkasan*', 'Total diabsen : ' + rows.length + ' orang', '✅ Hadir : ' + cnt('H')];
+        if (cnt('T')) L.push('⏰ Telat : ' + cnt('T'));
+        if (cnt('S')) L.push('🤒 Sakit : ' + cnt('S'));
+        if (cnt('I')) L.push('📝 Izin : ' + cnt('I'));
+        if (cnt('C')) L.push('🏖️ Cuti : ' + cnt('C'));
+        if (cnt('A')) L.push('❌ Alpa : ' + cnt('A'));
+        L.push('Kehadiran : ' + hadir + '/' + rows.length + ' (' + Math.round(hadir / rows.length * 100) + '%)');
+        order.forEach(k => {
+            const list = groups[k].slice().sort((a, b) => a.nama.localeCompare(b.nama, 'id', { sensitivity: 'base' }));
+            L.push('', '*' + bagName(k).toUpperCase() + '* (' + list.filter(r => r.status === 'H' || r.status === 'T').length + '/' + list.length + ')');
+            list.forEach((r, i) => L.push((i + 1) + '. ' + r.nama + (emp ? '' : ' [' + r.employer + ']') + ' — ' + (STATUS[r.status] || r.status) +
+                (r.lembur ? ' · lembur ' + r.lembur + ' jam' : '') + (r.ket ? ' (' + r.ket + ')' : '')));
+        });
+        L.push('', 'Dilaporkan oleh ' + (S.user.nama || S.user.username) + ' · ' + jam);
+        return L.join('\n');
+    }
+    // Bagikan teks: menu share bawaan HP, atau buka WhatsApp (teks juga disalin)
+    async function shareText_(text, title) {
+        const copied = await copyText(text);
+        if (navigator.share) {
+            try { await navigator.share({ title: title, text: text }); toast('Berhasil dibagikan.', 'ok'); return; }
+            catch (err) { if (err.name === 'AbortError') return; }
+        }
+        window.open('https://api.whatsapp.com/send?text=' + encodeURIComponent(text), '_blank');
+        toast('WhatsApp dibuka' + (copied ? ' — teks juga sudah disalin.' : '.'), 'ok');
     }
     async function loadDataAbsen() {
         try { daData = await call('absensiList', S.da); } catch (e) { return fail(e); }
@@ -2639,7 +2738,7 @@
             '<select id="oBag"><option value="">Semua bagian</option>' + S.master.bagian.map(b => '<option value="' + b.kode + '"' + (f.bagian === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') + '</select>' +
             '<select id="oEmp"><option value="">Semua employer</option>' + ['IEG', 'RKA'].map(e => '<option value="' + e + '"' + (f.employer === e ? ' selected' : '') + '>' + e + '</option>').join('') + '</select>' +
             '<select id="oSt"><option value="aktif">Aktif</option><option value="nonaktif">Nonaktif</option><option value="semua">Semua</option></select>' +
-            (isAdmin() ? '<button class="btn sm primary" id="oAdd"><span class="material-symbols-outlined">person_add</span> Operator</button><button class="btn sm" id="oImp"><span class="material-symbols-outlined">upload</span> Import</button>' : '') +
+            (isAdmin() && menuEdit('operator') ? '<button class="btn sm primary" id="oAdd"><span class="material-symbols-outlined">person_add</span> Operator</button><button class="btn sm" id="oImp"><span class="material-symbols-outlined">upload</span> Import</button>' : '') +
             '</div><div class="card" style="padding:0" id="oBody"></div>';
         $('#oSt').value = f.status;
         $('#oQ').oninput = e => { f.q = e.target.value; drawOps(); };
@@ -2661,8 +2760,9 @@
                 return (a.nama || '').localeCompare(b.nama || '');
             });
         $('#pageSub').textContent = list.length + ' operator';
-        if (!list.length) { $('#oBody').innerHTML = '<div class="empty"><div class="big"><span class="material-symbols-outlined">group_off</span></div>Tidak ada operator.' + (isAdmin() ? '<br><br><button class="btn primary" onclick="opModal(null)">Tambah operator</button> <button class="btn" onclick="importModal()">Import dari Excel</button>' : '') + '</div>'; return; }
-        const act = o => isAdmin() ? '<button class="btn sm" data-edit="' + o.id + '">Ubah</button>' : '';
+        const opEdit = isAdmin() && menuEdit('operator');
+        if (!list.length) { $('#oBody').innerHTML = '<div class="empty"><div class="big"><span class="material-symbols-outlined">group_off</span></div>Tidak ada operator.' + (opEdit ? '<br><br><button class="btn primary" onclick="opModal(null)">Tambah operator</button> <button class="btn" onclick="importModal()">Import dari Excel</button>' : '') + '</div>'; return; }
+        const act = o => opEdit ? '<button class="btn sm" data-edit="' + o.id + '">Ubah</button>' : '';
         $('#oBody').innerHTML =
             '<div class="only-wide"><div class="table-wrap" style="border:0"><table class="tbl"><thead><tr><th>Nama</th><th>NIK</th><th>Role</th><th>Bagian</th><th>Employer</th><th>Grup</th><th>Pola</th><th>Libur</th><th>Status</th><th></th></tr></thead><tbody>' +
             list.map(o => '<tr><td><span class="op-name"><span class="op-ava clickable" data-view-foto="' + o.id + '" role="button" tabindex="0" title="Lihat foto">' + avatarHtml(o.nama, o.foto) + '</span><b>' + esc(o.nama) + '</b></span></td><td>' + esc(o.nik) + '</td><td class="small">' + esc(o.role) + '</td><td>' + esc(bagName(o.bagian)) + '</td><td><span class="chip xs ' + (o.employer === 'IEG' ? 'pri' : '') + '">' + esc(o.employer || 'RKA') + '</span></td><td>' + esc(GRUP_LABEL[o.grup] || o.grup) + '</td><td>' + o.pola + ' hari</td><td>' + liburLabel(o.libur) + '</td>' +
@@ -2686,7 +2786,7 @@
                 (o.foto ? '<img src="' + esc(o.foto) + '" alt="Foto ' + esc(o.nama) + '">'
                     : '<div class="foto-view-empty">' + avatarHtml(o.nama, '') + '</div><p class="small muted">Belum ada foto profil.</p>') +
                 '<p class="small muted">' + esc(bagName(o.bagian)) + ' · ' + esc(o.employer || 'RKA') + (o.role ? ' · ' + esc(o.role) : '') + '</p></div>',
-            buttons: (isAdmin() ? [{ label: 'Ubah data', onClick: () => opModal(o) }] : []).concat([{ label: 'Tutup', cls: 'primary' }])
+            buttons: (isAdmin() && menuEdit('operator') ? [{ label: 'Ubah data', onClick: () => opModal(o) }] : []).concat([{ label: 'Tutup', cls: 'primary' }])
         });
     }
     function opModal(o) {
@@ -3181,14 +3281,37 @@
     const AK_ROLES = [['ADMIN', 'Admin'], ['SUPERVISOR', 'Supervisor'], ['LEADER', 'Leader / PIC'], ['VIEWER', 'Viewer']];
     let AK = null;
     function akMenus() { return PAGES.filter(p => !p.superOnly); }
+    // Menu yang memang hanya untuk dilihat (tidak ada data yang diedit) — pilihan Edit tidak ditampilkan
+    const AK_VIEW_ONLY = ['dashboard', 'rekap', 'data_absen'];
+    // Level akses menu: '' = tidak ada, 'R' = lihat saja, 'E' = bisa edit
+    // Role Viewer memang tidak pernah bisa mengedit — pilihannya hanya Tidak ada / Lihat saja
+    function akLevel(list, ro, id, r) { return list.indexOf(id) < 0 ? '' : (ro.indexOf(id) >= 0 || AK_VIEW_ONLY.includes(id) || r === 'VIEWER' ? 'R' : 'E'); }
+    function akSetLevel(list, ro, id, lv) {
+        const i = list.indexOf(id), j = ro.indexOf(id);
+        if (lv === '') { if (i >= 0) list.splice(i, 1); if (j >= 0) ro.splice(j, 1); return; }
+        if (i < 0) list.push(id);
+        if (lv === 'R' && j < 0 && !AK_VIEW_ONLY.includes(id)) ro.push(id);
+        if (lv === 'E' && j >= 0) ro.splice(j, 1);
+    }
+    function akSelect(attrs, lv, id, label, r) {
+        const opts = [['', 'Tidak ada'], ['R', 'Lihat saja']].concat(AK_VIEW_ONLY.includes(id) || r === 'VIEWER' ? [] : [['E', 'Bisa edit']]);
+        return '<select class="ak-lv lv-' + (lv || 'N') + '" ' + attrs + ' aria-label="' + esc(label) + '">' +
+            opts.map(o => '<option value="' + o[0] + '"' + (o[0] === lv ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>';
+    }
     function akDefault(r) { return akMenus().filter(p => p.roles.indexOf(r) >= 0).map(p => p.id); }
 
     async function renderAkses() {
         $('#pageSub').textContent = 'Atur menu yang dapat diakses tiap role atau user';
         $('#view').innerHTML = '<div id="akBody"><div class="empty">Memuat…</div></div>';
         const d = await call('accessGet', {});
-        AK = { roles: {}, users: Object.assign({}, d.config.users || {}), userList: d.users || [], sel: '' };
-        AK_ROLES.forEach(r => { AK.roles[r[0]] = (d.config.roles && d.config.roles[r[0]]) ? d.config.roles[r[0]].slice() : akDefault(r[0]); });
+        const ro = d.config.ro || {};
+        AK = { roles: {}, users: Object.assign({}, d.config.users || {}), userList: d.users || [], sel: '',
+            roRoles: {}, roUsers: {} };
+        AK_ROLES.forEach(r => {
+            AK.roles[r[0]] = (d.config.roles && d.config.roles[r[0]]) ? d.config.roles[r[0]].slice() : akDefault(r[0]);
+            AK.roRoles[r[0]] = ((ro.roles || {})[r[0]] || []).slice();
+        });
+        Object.keys(AK.users).forEach(u => { AK.roUsers[u] = ((ro.users || {})[u] || []).slice(); });
         drawAkses();
     }
 
@@ -3200,19 +3323,18 @@
         const menus = akMenus();
         const roleOf = u => (AK.userList.find(x => x.username === u) || {}).role || '';
         let h = '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined">group</span>Akses per role</h2>' +
-            '<span class="small muted">Centang menu yang boleh dibuka oleh setiap role</span></div>' +
-            '<div class="table-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>Menu</th>' +
+            '<span class="small muted">Pilih untuk tiap menu: <b>Tidak ada</b> (menu disembunyikan), <b>Lihat saja</b> (bisa dibuka, tidak bisa mengedit), atau <b>Bisa edit</b></span></div>' +
+            '<div class="table-wrap" style="max-height:none"><table class="tbl ak-tbl"><thead><tr><th>Menu</th>' +
             AK_ROLES.map(r => '<th style="text-align:center">' + r[1] + '</th>').join('') + '</tr></thead><tbody>' +
             menus.map(p => '<tr><td>' + akMenuLabel(p) + '</td>' + AK_ROLES.map(r =>
-                '<td style="text-align:center"><input type="checkbox" aria-label="' + esc(p.label + ' untuk ' + r[1]) + '" data-akr="' + r[0] + '" data-m="' + p.id + '"' +
-                (AK.roles[r[0]].indexOf(p.id) >= 0 ? ' checked' : '') + '></td>').join('') + '</tr>').join('') +
+                '<td style="text-align:center">' + akSelect('data-akr="' + r[0] + '" data-m="' + p.id + '"', akLevel(AK.roles[r[0]], AK.roRoles[r[0]], p.id, r[0]), p.id, p.label + ' untuk ' + r[1], r[0]) + '</td>').join('') + '</tr>').join('') +
             '</tbody></table></div>' +
             '<div class="row" style="margin-top:12px"><button class="btn sm ghost" id="akReset"><span class="material-symbols-outlined">restart_alt</span> Kembalikan ke bawaan</button></div></div>';
 
         const custom = Object.keys(AK.users);
         h += '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined">person</span>Akses khusus per user</h2>' +
             '<span class="small muted">Bila diatur, menggantikan akses role untuk user tersebut</span></div>' +
-            (custom.length ? '<div class="row" style="gap:6px;margin-bottom:12px">' + custom.map(u => '<span class="chip pri">' + esc(u) + ' · ' + AK.users[u].length + ' menu</span>').join('') + '</div>' : '') +
+            (custom.length ? '<div class="row" style="gap:6px;margin-bottom:12px">' + custom.map(u => '<span class="chip pri">' + esc(u) + ' · ' + AK.users[u].length + ' menu' + ((AK.roUsers[u] || []).length ? ' (' + AK.roUsers[u].length + ' lihat saja)' : '') + '</span>').join('') + '</div>' : '') +
             '<label class="field" style="max-width:420px"><span>Pilih user</span><select id="akUser"><option value="">— Pilih user —</option>' +
             AK.userList.map(u => '<option value="' + esc(u.username) + '"' + (AK.sel === u.username ? ' selected' : '') + '>' + esc(u.nama + ' (' + u.username + ') · ' + (u.role === 'LEADER' ? 'Leader / PIC' : u.role)) + (AK.users[u.username] ? ' · khusus' : '') + '</option>').join('') +
             '</select></label><div id="akUserBox"></div></div>';
@@ -3221,17 +3343,15 @@
             '<button class="btn sm primary" id="akSave"><span class="material-symbols-outlined">check_circle</span> Simpan Control Akses</button></div>';
 
         $('#akBody').innerHTML = h;
-        $$('[data-akr]').forEach(cb => cb.onchange = () => {
-            const list = AK.roles[cb.dataset.akr];
-            const i = list.indexOf(cb.dataset.m);
-            if (cb.checked && i < 0) list.push(cb.dataset.m);
-            if (!cb.checked && i >= 0) list.splice(i, 1);
+        $$('[data-akr]').forEach(sel => sel.onchange = () => {
+            akSetLevel(AK.roles[sel.dataset.akr], AK.roRoles[sel.dataset.akr], sel.dataset.m, sel.value);
+            sel.className = 'ak-lv lv-' + (sel.value || 'N');
         });
-        $('#akReset').onclick = () => { AK_ROLES.forEach(r => { AK.roles[r[0]] = akDefault(r[0]); }); drawAkses(); };
+        $('#akReset').onclick = () => { AK_ROLES.forEach(r => { AK.roles[r[0]] = akDefault(r[0]); AK.roRoles[r[0]] = []; }); drawAkses(); };
         $('#akUser').onchange = e => { AK.sel = e.target.value; drawAkUser(roleOf); };
         $('#akSave').onclick = async () => {
             try {
-                await call('accessSave', { roles: AK.roles, users: AK.users });
+                await call('accessSave', { roles: AK.roles, users: AK.users, ro: { roles: AK.roRoles, users: AK.roUsers } });
                 toast('Control akses disimpan.', 'ok');
             } catch (e) { fail(e); }
         };
@@ -3244,17 +3364,20 @@
         if (!u) { box.innerHTML = ''; return; }
         const has = !!AK.users[u];
         const list = has ? AK.users[u] : (AK.roles[roleOf(u)] || []);
+        const ro = has ? (AK.roUsers[u] = AK.roUsers[u] || []) : (AK.roRoles[roleOf(u)] || []);
         box.innerHTML = '<label class="check"><input type="checkbox" id="akUse"' + (has ? ' checked' : '') + '> Gunakan akses khusus untuk user ini</label>' +
-            '<div class="days-pick" style="margin-top:8px' + (has ? '' : ';opacity:.5;pointer-events:none') + '">' +
-            akMenus().map(p => '<label><input type="checkbox" data-aku="' + p.id + '"' + (list.indexOf(p.id) >= 0 ? ' checked' : '') + (has ? '' : ' disabled') + '>' + esc(p.label) + '</label>').join('') + '</div>' +
+            '<div class="ak-user-grid" style="margin-top:10px' + (has ? '' : ';opacity:.55;pointer-events:none') + '">' +
+            akMenus().map(p => '<label class="ak-user-item"><span>' + akMenuLabel(p) + '</span>' +
+                akSelect('data-aku="' + p.id + '"' + (has ? '' : ' disabled'), akLevel(list, ro, p.id, roleOf(u)), p.id, p.label, roleOf(u)) + '</label>').join('') + '</div>' +
             (has ? '' : '<p class="small muted" style="margin:8px 0 0">Saat ini mengikuti akses role ' + esc(roleOf(u)) + '.</p>');
         $('#akUse').onchange = e => {
-            if (e.target.checked) AK.users[u] = (AK.roles[roleOf(u)] || []).slice();
-            else delete AK.users[u];
+            if (e.target.checked) { AK.users[u] = (AK.roles[roleOf(u)] || []).slice(); AK.roUsers[u] = (AK.roRoles[roleOf(u)] || []).slice(); }
+            else { delete AK.users[u]; delete AK.roUsers[u]; }
             drawAkses();
         };
-        $$('[data-aku]', box).forEach(cb => cb.onchange = () => {
-            AK.users[u] = $$('[data-aku]', box).filter(x => x.checked).map(x => x.dataset.aku);
+        $$('[data-aku]', box).forEach(sel => sel.onchange = () => {
+            akSetLevel(AK.users[u], AK.roUsers[u], sel.dataset.aku, sel.value);
+            sel.className = 'ak-lv lv-' + (sel.value || 'N');
         });
     }
 

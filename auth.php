@@ -63,7 +63,7 @@ function menu_access_config(): array {
     $raw = json_decode((string)get_setting('menu_access', ''), true);
     // id lama 'wa' -> 'request_os'
     $clean = fn($list) => array_values(array_intersect(MENU_IDS, array_map(fn($m) => $m === 'wa' ? 'request_os' : $m, is_array($list) ? $list : [])));
-    $out = ['roles' => [], 'users' => []];
+    $out = ['roles' => [], 'users' => [], 'ro' => ['roles' => [], 'users' => []]];
     foreach ((array)($raw['roles'] ?? []) as $r => $list) {
         $r = strtoupper((string)$r);
         if (in_array($r, ROLES, true)) $out['roles'][$r] = $clean($list);
@@ -71,7 +71,31 @@ function menu_access_config(): array {
     foreach ((array)($raw['users'] ?? []) as $u => $list) {
         $out['users'][strtolower((string)$u)] = $clean($list);
     }
+    // Menu "lihat saja" (tidak bisa edit) per role / per user
+    foreach ((array)($raw['ro']['roles'] ?? []) as $r => $list) {
+        $r = strtoupper((string)$r);
+        if (in_array($r, ROLES, true)) $out['ro']['roles'][$r] = $clean($list);
+    }
+    foreach ((array)($raw['ro']['users'] ?? []) as $u => $list) {
+        $out['ro']['users'][strtolower((string)$u)] = $clean($list);
+    }
     return $out;
+}
+
+/** Menu yang hanya boleh DILIHAT (tidak bisa edit) oleh user ini. Super admin selalu bisa edit. */
+function readonly_menus_for_user(array $user): array {
+    if (is_super($user)) return [];
+    $cfg = menu_access_config();
+    $uname = strtolower($user['username']);
+    if (array_key_exists($uname, $cfg['users'])) return $cfg['ro']['users'][$uname] ?? [];
+    return $cfg['ro']['roles'][$user['role']] ?? [];
+}
+
+/** Tolak aksi simpan/ubah bila menu tersebut diatur "lihat saja" untuk user ini. */
+function require_menu_edit(array $user, string $menu, string $label = ''): void {
+    if (in_array($menu, readonly_menus_for_user($user), true)) {
+        throw new RuntimeException('Akses Anda untuk menu ' . ($label !== '' ? $label : $menu) . ' hanya lihat saja (tidak bisa edit). Hubungi Super Admin.');
+    }
 }
 
 /** Daftar menu untuk user ini; null = pakai bawaan sesuai role. Super admin selalu null (semua menu). */
@@ -97,6 +121,16 @@ function menu_access_save(array $p, array $currentUser): array {
         if ($u === '' || in_array($u, $hide, true)) continue;
         if (!db_val("SELECT COUNT(*) FROM users WHERE LOWER(username) = ?", [$u])) continue;
         $cfg['users'][$u] = array_values(array_intersect(MENU_IDS, (array)$list));
+    }
+    // Menu lihat saja: hanya menu yang memang boleh dibuka
+    $cfg['ro'] = ['roles' => [], 'users' => []];
+    foreach ((array)($p['ro']['roles'] ?? []) as $r => $list) {
+        $r = strtoupper((string)$r);
+        if (isset($cfg['roles'][$r])) $cfg['ro']['roles'][$r] = array_values(array_intersect($cfg['roles'][$r], (array)$list));
+    }
+    foreach ((array)($p['ro']['users'] ?? []) as $u => $list) {
+        $u = strtolower(trim((string)$u));
+        if (isset($cfg['users'][$u])) $cfg['ro']['users'][$u] = array_values(array_intersect($cfg['users'][$u], (array)$list));
     }
     set_settings(['menu_access' => json_encode($cfg)]);
     audit_log($currentUser['username'], 'CONTROL_AKSES', count($cfg['roles']) . ' role, ' . count($cfg['users']) . ' user khusus');

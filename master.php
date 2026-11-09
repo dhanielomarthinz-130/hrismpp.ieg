@@ -219,6 +219,7 @@ function get_master(array $currentUser): array {
         'user'        => $currentUser,
         'maintenance' => maintenance_on(),
         'menus'       => menus_for_user($currentUser),
+        'roMenus'     => readonly_menus_for_user($currentUser),
         'autoApprove' => auto_approve_on(),
         'today'       => date('Y-m-d'),
         'now'       => date('Y-m-d H:i:s'),

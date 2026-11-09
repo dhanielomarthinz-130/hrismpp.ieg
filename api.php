@@ -190,6 +190,27 @@ try {
         throw new InvalidArgumentException("Aksi tidak dikenal: $action");
     }
 
+    // Control Akses "lihat saja": aksi simpan/ubah per menu ditolak
+    $jadMenu = !empty($payload['onlyIeg']) ? ['jadwal_ieg', 'Jadwal IEG'] : ['jadwal', 'Jadwal Employee'];
+    $writeMenu = [
+        'setAbsensi' => ['absensi', 'Absensi Shift'], 'addToShift' => ['absensi', 'Absensi Shift'],
+        'removeFromShift' => ['absensi', 'Absensi Shift'], 'fillVacant' => ['absensi', 'Absensi Shift'],
+        'mingguSimpan' => $jadMenu, 'mingguIsi' => $jadMenu, 'mingguSalin' => $jadMenu,
+        'mingguKunci' => ['jadwal', 'Jadwal Employee'], 'setJadwal' => ['jadwal', 'Jadwal Employee'], 'mingguImport' => ['jadwal', 'Jadwal Employee'],
+        'orderSave' => ['request_os', 'Request OS'], 'orderSend' => ['request_os', 'Request OS'],
+        'orderSubmit' => ['request_os', 'Request OS'], 'orderShared' => ['request_os', 'Request OS'],
+        'orderApprove' => ['req_approval', 'Approval Request OS'], 'orderReject' => ['req_approval', 'Approval Request OS'],
+        'saveOperator' => ['operator', 'Operator'], 'deleteOperator' => ['operator', 'Operator'],
+        'importOperator' => ['operator', 'Operator'], 'fotoOperator' => ['operator', 'Operator'],
+        'saveBagian' => ['bagian', 'Bagian & Target'], 'deleteBagian' => ['bagian', 'Bagian & Target'],
+        'saveSettings' => ['pengaturan', 'Pengaturan'], 'saveShift' => ['pengaturan', 'Pengaturan'], 'kodeSimpan' => ['pengaturan', 'Pengaturan'],
+        'saveUser' => ['pengaturan', 'Pengaturan'], 'deleteUser' => ['pengaturan', 'Pengaturan'],
+        'botToken' => ['pengaturan', 'Pengaturan'], 'waAuto' => ['pengaturan', 'Pengaturan'],
+    ];
+    if (isset($writeMenu[$action])) {
+        require_menu_edit($user, $writeMenu[$action][0], $writeMenu[$action][1]);
+    }
+
     $result = $routes[$action]();
     echo json_encode(['ok' => true, 'data' => $result]);
 
