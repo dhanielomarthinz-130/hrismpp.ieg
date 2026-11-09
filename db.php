@@ -301,6 +301,7 @@ function init_db_tables(PDO $pdo, string $driver): void {
     $addCol('users', 'foto', 'VARCHAR(80) NULL');
     $addCol('users', 'operator_id', 'VARCHAR(30) NULL');
     $addCol('operator', 'foto', 'VARCHAR(80) NULL');
+    $addCol('operator', 'forklift', 'TINYINT NOT NULL DEFAULT 0');
 
     // Seeding data awal bila tabel users kosong
     $userCount = (int)$pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();

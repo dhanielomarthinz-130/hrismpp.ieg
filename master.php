@@ -129,6 +129,7 @@ function operators_(): array {
             'pola'     => (int)$r['pola'] === 5 ? 5 : 6,
             'employer' => (string)($r['employer'] ?? ''),
             'role'     => (string)($r['role'] ?? ''),
+            'forklift' => (int)($r['forklift'] ?? 0) === 1,
             'foto'     => foto_url($r['foto'] ?? '')
         ];
     }
@@ -482,7 +483,8 @@ function save_operator(array $p, array $currentUser): array {
         'ket'       => (string)($p['ket'] ?? ''),
         'pola'      => (int)($p['pola'] ?? 6) === 5 ? 5 : 6,
         'employer'  => normalize_employer($p['employer'] ?? ''),
-        'role'      => (string)($p['role'] ?? '')
+        'role'      => (string)($p['role'] ?? ''),
+        'forklift'  => !empty($p['forklift']) && $p['forklift'] !== '0' ? 1 : 0
     ];
 
     if ($isNew) {
