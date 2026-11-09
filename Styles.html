@@ -2351,6 +2351,24 @@
         flex: none;
     }
 
+    /* Tombol status "Belum Disubmit" (Jadwal IEG) */
+    .btn.warn-solid {
+        background: #FEF3C7;
+        border-color: #F59E0B;
+        color: #92400E;
+    }
+
+    @media (hover: hover) {
+        .btn.warn-solid:hover:not(:disabled) {
+            background: #FDE68A;
+        }
+    }
+
+    [data-theme="evening"] .btn.warn-solid {
+        background: rgba(245, 158, 11, 0.16);
+        color: #FCD34D;
+    }
+
     .wk .wk-nm {
         display: flex;
         align-items: center;

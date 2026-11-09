@@ -1036,7 +1036,7 @@
             (editable ? '<button class="btn sm grad" id="wkAuto"><span class="material-symbols-outlined">bolt</span> Isi otomatis (pola 5/6 hari)</button>' : '') +
             (editable ? '<button class="btn sm primary" id="wkBatch"><span class="material-symbols-outlined">calendar_month</span> Input Tanggal &amp; Divisi</button><button class="btn sm" id="wkCopy"><span class="material-symbols-outlined">content_copy</span> Salin minggu lalu</button>' : '') +
             (isAdmin() && !locked && !jOnlyIeg ? '<button class="btn sm" id="wkPaste"><span class="material-symbols-outlined">content_paste</span> Tempel dari Excel</button>' : '') +
-            (jOnlyIeg && editable ? '<button class="btn sm ok" id="wkSubmitTop"><span class="material-symbols-outlined">check_circle</span> Submit ke Jadwal Employee</button>' : '') +
+            (jOnlyIeg ? '<button class="btn sm" id="wkSubmitTop"></button>' : '') +
             (jOnlyIeg ? '<button class="btn sm ghost" id="wkGoFull"><span class="material-symbols-outlined">calendar_month</span> Lihat Jadwal Employee →</button>' : '') +
             (!editable && !jOnlyIeg ? '<span class="chip pri"><span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;margin-right:4px">visibility</span>Mode View Saja (Terisi otomatis dari Submit Jadwal IEG &amp; Approval Request OS)</span>' : '') +
             '<button class="btn sm ghost" id="wkXls"><span class="material-symbols-outlined">download</span> Excel</button>' +
@@ -1047,12 +1047,15 @@
         if ($('#wkCopy')) $('#wkCopy').onclick = copyWeek;
         if ($('#wkPaste')) $('#wkPaste').onclick = pasteWeekModal;
         if ($('#wkSubmitTop')) $('#wkSubmitTop').onclick = () => {
+            if (!editable) return toast('Jadwal IEG minggu ini ' + (J.iegSubmit ? 'sudah disubmit.' : 'belum disubmit.') + (J.lock ? ' Minggu ini dikunci.' : ''), J.iegSubmit ? 'ok' : 'warn');
             if (!Object.keys(J.pending || {}).length) {
-                toast('Semua jadwal IEG minggu ini sudah tersimpan & tampil di Jadwal Employee!', 'ok');
-                return;
+                return J.iegSubmit
+                    ? toast('Jadwal IEG minggu ini sudah disubmit & tampil di Jadwal Employee.', 'ok')
+                    : toast('Belum ada jadwal yang diisi. Isi jadwal karyawan IEG dulu, lalu klik Submit.', 'warn');
             }
             saveWeek(false);
         };
+        updateIegSubmitBtn();
         if ($('#wkGoFull')) $('#wkGoFull').onclick = async () => {
             if (Object.keys(J.pending || {}).length) await saveWeek(false);
             S.jad.emp = '';
@@ -1224,7 +1227,22 @@
     function closeCellMenuOut(e) { if (!e.target.closest('.cellmenu')) closeCellMenu(); }
     function closeCellMenu() { const m = $('.cellmenu'); if (m) m.remove(); document.removeEventListener('click', closeCellMenuOut); }
 
+    // Tombol Submit Jadwal IEG menampilkan status: Belum Disubmit / Sudah Disubmit
+    function updateIegSubmitBtn() {
+        const b = $('#wkSubmitTop');
+        if (!b || !J) return;
+        const n = Object.keys(J.pending || {}).length;
+        const done = !!J.iegSubmit && !n;
+        b.className = 'btn sm ' + (done ? 'ok' : 'warn-solid');
+        b.innerHTML = '<span class="material-symbols-outlined">' + (done ? 'task_alt' : 'pending_actions') + '</span> ' +
+            (done ? 'Sudah Disubmit' : 'Belum Disubmit' + (n ? ' · ' + n + ' perubahan' : '') + ' — Klik untuk Submit');
+        b.title = done
+            ? 'Disubmit oleh ' + (J.iegSubmit.by || '-') + ' · ' + String(J.iegSubmit.at || '').slice(0, 16) + '. Jadwal sudah masuk ke Jadwal Employee.'
+            : 'Jadwal IEG minggu ini belum masuk ke Jadwal Employee. Klik untuk submit.';
+    }
+
     function updateSaveBar() {
+        updateIegSubmitBtn();
         const n = Object.keys(J.pending || {}).length;
         $('#wkSave').classList.toggle('hidden', !n);
         $('#wkSaveTxt').textContent = n + ' perubahan belum disimpan';

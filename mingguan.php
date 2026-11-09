@@ -218,8 +218,19 @@ function jadwal_minggu(array $p, array $currentUser): array {
 
     $employers = array_values(array_unique(array_filter(array_column($ops, 'employer'))));
 
+    // Status submit Jadwal IEG minggu ini: ada jadwal karyawan IEG yang tersimpan dari halaman Jadwal IEG
+    $iegSubmit = null;
+    if ($onlyIeg && $ops) {
+        $ids = array_column($ops, 'id');
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $last = db_row("SELECT updated_at, updated_by FROM jadwal WHERE tanggal BETWEEN ? AND ? AND sumber = 'JADWAL_IEG' AND operator_id IN ($ph) ORDER BY updated_at DESC LIMIT 1",
+            array_merge([$dates[0], $dates[6]], $ids));
+        if ($last) $iegSubmit = ['at' => (string)($last['updated_at'] ?? ''), 'by' => (string)($last['updated_by'] ?? '')];
+    }
+
     return [
         'monday'    => $monday,
+        'iegSubmit' => $iegSubmit,
         'dates'     => $datesFormatted,
         'rows'      => $rows,
         'kodes'     => kode_list_(),
