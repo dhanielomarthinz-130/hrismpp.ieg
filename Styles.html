@@ -3893,6 +3893,34 @@
             padding: 0;
         }
 
+        /* Tombol aksi yang di HP cukup ikon (teks tetap dibaca pembaca layar lewat aria-label) */
+        .toolbar .btn.icon-only-m {
+            flex: 0 0 44px;
+            width: 44px;
+            min-height: 44px;
+            padding: 0;
+            justify-content: center;
+        }
+
+        .toolbar .btn.icon-only-m .btn-txt {
+            display: none;
+        }
+
+        .toolbar .btn.icon-only-m .material-symbols-outlined {
+            font-size: 21px;
+            margin: 0;
+        }
+
+        /* Baris: pilihan divisi penuh; kolom cari + tombol ikon berbagi satu baris */
+        .toolbar:has(.icon-only-m) select {
+            flex: 1 1 100%;
+        }
+
+        .toolbar:has(.icon-only-m) input[type="search"] {
+            flex: 1 1 0;
+            min-width: 0;
+        }
+
         /* Segmen (shift / jenis) berbagi baris dengan tanggal bila muat */
         .toolbar .seg {
             flex: 1 1 170px;

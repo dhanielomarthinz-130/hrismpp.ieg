@@ -556,9 +556,9 @@
             shiftSeg(S.abs.shift, 'ashift') +
             '<select id="aBag"><option value="">Semua Divisi</option>' + S.master.bagian.map(b => '<option value="' + b.kode + '"' + (absBagFilter === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') + '</select>' +
             '<input type="search" id="aQ" placeholder="Cari nama karyawan…" class="grow" style="flex:1 1 160px">' +
-            (menuEdit('absensi') ? '<button class="btn sm grad" id="aAllClockIn"><span class="material-symbols-outlined">fact_check</span> Clock-In Semua</button>' +
-            '<button class="btn sm primary" id="aAdd"><span class="material-symbols-outlined">person_add</span> Tambah</button>' : '') +
-            '<button class="btn sm btn-wa" id="aShare"><span class="material-symbols-outlined">share</span> Share Absensi</button>' +
+            (menuEdit('absensi') ? '<button class="btn sm grad icon-only-m" id="aAllClockIn" aria-label="Clock-In Semua" title="Clock-In Semua"><span class="material-symbols-outlined">fact_check</span><span class="btn-txt"> Clock-In Semua</span></button>' +
+            '<button class="btn sm primary icon-only-m" id="aAdd" aria-label="Tambah karyawan ke shift" title="Tambah karyawan ke shift"><span class="material-symbols-outlined">person_add</span><span class="btn-txt"> Tambah</span></button>' : '') +
+            '<button class="btn sm btn-wa icon-only-m" id="aShare" aria-label="Share Absensi" title="Share Absensi"><span class="material-symbols-outlined">share</span><span class="btn-txt"> Share Absensi</span></button>' +
             '</div>' +
             '<div id="aStats"></div>' +
             '<div id="aBody"><div class="empty">Memuat…</div></div>';
