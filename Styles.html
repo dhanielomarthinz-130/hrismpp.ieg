@@ -2304,6 +2304,53 @@
         line-height: 1.2;
     }
 
+    /* Data Absensi */
+    .da-kpis {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        margin-bottom: 14px;
+    }
+
+    @media (min-width: 900px) {
+        .da-kpis {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+    }
+
+    .da-kpis .val {
+        font-variant-numeric: tabular-nums;
+    }
+
+    .tbl tr.da-day td {
+        background: var(--surface-2, var(--primary-soft));
+        padding: 8px 12px;
+        font-size: 12.5px;
+    }
+
+    .tbl td.nowrap,
+    .tbl .nowrap {
+        white-space: nowrap;
+    }
+
+    .da-day-n {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        padding: 8px 14px;
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--text-2, var(--text));
+        background: var(--primary-soft);
+        border-bottom: 1px solid var(--line);
+    }
+
+    .da-st {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 4px;
+        flex: none;
+    }
+
     .wk .wk-nm {
         display: flex;
         align-items: center;

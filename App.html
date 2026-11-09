@@ -15,6 +15,7 @@
     const ICONS = {
         dashboard: '<span class="material-symbols-outlined">dashboard</span>',
         absensi: '<span class="material-symbols-outlined">how_to_reg</span>',
+        data_absen: '<span class="material-symbols-outlined">assignment_turned_in</span>',
         jadwal_ieg: '<span class="material-symbols-outlined">event_note</span>',
         jadwal: '<span class="material-symbols-outlined">calendar_month</span>',
         request_os: '<span class="material-symbols-outlined">chat</span>',
@@ -34,6 +35,7 @@
         { id: 'req_approval', label: 'Approval Request OS', short: 'Approval OS', roles: ['ADMIN', 'SUPERVISOR'], bottom: true },
         { id: 'jadwal_ieg', label: 'Jadwal IEG', short: 'Jadwal IEG', roles: ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'], bottom: true },
         { id: 'absensi', label: 'Absensi Shift', short: 'Absensi', roles: ['ADMIN', 'SUPERVISOR', 'LEADER'], bottom: true },
+        { id: 'data_absen', label: 'Data Absensi', short: 'Data Absen', roles: ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'] },
         { id: 'jadwal', label: 'Jadwal Employee', short: 'Jadwal', roles: ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'], bottom: true },
         { id: 'rekap', label: 'Rekap MPP', short: 'Rekap', roles: ['ADMIN', 'SUPERVISOR', 'LEADER', 'VIEWER'], bottom: true },
         { id: 'operator', label: 'Operator', roles: ['ADMIN', 'SUPERVISOR'], sec: 'Master data' },
@@ -2499,6 +2501,117 @@
         if ($('#rkSearch')) $('#rkSearch').oninput = e => { rkQ = e.target.value; drawRekapView(); };
     }
 
+    /* =========================== DATA ABSENSI =========================== */
+    let daData = null;
+    const DA_CHIP = { H: 'ok', T: 'info', S: 'warn', I: 'warn', A: 'err', C: 'pri' };
+    async function renderDataAbsen() {
+        const today = S.master.today;
+        S.da = S.da || { from: today, to: today, shift: '', bagian: '', status: '', employer: '', q: '' };
+        const f = S.da;
+        $('#view').innerHTML =
+            '<div class="toolbar">' +
+            '<button class="btn sm" id="daPrev" aria-label="Hari sebelumnya"><span class="material-symbols-outlined" style="font-size:16px">chevron_left</span></button>' +
+            '<input type="date" id="daFrom" value="' + f.from + '" aria-label="Dari tanggal">' +
+            '<input type="date" id="daTo" value="' + f.to + '" aria-label="Sampai tanggal">' +
+            '<button class="btn sm" id="daNext" aria-label="Hari berikutnya"><span class="material-symbols-outlined" style="font-size:16px">chevron_right</span></button>' +
+            '<div class="seg" id="daRange"><button type="button" data-dr="1">Hari ini</button><button type="button" data-dr="7">7 hari</button><button type="button" data-dr="M">Bulan ini</button></div>' +
+            '</div>' +
+            '<div class="toolbar">' +
+            '<input type="search" id="daQ" placeholder="Cari nama / NIK…" value="' + esc(f.q) + '" style="flex:1 1 160px">' +
+            '<select id="daShift"><option value="">Semua shift</option>' + (S.master.shifts || []).map(s => '<option value="' + s.kode + '"' + (f.shift === s.kode ? ' selected' : '') + '>' + esc(s.nama) + '</option>').join('') + '</select>' +
+            '<select id="daBag"><option value="">Semua divisi</option>' + S.master.bagian.map(b => '<option value="' + b.kode + '"' + (f.bagian === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') + '</select>' +
+            '<select id="daSt"><option value="">Semua status</option>' + Object.keys(STATUS).map(k => '<option value="' + k + '"' + (f.status === k ? ' selected' : '') + '>' + STATUS[k] + '</option>').join('') + '</select>' +
+            '<select id="daEmp"><option value="">Semua employer</option>' + ['RKA', 'IEG'].map(e => '<option value="' + e + '"' + (f.employer === e ? ' selected' : '') + '>' + e + '</option>').join('') + '</select>' +
+            '<button class="btn sm" id="daXls"><span class="material-symbols-outlined">download</span> Excel</button>' +
+            '</div>' +
+            '<div id="daStats"></div><div class="card" style="padding:0" id="daBody"><div class="empty">Memuat…</div></div>';
+        const setRange = (a, b) => { f.from = a; f.to = b; $('#daFrom').value = a; $('#daTo').value = b; loadDataAbsen(); };
+        $('#daFrom').onchange = e => { f.from = e.target.value; if (f.to < f.from) { f.to = f.from; $('#daTo').value = f.to; } loadDataAbsen(); };
+        $('#daTo').onchange = e => { f.to = e.target.value; if (f.to < f.from) { f.from = f.to; $('#daFrom').value = f.from; } loadDataAbsen(); };
+        const span = () => Math.round((utc(f.to) - utc(f.from)) / 864e5) + 1;
+        $('#daPrev').onclick = () => { const n = span(); setRange(addDays(f.from, -n), addDays(f.to, -n)); };
+        $('#daNext').onclick = () => { const n = span(); setRange(addDays(f.from, n), addDays(f.to, n)); };
+        $$('[data-dr]').forEach(b => b.onclick = () => {
+            const v = b.dataset.dr;
+            if (v === '1') setRange(today, today);
+            else if (v === '7') setRange(addDays(today, -6), today);
+            else setRange(today.slice(0, 8) + '01', today);
+        });
+        let qT = null;
+        $('#daQ').oninput = e => { f.q = e.target.value; clearTimeout(qT); qT = setTimeout(loadDataAbsen, 300); };
+        $('#daShift').onchange = e => { f.shift = e.target.value; loadDataAbsen(); };
+        $('#daBag').onchange = e => { f.bagian = e.target.value; loadDataAbsen(); };
+        $('#daSt').onchange = e => { f.status = e.target.value; loadDataAbsen(); };
+        $('#daEmp').onchange = e => { f.employer = e.target.value; loadDataAbsen(); };
+        $('#daXls').onclick = async () => {
+            try {
+                const r = await call('absensiListXls', S.da);
+                const a = document.createElement('a');
+                a.href = 'data:' + r.mime + ';base64,' + r.base64; a.download = r.name;
+                document.body.appendChild(a); a.click(); a.remove();
+                toast('Diunduh: ' + r.name, 'ok');
+            } catch (e) { fail(e); }
+        };
+        await loadDataAbsen();
+    }
+    async function loadDataAbsen() {
+        try { daData = await call('absensiList', S.da); } catch (e) { return fail(e); }
+        if (S.page !== 'data_absen') return;
+        drawDataAbsen();
+    }
+    function drawDataAbsen() {
+        const d = daData, f = S.da;
+        const today = S.master.today;
+        $$('[data-dr]').forEach(b => b.classList.toggle('on',
+            (b.dataset.dr === '1' && f.from === today && f.to === today) ||
+            (b.dataset.dr === '7' && f.from === addDays(today, -6) && f.to === today) ||
+            (b.dataset.dr === 'M' && f.from === today.slice(0, 8) + '01' && f.to === today)));
+        $('#pageSub').textContent = (d.from === d.to ? fmtTgl(d.from) : fmtShort(d.from) + ' – ' + fmtShort(d.to)) + ' · ' + d.total + ' catatan absensi';
+        const c = d.count, hadir = c.H + c.T;
+        $('#daStats').innerHTML = '<div class="kpis da-kpis">' +
+            '<div class="kpi"><div class="lbl">Total diabsen</div><div class="val">' + d.total + '</div><div class="sub">catatan</div></div>' +
+            '<div class="kpi"><div class="lbl">Hadir</div><div class="val" style="color:var(--ok)">' + hadir + '</div><div class="sub">Telat ' + c.T + (d.total ? ' · ' + Math.round(hadir / d.total * 100) + '%' : '') + '</div></div>' +
+            '<div class="kpi"><div class="lbl">Sakit / Izin / Cuti</div><div class="val">' + (c.S + c.I + c.C) + '</div><div class="sub">S ' + c.S + ' · I ' + c.I + ' · C ' + c.C + '</div></div>' +
+            '<div class="kpi"><div class="lbl">Alpa</div><div class="val" style="color:' + (c.A ? 'var(--err)' : 'inherit') + '">' + c.A + '</div><div class="sub">Lembur total ' + (Math.round(d.lembur * 10) / 10) + ' jam</div></div>' +
+            '</div>';
+        if (!d.rows.length) {
+            $('#daBody').innerHTML = '<div class="empty"><div class="big"><span class="material-symbols-outlined">event_busy</span></div><p>Belum ada data absensi untuk filter ini.</p>' +
+                (allowedPages().some(p => p.id === 'absensi') ? '<button class="btn sm primary" onclick="go(\'absensi\')">Buka Absensi Shift</button>' : '') + '</div>';
+            return;
+        }
+        const multiDay = d.from !== d.to;
+        const jamAbs = r => r.updatedAt ? esc(r.updatedAt.slice(11, 16)) : '—';
+        const stChip = r => '<span class="chip xs ' + (DA_CHIP[r.status] || '') + '">' + esc(STATUS[r.status] || r.status) + '</span>';
+        let lastDay = '';
+        const wideRows = d.rows.map(r => {
+            let sep = '';
+            if (multiDay && r.tanggal !== lastDay) {
+                lastDay = r.tanggal;
+                const n = d.rows.filter(x => x.tanggal === r.tanggal);
+                const h = n.filter(x => x.status === 'H' || x.status === 'T').length;
+                sep = '<tr class="da-day"><td colspan="10"><b>' + esc(fmtTgl(r.tanggal)) + '</b><span class="muted small"> · ' + n.length + ' diabsen · ' + h + ' hadir</span></td></tr>';
+            }
+            return sep + '<tr><td class="nowrap">' + esc(fmtShort(r.tanggal)) + '</td><td>' + esc(shiftName(r.shift)) + '</td>' +
+                '<td><span class="op-name"><span class="op-ava">' + avatarHtml(r.nama, r.foto) + '</span><b>' + esc(r.nama) + '</b></span></td>' +
+                '<td>' + esc(r.nik) + '</td><td>' + esc(bagName(r.bagian)) + '</td><td><span class="chip xs ' + (r.employer === 'IEG' ? 'pri' : '') + '">' + esc(r.employer || '—') + '</span></td>' +
+                '<td>' + stChip(r) + '</td><td class="num">' + (r.lembur ? r.lembur + ' j' : '—') + '</td>' +
+                '<td class="small">' + (r.ket ? esc(r.ket) : '<span class="muted">—</span>') + '</td>' +
+                '<td class="small muted nowrap">' + esc(r.updatedBy || '—') + ' · ' + jamAbs(r) + '</td></tr>';
+        }).join('');
+        lastDay = '';
+        const narrow = d.rows.map(r => {
+            let sep = '';
+            if (r.tanggal !== lastDay) { lastDay = r.tanggal; sep = '<div class="da-day-n">' + esc(fmtTgl(r.tanggal)) + '</div>'; }
+            return sep + '<div class="list-item"><span class="op-ava lg">' + avatarHtml(r.nama, r.foto) + '</span><div class="grow"><b>' + esc(r.nama) + '</b>' +
+                '<span class="small muted">' + esc(shiftName(r.shift)) + ' · ' + esc(bagName(r.bagian)) + ' · ' + esc(r.employer) + (r.lembur ? ' · lembur ' + r.lembur + ' j' : '') + (r.ket ? ' · ' + esc(r.ket) : '') + '</span></div>' +
+                '<div class="da-st">' + stChip(r) + '<span class="small muted">' + jamAbs(r) + '</span></div></div>';
+        }).join('');
+        $('#daBody').innerHTML =
+            '<div class="only-wide"><div class="table-wrap" style="border:0"><table class="tbl"><thead><tr><th>Tanggal</th><th>Shift</th><th>Nama</th><th>NIK</th><th>Divisi</th><th>Employer</th><th>Status</th><th class="num">Lembur</th><th>Catatan</th><th>Diabsen oleh</th></tr></thead><tbody>' +
+            wideRows + '</tbody></table></div></div>' +
+            '<div class="only-narrow">' + narrow + '</div>';
+    }
+
     /* =========================== OPERATOR =========================== */
     async function renderOperator() {
         const f = S.op;
@@ -3260,7 +3373,7 @@
     const RENDER = {
         dashboard: renderDashboard, absensi: renderAbsensi, jadwal_ieg: renderJadwalIeg, jadwal: renderJadwal,
         request_os: renderWa, req_approval: renderReqApproval,
-        operator: renderOperator, bagian: renderBagian, pengaturan: renderPengaturan, rekap: renderRekap,
+        operator: renderOperator, bagian: renderBagian, pengaturan: renderPengaturan, rekap: renderRekap, data_absen: renderDataAbsen,
         akses: renderAkses, maintenance: renderMaintenance
     };
 

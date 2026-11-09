@@ -97,6 +97,8 @@ try {
         'addToShift'      => fn() => add_to_shift($payload, $user),
         'removeFromShift' => fn() => remove_from_shift($payload, $user),
         'fillVacant'      => fn() => fill_vacant_slot($payload, $user),
+        'absensiList'     => fn() => absensi_list($payload, $user),
+        'absensiListXls'  => fn() => absensi_list_export($payload, $user),
 
         // Jadwal Employee
         'jadwal'          => fn() => jadwal_minggu($payload, $user),

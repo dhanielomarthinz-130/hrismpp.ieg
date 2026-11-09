@@ -56,7 +56,7 @@ function maintenance_on(): bool {
 
 // ---------------------------------------------------------------- Control Akses Menu
 // ID menu yang bisa diatur aksesnya (menu khusus super admin tidak termasuk).
-const MENU_IDS = ['dashboard', 'request_os', 'req_approval', 'jadwal_ieg', 'absensi', 'jadwal', 'rekap', 'operator', 'bagian', 'pengaturan'];
+const MENU_IDS = ['dashboard', 'request_os', 'req_approval', 'jadwal_ieg', 'absensi', 'data_absen', 'jadwal', 'rekap', 'operator', 'bagian', 'pengaturan'];
 
 /** Konfigurasi akses: ['roles' => [ROLE => [menu...]], 'users' => [username => [menu...]]] */
 function menu_access_config(): array {

@@ -553,3 +553,96 @@ function fill_vacant_slot(array $p, array $currentUser): array {
     ];
 }
 
+/**
+ * Data Absensi: riwayat absensi yang sudah tercatat, per rentang tanggal.
+ * Filter: from, to (maks 92 hari), shift, bagian, status, employer, q (nama/NIK).
+ */
+function absensi_list_(array $p): array {
+    $re = '/^\d{4}-\d{2}-\d{2}$/';
+    $today = date('Y-m-d');
+    $from = preg_match($re, (string)($p['from'] ?? '')) ? (string)$p['from'] : $today;
+    $to   = preg_match($re, (string)($p['to'] ?? '')) ? (string)$p['to'] : $from;
+    if ($to < $from) [$from, $to] = [$to, $from];
+    if ((strtotime($to) - strtotime($from)) / 86400 > 92) {
+        throw new RuntimeException('Rentang tanggal maksimal 3 bulan.');
+    }
+    $shift  = strtoupper(trim((string)($p['shift'] ?? '')));
+    $bagian = strtoupper(trim((string)($p['bagian'] ?? '')));
+    $status = strtoupper(trim((string)($p['status'] ?? '')));
+    $emp    = strtoupper(trim((string)($p['employer'] ?? '')));
+    $q      = mb_strtolower(trim((string)($p['q'] ?? '')));
+
+    $sql = "SELECT tanggal, shift, operator_id, status, lembur, ket, updated_at, updated_by FROM absensi WHERE tanggal BETWEEN ? AND ? AND status <> ''";
+    $par = [$from, $to];
+    if ($shift !== '') { $sql .= " AND UPPER(shift) = ?"; $par[] = $shift; }
+    if ($status !== '') { $sql .= " AND UPPER(status) = ?"; $par[] = $status; }
+    $abs = db_all($sql, $par);
+
+    $ops = [];
+    foreach (operators_() as $o) $ops[$o['id']] = $o;
+    $jad = [];
+    foreach (db_all("SELECT tanggal, operator_id, bagian_tugas FROM jadwal WHERE tanggal BETWEEN ? AND ?", [$from, $to]) as $j) {
+        $jad[$j['tanggal'] . '|' . $j['operator_id']] = strtoupper((string)($j['bagian_tugas'] ?? ''));
+    }
+
+    $rows = [];
+    foreach ($abs as $a) {
+        $o = $ops[$a['operator_id']] ?? null;
+        $nama = $o ? $o['nama'] : ('(terhapus) ' . $a['operator_id']);
+        if (stripos($nama, 'vacant') !== false) continue;
+        $bt = $jad[$a['tanggal'] . '|' . $a['operator_id']] ?? '';
+        $bag = $bt !== '' ? $bt : ($o ? strtoupper($o['bagian']) : '');
+        $employer = $o ? normalize_employer($o['employer'] ?? '') : '';
+        if ($bagian !== '' && $bag !== $bagian) continue;
+        if ($emp !== '' && $employer !== $emp) continue;
+        if ($q !== '' && mb_strpos(mb_strtolower($nama), $q) === false && mb_strpos(mb_strtolower((string)($o['nik'] ?? '')), $q) === false) continue;
+        $rows[] = [
+            'tanggal'    => (string)$a['tanggal'],
+            'shift'      => strtoupper((string)$a['shift']),
+            'operatorId' => (string)$a['operator_id'],
+            'nama'       => $nama,
+            'nik'        => $o ? (string)$o['nik'] : '',
+            'bagian'     => $bag,
+            'employer'   => $employer,
+            'foto'       => $o ? (string)($o['foto'] ?? '') : '',
+            'status'     => strtoupper((string)$a['status']),
+            'lembur'     => (float)$a['lembur'],
+            'ket'        => (string)($a['ket'] ?? ''),
+            'updatedAt'  => (string)($a['updated_at'] ?? ''),
+            'updatedBy'  => (string)($a['updated_by'] ?? '')
+        ];
+    }
+    // Terbaru dulu, lalu shift, lalu nama A-Z
+    usort($rows, function ($x, $y) {
+        if ($x['tanggal'] !== $y['tanggal']) return strcmp($y['tanggal'], $x['tanggal']);
+        if ($x['shift'] !== $y['shift']) return strcmp($x['shift'], $y['shift']);
+        return strcasecmp($x['nama'], $y['nama']);
+    });
+
+    $cnt = ['H' => 0, 'T' => 0, 'S' => 0, 'I' => 0, 'A' => 0, 'C' => 0];
+    $lembur = 0.0;
+    foreach ($rows as $r) {
+        if (isset($cnt[$r['status']])) $cnt[$r['status']]++;
+        $lembur += $r['lembur'];
+    }
+    return ['from' => $from, 'to' => $to, 'rows' => $rows, 'count' => $cnt, 'total' => count($rows), 'lembur' => $lembur];
+}
+
+function absensi_list(array $p, array $currentUser): array {
+    return absensi_list_($p);
+}
+
+/** Unduh Data Absensi (CSV, terbuka di Excel). */
+function absensi_list_export(array $p, array $currentUser): array {
+    require_once __DIR__ . '/export.php';
+    $d = absensi_list_($p);
+    $label = ['H' => 'Hadir', 'T' => 'Telat', 'S' => 'Sakit', 'I' => 'Izin', 'A' => 'Alpa', 'C' => 'Cuti'];
+    $out = [];
+    $no = 0;
+    foreach ($d['rows'] as $r) {
+        $out[] = [++$no, $r['tanggal'], $r['shift'], $r['nama'], $r['nik'], $r['bagian'], $r['employer'],
+            $label[$r['status']] ?? $r['status'], $r['lembur'], $r['ket'], $r['updatedBy'], $r['updatedAt']];
+    }
+    return csv_download_('data-absensi_' . $d['from'] . '_sd_' . $d['to'] . '.csv',
+        ['No', 'Tanggal', 'Shift', 'Nama', 'NIK', 'Divisi', 'Employer', 'Status', 'Lembur (jam)', 'Catatan', 'Diabsen oleh', 'Waktu absen'], $out);
+}
