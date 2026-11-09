@@ -2891,27 +2891,45 @@
             '</tbody></table></div>';
         $$('[data-sb]', box).forEach(x => x.onclick = () => bagModal(S.master.bagian.find(b => b.kode === x.dataset.sb), drawSetBagian));
     }
+    function autoKodeBagian(nama) {
+        let base = String(nama || '').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+            .replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 26);
+        if (!base) return '';
+        if (base.length < 2) base += '_1';
+        const used = new Set((S.master.bagian || []).map(b => String(b.kode).toUpperCase()));
+        let k = base, i = 2;
+        while (used.has(k)) k = base + '_' + (i++);
+        return k;
+    }
     function bagModal(b, onDone) {
         const after = onDone || renderBagian;
         const isNew = !b;
         b = b || { kode: '', nama: '', targetS1: 0, targetS2: 0, urutan: S.master.bagian.length + 1, aktif: true };
         openModal({
-            title: isNew ? 'Tambah bagian' : 'Ubah bagian',
-            body: '<div class="grid2"><label class="field"><span>Kode *</span><input name="kode" value="' + esc(b.kode) + '"' + (isNew ? '' : ' readonly') + ' style="text-transform:uppercase"></label>' +
-                '<label class="field"><span>Nama *</span><input name="nama" value="' + esc(b.nama) + '"></label></div>' +
+            title: isNew ? 'Tambah divisi' : 'Ubah divisi',
+            body: '<div class="grid2"><label class="field"><span>Divisi *</span><input name="nama" value="' + esc(b.nama) + '" placeholder="Contoh: Operator Forklift" required></label>' +
+                '<label class="field"><span>Kode</span><input name="kode" value="' + esc(b.kode) + '" readonly tabindex="-1" class="mono" placeholder="Otomatis"><small>' + (isNew ? 'Otomatis dari nama divisi' : 'Kode tidak bisa diubah') + '</small></label></div>' +
                 '<div class="grid2"><label class="field"><span>Target MPP ' + esc(shiftName('S1')) + '</span><input type="number" min="0" name="targetS1" value="' + b.targetS1 + '"></label>' +
-                '<label class="field"><span>MPP default ' + esc(shiftName('S2')) + '</span><input type="number" min="0" name="targetS2" value="' + b.targetS2 + '"></label></div>' +
+                '<label class="field"><span>Target MPP ' + esc(shiftName('S2')) + '</span><input type="number" min="0" name="targetS2" value="' + b.targetS2 + '"></label></div>' +
                 '<label class="field"><span>Urutan tampil</span><input type="number" name="urutan" value="' + b.urutan + '"></label>' +
                 '<label class="check"><input type="checkbox" name="aktif"' + (b.aktif ? ' checked' : '') + '> Aktif</label>',
+            onOpen: body => {
+                if (!isNew) return;
+                // Kode dibuat otomatis dari nama divisi: "Operator Forklift" -> OPERATOR_FORKLIFT (unik)
+                const nm = $('[name=nama]', body), kd = $('[name=kode]', body);
+                nm.oninput = () => { kd.value = autoKodeBagian(nm.value); };
+            },
             buttons: (isNew ? [] : [{
                 label: 'Hapus', cls: 'danger', onClick: async () => {
-                    if (!await confirmBox('Hapus bagian?', b.nama, 'Hapus', 'danger')) return;
-                    try { await call('deleteBagian', { kode: b.kode }); toast('Bagian dihapus.', 'ok'); closeModal(); await loadMaster(); after(); } catch (e) { fail(e); }
+                    if (!await confirmBox('Hapus divisi?', b.nama, 'Hapus', 'danger')) return;
+                    try { await call('deleteBagian', { kode: b.kode }); toast('Divisi dihapus.', 'ok'); closeModal(); await loadMaster(); after(); } catch (e) { fail(e); }
                 }
             }]).concat([{ label: 'Batal' }, {
                 label: 'Simpan', cls: 'primary', onClick: async () => {
                     const f = formData($('#modalBody')); f.isNew = isNew;
-                    try { await call('saveBagian', f); closeModal(); toast('Bagian disimpan.', 'ok'); await loadMaster(); after(); } catch (e) { fail(e); }
+                    if (!String(f.nama || '').trim()) { $('#modalBody [name=nama]').focus(); return toast('Isi nama divisi dulu.', 'warn'); }
+                    if (isNew) f.kode = autoKodeBagian(f.nama);
+                    try { await call('saveBagian', f); closeModal(); toast('Divisi disimpan.', 'ok'); await loadMaster(); after(); } catch (e) { fail(e); }
                 }
             }])
         });
