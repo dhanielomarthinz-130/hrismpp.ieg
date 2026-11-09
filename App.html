@@ -533,6 +533,7 @@
             '<input type="search" id="aQ" placeholder="Cari nama karyawan…" class="grow" style="flex:1 1 160px">' +
             '<button class="btn sm grad" id="aAllClockIn"><span class="material-symbols-outlined">fact_check</span> Clock-In Semua</button>' +
             '<button class="btn sm primary" id="aAdd"><span class="material-symbols-outlined">person_add</span> Tambah</button>' +
+            '<button class="btn sm btn-wa" id="aShare"><span class="material-symbols-outlined">share</span> Share Absensi</button>' +
             '</div>' +
             '<div id="aStats"></div>' +
             '<div id="aBody"><div class="empty">Memuat…</div></div>';
@@ -558,13 +559,114 @@
             }
         };
         $('#aAdd').onclick = addOperatorModal;
+        $('#aShare').onclick = shareAbsensi;
         await loadAbs();
     }
 
     async function loadAbs() {
         absData = await call('absensi', { tanggal: S.abs.tanggal, shift: S.abs.shift });
-        $('#pageSub').textContent = absData.tanggalLabel + ' · ' + shiftName(absData.shift) + ' ' + shiftTime(absData.shift);
+        // Absensi Shift dipakai PIC untuk mengabsen Employee RKA saja
+        absData.rows = (absData.rows || []).filter(r => (r.employer || 'RKA') === 'RKA');
+        $('#pageSub').textContent = 'Employee RKA · ' + absData.tanggalLabel + ' · ' + shiftName(absData.shift) + ' ' + shiftTime(absData.shift);
         renderAbsList();
+    }
+
+    /* ---------- Share hasil absensi (Employee RKA) ---------- */
+    const isVacRow = r => r.isVacant || /vacant/i.test(r.nama);
+
+    function absShareRows() {
+        // Yang dilaporkan: karyawan RKA pada tampilan aktif (Request Hari Ini / Semua), tanpa filter divisi & pencarian
+        const all = absData && absData.rows ? absData.rows : [];
+        const hasScheduled = all.some(r => r.terjadwal);
+        const showAll = (absMode === 'ALL') || (absMode === 'AUTO' && !hasScheduled);
+        return all.filter(r => showAll || r.terjadwal);
+    }
+
+    function absCaption(rows) {
+        const now = new Date();
+        const jam = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+        const cnt = k => rows.filter(r => r.status === k).length;
+        const groups = {};
+        rows.forEach(r => (groups[r.bagianTugas] = groups[r.bagianTugas] || []).push(r));
+        const order = S.master.bagian.map(b => b.kode).filter(k => groups[k])
+            .concat(Object.keys(groups).filter(k => !S.master.bagian.some(b => b.kode === k)));
+        const hadir = cnt('H') + cnt('T');
+        const L = [];
+        L.push('*LAPORAN ABSENSI CLOCK-IN*');
+        L.push('*Employee RKA · ' + (absData.tim || 'Inventory') + '*');
+        L.push('');
+        L.push('Tanggal : ' + absData.tanggalLabel);
+        L.push('Shift   : ' + shiftName(absData.shift) + ' (' + shiftTime(absData.shift) + ')');
+        L.push('');
+        L.push('*Ringkasan*');
+        L.push('Total karyawan : ' + rows.length + ' orang');
+        L.push('✅ Hadir : ' + cnt('H'));
+        if (cnt('T')) L.push('⏰ Telat : ' + cnt('T'));
+        if (cnt('S')) L.push('🤒 Sakit : ' + cnt('S'));
+        if (cnt('I')) L.push('📝 Izin : ' + cnt('I'));
+        if (cnt('C')) L.push('🏖️ Cuti : ' + cnt('C'));
+        if (cnt('A')) L.push('❌ Alpa : ' + cnt('A'));
+        L.push('Kehadiran : ' + hadir + '/' + rows.length + ' (' + (rows.length ? Math.round(hadir / rows.length * 100) : 0) + '%)');
+        order.forEach(k => {
+            const list = groups[k].slice().sort((a, b) => (a.nama || '').localeCompare(b.nama || '', 'id', { sensitivity: 'base' }));
+            const h = list.filter(r => r.status === 'H' || r.status === 'T').length;
+            L.push('');
+            L.push('*' + bagName(k).toUpperCase() + '* (' + h + '/' + list.length + ')');
+            list.forEach((r, i) => {
+                let s = (i + 1) + '. ' + r.nama + ' — ' + (STATUS[r.status] || r.status);
+                if (Number(r.lembur) > 0) s += ' · lembur ' + r.lembur + ' jam';
+                if (r.ket) s += ' (' + r.ket + ')';
+                L.push(s);
+            });
+        });
+        L.push('');
+        L.push('Semua karyawan sudah ter-absen ✅');
+        L.push('Dilaporkan oleh ' + (S.user.nama || S.user.username) + ' · ' + jam);
+        return L.join('\n');
+    }
+
+    function absBlockedModal(belum, vac) {
+        const byBag = {};
+        belum.forEach(r => (byBag[r.bagianTugas] = byBag[r.bagianTugas] || []).push(r.nama));
+        const listHtml = Object.keys(byBag).map(k =>
+            '<div style="margin-bottom:10px"><b>' + esc(bagName(k)) + '</b> <span class="chip xs warn">' + byBag[k].length + '</span>' +
+            '<ol style="margin:6px 0 0;padding-left:20px">' + byBag[k].sort((a, b) => a.localeCompare(b)).map(n => '<li>' + esc(n) + '</li>').join('') + '</ol></div>').join('');
+        openModal({
+            title: 'Absensi belum lengkap',
+            body: '<div class="alert warn" style="margin-bottom:12px">Hasil absensi baru bisa di-share setelah <b>semua karyawan</b> diabsen (Clock-In, atau ditandai Telat/Sakit/Izin/Cuti/Alpa).</div>' +
+                (belum.length ? '<p style="margin:0 0 8px"><b>' + belum.length + ' karyawan belum Clock-In:</b></p>' + listHtml : '') +
+                (vac.length ? '<p style="margin:8px 0 0"><b>' + vac.length + ' slot VACANT</b> belum diisi nama karyawan pengganti.</p>' : ''),
+            buttons: [{ label: 'Tutup', cls: 'primary' }]
+        });
+    }
+
+    async function shareAbsensi() {
+        if (!absData) return;
+        await flushAbs();
+        const rows = absShareRows();
+        if (!rows.length) return toast('Belum ada karyawan RKA yang terjadwal di shift ini.', 'warn');
+        const vac = rows.filter(isVacRow);
+        const named = rows.filter(r => !isVacRow(r));
+        const belum = named.filter(r => !r.status);
+        if (belum.length || vac.length) {
+            const contoh = belum.slice(0, 5).map(r => r.nama).join(', ') + (belum.length > 5 ? ', dan ' + (belum.length - 5) + ' lainnya' : '');
+            toast('Belum bisa di-share. ' + (belum.length ? belum.length + ' karyawan belum Clock-In: ' + contoh : '') + (vac.length ? (belum.length ? '\n' : '') + vac.length + ' slot VACANT belum diisi.' : ''), 'warn');
+            absBlockedModal(belum, vac);
+            return;
+        }
+        const text = absCaption(named);
+        const copied = await copyText(text);
+        if (navigator.share) {
+            try {
+                await navigator.share({ title: 'Absensi ' + shiftName(absData.shift) + ' - ' + absData.tanggalLabel, text: text });
+                toast('Hasil absensi berhasil dibagikan.', 'ok');
+                return;
+            } catch (err) {
+                if (err.name === 'AbortError') return;
+            }
+        }
+        window.open('https://api.whatsapp.com/send?text=' + encodeURIComponent(text), '_blank');
+        toast('WhatsApp dibuka' + (copied ? ' — caption juga sudah disalin.' : '.'), 'ok');
     }
 
     function getFilteredAbsRows() {

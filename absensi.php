@@ -169,6 +169,7 @@ function get_absensi(array $p, array $currentUser): array {
             'nik'         => $op['nik'],
             'bagian'      => $op['bagian'],
             'bagianTugas' => $bt,
+            'employer'    => normalize_employer($op['employer'] ?? ''),
             'kodeJadwal'  => $jShift ?: '-',
             'terjadwal'   => ($isScheduledThisShift || $hasAbsThisShift),
             'isVacant'    => $isVacant,
@@ -211,6 +212,7 @@ function get_absensi(array $p, array $currentUser): array {
         'scheduledCount' => $scheduledCount,
         'approvalStatus' => $ordAppStatus,
         'approvedBy'     => $ordRow ? (string)($ordRow['approved_by'] ?? '') : '',
+        'tim'            => (string)(settings_()['wa_tim'] ?? 'Inventory'),
         'rows'           => $rows,
         'available'      => $available,
         'current'        => $cur
