@@ -3916,6 +3916,68 @@
             flex: 1 1 100%;
         }
 
+        /* Toolbar yang punya tombol ikon: cari + ikon satu baris, pilihan (select) di baris bawah */
+        .toolbar:has(> .icon-only-m) > .icon-only-m {
+            order: 1;
+        }
+
+        .toolbar:has(> .icon-only-m) > select {
+            order: 2;
+            flex: 1 1 calc(50% - 4px);
+            min-width: 0;
+        }
+
+        /* Jadwal: baris 1 minggu (‹ tanggal ›), baris 2 bagian + employer, baris 3 cari */
+        .wk-filter #wkDate {
+            flex: 1 1 calc(100% - 96px);
+        }
+
+        .wk-filter #wkBag,
+        .wk-filter #wkEmp,
+        .wk-filter .wk-ieg-chip {
+            flex: 1 1 calc(50% - 4px);
+            min-width: 0;
+            justify-content: center;
+        }
+
+        .wk-filter #wkQ {
+            flex: 1 1 100% !important;
+        }
+
+        /* Status Submit Jadwal IEG: baris sendiri selebar layar, ikon aksi di bawahnya */
+        #wkActs #wkSubmitTop {
+            flex: 1 1 100%;
+            order: -1;
+        }
+
+        /* Tab status (mis. Approval Request OS) jadi kisi 2 kolom, semua terlihat tanpa digeser */
+        .toolbar .seg.seg-grid {
+            display: grid !important;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            flex: 1 1 100%;
+            overflow: visible;
+            gap: 4px;
+        }
+
+        .toolbar .seg.seg-grid button {
+            white-space: normal;
+            line-height: 1.2;
+            min-height: 36px;
+            padding: 4px 8px;
+        }
+
+        /* Chip berisi teks panjang boleh turun baris, tidak terpotong keluar kartu */
+        #raBody .chip,
+        .pending-approval-item .chip {
+            white-space: normal;
+            height: auto;
+            min-height: 22px;
+            line-height: 1.3;
+            padding-top: 3px;
+            padding-bottom: 3px;
+            max-width: 100%;
+        }
+
         .toolbar:has(.icon-only-m) input[type="search"] {
             flex: 1 1 120px;
             min-width: 0;

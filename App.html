@@ -1073,11 +1073,11 @@
         S.jad.q = S.jad.q || '';
         jBrush = null;
         $('#view').innerHTML =
-            '<div class="toolbar">' +
+            '<div class="toolbar wk-filter">' +
             '<button class="btn sm" id="wkPrev" aria-label="Minggu sebelumnya"><span class="material-symbols-outlined" style="font-size:16px">chevron_left</span></button><input type="date" id="wkDate" value="' + S.jad.tanggal + '" aria-label="Minggu"><button class="btn sm" id="wkNext" aria-label="Minggu berikutnya"><span class="material-symbols-outlined" style="font-size:16px">chevron_right</span></button>' +
             '<select id="wkBag"><option value="">Semua bagian</option>' + S.master.bagian.map(b => '<option value="' + b.kode + '"' + (S.jad.bagian === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') + '</select>' +
             (jOnlyIeg
-                ? '<span class="chip pri" style="height:36px;padding:0 12px"><span class="material-symbols-outlined" style="font-size:16px;margin-right:4px">badge</span>Khusus Karyawan IEG</span>'
+                ? '<span class="chip pri wk-ieg-chip" style="height:36px;padding:0 12px"><span class="material-symbols-outlined" style="font-size:16px;margin-right:4px">badge</span>Khusus Karyawan IEG</span>'
                 : '<select id="wkEmp"><option value="">Semua employer</option></select>') +
             '<input type="search" id="wkQ" placeholder="Cari nama / NIK…" value="' + esc(S.jad.q) + '" style="flex:1 1 140px">' +
             '</div>' +
@@ -1125,7 +1125,6 @@
             (isAdmin() && !locked && !jOnlyIeg ? '<button class="btn sm" id="wkPaste"><span class="material-symbols-outlined">content_paste</span> Tempel dari Excel</button>' : '') +
             (jOnlyIeg ? '<button class="btn sm" id="wkSubmitTop" data-keep-text="1"></button>' : '') +
             (jOnlyIeg ? '<button class="btn sm ghost" id="wkGoFull"><span class="material-symbols-outlined">calendar_month</span> Lihat Jadwal Employee →</button>' : '') +
-            (!editable && !jOnlyIeg ? '<span class="chip pri"><span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;margin-right:4px">visibility</span>Mode View Saja (Terisi otomatis dari Submit Jadwal IEG &amp; Approval Request OS)</span>' : '') +
             '<button class="btn sm ghost" id="wkXls"><span class="material-symbols-outlined">download</span> Excel</button>' +
             (isAdmin() && !jOnlyIeg ? '<button class="btn sm ghost" id="wkLock"><span class="material-symbols-outlined">' + (J.lock ? 'lock_open' : 'lock') + '</span> ' + (J.lock ? 'Buka kunci' : 'Kunci minggu') + '</button>' : '') +
             (J.lock ? '<span class="chip warn">Dikunci ' + esc(J.lock.by) + ' · ' + esc(J.lock.at.slice(5, 16)) + '</span>' : '');
@@ -2622,8 +2621,6 @@
             '<button class="btn sm" id="daNext" aria-label="Hari berikutnya"><span class="material-symbols-outlined" style="font-size:16px">chevron_right</span></button>' +
             '<div class="seg" id="daRange"><button type="button" data-dr="1">Hari ini</button><button type="button" data-dr="7">7 hari</button><button type="button" data-dr="M">Bulan ini</button></div>' +
             '<div class="seg" id="daEmpSeg" role="group" aria-label="Employer">' + [['', 'Semua'], ['RKA', 'RKA'], ['IEG', 'IEG']].map(e => '<button type="button" data-de="' + e[0] + '" class="' + (f.employer === e[0] ? 'on' : '') + '">' + e[1] + '</button>').join('') + '</div>' +
-            '<span class="spacer"></span>' +
-            '<button class="btn sm btn-wa" id="daShare"><span class="material-symbols-outlined">share</span> Share Shift Hari Ini</button>' +
             '</div>' +
             '<div class="toolbar">' +
             '<input type="search" id="daQ" placeholder="Cari nama / NIK…" value="' + esc(f.q) + '" style="flex:1 1 160px">' +
@@ -2631,6 +2628,7 @@
             '<select id="daBag"><option value="">Semua divisi</option>' + S.master.bagian.map(b => '<option value="' + b.kode + '"' + (f.bagian === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') + '</select>' +
             '<select id="daSt"><option value="">Semua status</option>' + Object.keys(STATUS).map(k => '<option value="' + k + '"' + (f.status === k ? ' selected' : '') + '>' + STATUS[k] + '</option>').join('') + '</select>' +
             '<button class="btn sm" id="daXls"><span class="material-symbols-outlined">download</span> Excel</button>' +
+            '<button class="btn sm btn-wa" id="daShare"><span class="material-symbols-outlined">share</span> Share Shift Hari Ini</button>' +
             '</div>' +
             '<div id="daStats"></div><div class="card" style="padding:0" id="daBody"><div class="empty">Memuat…</div></div>';
         const setRange = (a, b) => { f.from = a; f.to = b; $('#daFrom').value = a; $('#daTo').value = b; loadDataAbsen(); };
@@ -3238,7 +3236,7 @@
             : 'Pantau Request OS & status Approval Supervisor (hanya lihat)';
         $('#view').innerHTML =
             '<div class="toolbar">' +
-            '<div class="seg">' +
+            '<div class="seg seg-grid">' +
             '<button type="button" data-ra-st="ALL" class="' + (reqAppFilter === 'ALL' ? 'on' : '') + '">Semua</button>' +
             '<button type="button" data-ra-st="PENDING" class="' + (reqAppFilter === 'PENDING' ? 'on' : '') + '">Waiting Approval Supervisor</button>' +
             '<button type="button" data-ra-st="APPROVED" class="' + (reqAppFilter === 'APPROVED' ? 'on' : '') + '">Approved</button>' +
