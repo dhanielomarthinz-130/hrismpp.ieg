@@ -350,6 +350,80 @@ ob_start();
             margin-top: 6px;
         }
 
+        /* Pilihan aplikasi: HRIS / Monitoring 5R */
+        .app-switch {
+            position: relative;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            padding: 4px;
+            margin: 0 0 18px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.10);
+        }
+        .app-switch::before {
+            content: "";
+            position: absolute;
+            top: 4px;
+            bottom: 4px;
+            left: 4px;
+            width: calc(50% - 4px);
+            border-radius: 9px;
+            background: var(--grad);
+            box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35);
+            transition: transform .28s cubic-bezier(.2, .8, .2, 1);
+        }
+        .app-switch[data-app="5r"]::before {
+            transform: translateX(100%);
+        }
+        .app-switch button {
+            position: relative;
+            z-index: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            min-height: 38px;
+            padding: 0 10px;
+            border: 0;
+            border-radius: 9px;
+            background: transparent;
+            color: var(--side-text);
+            font: inherit;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: color .2s;
+        }
+        .app-switch button[aria-checked="true"] {
+            color: #FFFFFF;
+        }
+        .app-switch button .material-symbols-outlined {
+            font-size: 18px;
+        }
+        .app-switch button:focus-visible {
+            outline: 2px solid #A5B4FC;
+            outline-offset: 2px;
+        }
+        @media (hover: hover) {
+            .app-switch button[aria-checked="false"]:hover {
+                color: #FFFFFF;
+            }
+        }
+        .auth-main .alert.info {
+            background: rgba(165, 180, 252, 0.14);
+            border: 1px solid rgba(165, 180, 252, 0.35);
+            color: #E0E7FF;
+        }
+        .auth-swap {
+            transition: opacity .18s ease;
+        }
+        .auth-swap.fading {
+            opacity: 0;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .app-switch::before, .auth-swap { transition: none; }
+        }
         .auth-meta {
             display: flex;
             align-items: center;
@@ -376,6 +450,7 @@ ob_start();
             </div>
 
             <div>
+                <div class="auth-swap" id="brandHris">
                 <h2>Perencanaan tenaga kerja dalam satu tempat.</h2>
                 <p>Request OS, approval supervisor, jadwal employee, dan absensi shift — terhubung otomatis.</p>
                 <ul class="auth-feats">
@@ -392,6 +467,25 @@ ob_start();
                         <span>Clock-in &amp; rekap MPP</span>
                     </li>
                 </ul>
+                </div>
+                <div class="auth-swap hidden" id="brand5r">
+                <h2>Area kerja rapi, temuan tertutup tepat waktu.</h2>
+                <p>Lapor temuan 5R dengan foto, PIC memperbaiki, auditor memverifikasi — skor tim dihitung otomatis.</p>
+                <ul class="auth-feats">
+                    <li>
+                        <span class="material-symbols-outlined">photo_camera</span>
+                        <span>Temuan &amp; perbaikan berfoto</span>
+                    </li>
+                    <li>
+                        <span class="material-symbols-outlined">fact_check</span>
+                        <span>Verifikasi &amp; audit checklist 5R</span>
+                    </li>
+                    <li>
+                        <span class="material-symbols-outlined">emoji_events</span>
+                        <span>Papan poin tim &amp; PIC</span>
+                    </li>
+                </ul>
+                </div>
             </div>
 
             <div class="auth-brand-foot">
@@ -421,19 +515,25 @@ ob_start();
 <?php if ($maintenance): ?>
                     <div class="mt-banner"><span class="material-symbols-outlined">construction</span>Mode maintenance aktif — hanya super admin yang dapat masuk.</div>
 <?php endif; ?>
-                    <h1>Masuk ke akun Anda</h1>
-                    <p class="lead">Gunakan akun Admin, Supervisor, atau Leader/PIC.</p>
+                    <div class="app-switch" id="appSwitch" role="radiogroup" aria-label="Pilih aplikasi" data-app="hris">
+                        <button type="button" role="radio" aria-checked="true" data-app="hris"><span class="material-symbols-outlined" aria-hidden="true">badge</span>HRIS</button>
+                        <button type="button" role="radio" aria-checked="false" data-app="5r"><span class="material-symbols-outlined" aria-hidden="true">cleaning_services</span>Monitoring 5R</button>
+                    </div>
+                    <div class="auth-swap" id="formHead">
+                        <h1 id="lgTitle">Masuk ke HRIS</h1>
+                        <p class="lead" id="lgLead">Gunakan akun Admin, Supervisor, atau Leader/PIC.</p>
+                    </div>
 
                     <form id="loginForm" class="login-form" autocomplete="on">
                         <label class="field">
-                            <span>Username</span>
+                            <span id="lgUserLbl">Username</span>
                             <div class="input-icon-wrap">
-                                <span class="material-symbols-outlined input-lead-icon">person</span>
+                                <span class="material-symbols-outlined input-lead-icon" id="lgUserIco">person</span>
                                 <input id="lgUser" name="username" autocomplete="username" autocapitalize="none" placeholder="Masukkan username" required autofocus>
                             </div>
                         </label>
                         <label class="field">
-                            <span>Password</span>
+                            <span id="lgPassLbl">Password</span>
                             <div class="pw-wrap input-icon-wrap">
                                 <span class="material-symbols-outlined input-lead-icon">lock</span>
                                 <input id="lgPass" name="password" type="password" autocomplete="current-password" placeholder="Masukkan password" required>
@@ -505,14 +605,92 @@ ob_start();
             const errBox = document.getElementById('loginErr');
             const submitBtn = document.getElementById('lgBtn');
             const submitText = document.getElementById('lgBtnText');
+            const userInput = document.getElementById('lgUser');
+            const baseDir = location.pathname.replace(/\/(login(\.php)?|index\.php|Index\.html)\/?$/i, '').replace(/\/+$/, '');
+
+            // Pilihan aplikasi: HRIS atau Monitoring 5R (satu form login)
+            const params = new URLSearchParams(location.search);
+            const APPS = {
+                hris: { title: 'Masuk ke HRIS', lead: 'Gunakan akun Admin, Supervisor, atau Leader/PIC.', user: 'Username', userPh: 'Masukkan username', ico: 'person', pass: 'Password', passPh: 'Masukkan password', mode: 'text' },
+                '5r': { title: 'Masuk ke Monitoring 5R', lead: 'Gunakan NIK dan PIN akun 5R Anda.', user: 'NIK', userPh: 'Masukkan NIK', ico: 'badge', pass: 'PIN', passPh: 'Masukkan PIN', mode: 'numeric' }
+            };
+            let app = params.get('app') === '5r' ? '5r' : (params.get('app') === 'hris' ? 'hris' : null);
+            if (!app) { try { app = localStorage.getItem('login_app'); } catch (e) { } }
+            if (app !== '5r') app = 'hris';
+            const sw = document.getElementById('appSwitch');
+            function fade(els, fn) {
+                els.forEach(el => el && el.classList.add('fading'));
+                setTimeout(() => { fn(); els.forEach(el => el && el.classList.remove('fading')); }, 140);
+            }
+            function setApp(a, animate) {
+                app = a;
+                try { localStorage.setItem('login_app', a); } catch (e) { }
+                const c = APPS[a];
+                sw.dataset.app = a;
+                sw.querySelectorAll('button').forEach(b => b.setAttribute('aria-checked', String(b.dataset.app === a)));
+                const apply = () => {
+                    document.getElementById('lgTitle').textContent = c.title;
+                    document.getElementById('lgLead').textContent = c.lead;
+                    document.getElementById('lgUserLbl').textContent = c.user;
+                    document.getElementById('lgUserIco').textContent = c.ico;
+                    document.getElementById('lgPassLbl').textContent = c.pass;
+                    userInput.placeholder = c.userPh;
+                    passInput.placeholder = c.passPh;
+                    passInput.setAttribute('inputmode', c.mode);
+                    document.getElementById('brandHris').classList.toggle('hidden', a !== 'hris');
+                    document.getElementById('brand5r').classList.toggle('hidden', a !== '5r');
+                    document.title = (a === '5r' ? 'Masuk · Monitoring 5R' : 'Masuk · HRIS Inventory') + ' PT. Inovasi Eka Gemilang';
+                };
+                if (animate) fade([document.getElementById('formHead'), document.getElementById('brandHris'), document.getElementById('brand5r')], apply);
+                else apply();
+            }
+            sw.querySelectorAll('button').forEach(b => b.addEventListener('click', function () {
+                if (b.dataset.app === app) return;
+                errBox.classList.add('hidden');
+                setApp(b.dataset.app, true);
+                userInput.focus();
+            }));
+            sw.addEventListener('keydown', function (e) {
+                if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+                e.preventDefault();
+                setApp(app === 'hris' ? '5r' : 'hris', true);
+                sw.querySelector('[data-app="' + app + '"]').focus();
+            });
+            setApp(app, false);
+
+            // Pesan dari aplikasi (mis. sesi 5R berakhir)
+            const msg = params.get('msg');
+            if (msg) {
+                errBox.textContent = msg.slice(0, 160);
+                errBox.classList.remove('hidden');
+                errBox.classList.add('info');
+            }
+
+            async function login5r() {
+                const res = await fetch('api5r.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fn: 'apiLogin', args: [userInput.value.trim(), passInput.value] })
+                });
+                const r = await res.json();
+                if (!r || !r.ok) throw new Error(r && r.error ? r.error : 'Gagal masuk ke Monitoring 5R');
+                try {
+                    localStorage.setItem('5r_token', r.data.token);
+                    if (r.data.defaultPin) localStorage.setItem('5r_defpin', '1'); else localStorage.removeItem('5r_defpin');
+                } catch (e) { throw new Error('Browser memblokir penyimpanan lokal. Aktifkan cookie/penyimpanan situs lalu coba lagi.'); }
+                const area = (params.get('area') || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 12);
+                window.location.href = (baseDir || '') + '/5r' + (area ? '?area=' + encodeURIComponent(area) : '');
+            }
 
             form.addEventListener('submit', async function (ev) {
                 ev.preventDefault();
                 errBox.classList.add('hidden');
+                errBox.classList.remove('info');
                 submitBtn.disabled = true;
                 submitText.textContent = 'Memverifikasi…';
 
                 try {
+                    if (app === '5r') { await login5r(); return; }
                     const res = await fetch('api.php?action=login', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -526,10 +704,9 @@ ob_start();
                         throw new Error(r && r.error ? r.error : 'Gagal masuk ke sistem');
                     }
                     localStorage.setItem('hris_token', r.data.token);
-                    const baseDir = location.pathname.replace(/\/(login(\.php)?|index\.php|Index\.html)\/?$/i, '').replace(/\/+$/, '');
                     window.location.href = (baseDir || '') + '/';
                 } catch (err) {
-                    errBox.textContent = err.message || 'Username atau password salah.';
+                    errBox.textContent = err.message || (app === '5r' ? 'NIK atau PIN salah.' : 'Username atau password salah.');
                     errBox.classList.remove('hidden');
                     submitBtn.disabled = false;
                     submitText.textContent = 'Masuk';

@@ -35,8 +35,9 @@ function foto_delete_file(?string $name): void {
 
 /**
  * Simpan gambar dari data URL / base64. Mengembalikan nama file acak yang tersimpan.
+ * $maxDim = sisi terpanjang hasil re-encode (bawaan 512px untuk foto profil).
  */
-function foto_save(string $data): string {
+function foto_save(string $data, int $maxDim = FOTO_MAX_DIM): string {
     $data = trim($data);
     if (preg_match('/^data:([a-z0-9.+\/-]+);base64,/i', $data, $m)) {
         $data = substr($data, strlen($m[0]));
@@ -82,7 +83,7 @@ function foto_save(string $data): string {
         if ($src !== false) {
             $w = imagesx($src);
             $h = imagesy($src);
-            $scale = min(1, FOTO_MAX_DIM / max($w, $h));
+            $scale = min(1, $maxDim / max($w, $h));
             $nw = max(1, (int)round($w * $scale));
             $nh = max(1, (int)round($h * $scale));
             $dst = imagecreatetruecolor($nw, $nh);

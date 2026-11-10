@@ -2,7 +2,7 @@ DirectoryIndex index.php
 Options -Indexes
 
 # Lindungi file sensitif
-<FilesMatch "^(config\.local(\.example)?\.php|database\.sql|README\.md|\.gitignore)$">
+<FilesMatch "^(config\.local(\.example)?\.php|database\.sql|README\.md|\.gitignore|index5R\.html|Code\.gs5R)$">
     Require all denied
 </FilesMatch>
 
@@ -40,6 +40,11 @@ Options -Indexes
 
     # 3. /login -> login.php
     RewriteRule ^login/?$ login.php [L,QSA]
+
+    # 3b. Monitoring 5R: 5r.php dibuka langsung -> /5r, lalu /5r -> 5r.php
+    RewriteCond %{THE_REQUEST} \s/+(?:[^\s?]*/)?5r\.php[\s?] [NC]
+    RewriteRule ^5r\.php$ %{ENV:BASE}5r [R=302,L,QSA]
+    RewriteRule ^5r/?$ 5r.php [L,QSA]
 
     # 4. Route halaman SPA -> index.php
     RewriteCond %{REQUEST_FILENAME} !-f

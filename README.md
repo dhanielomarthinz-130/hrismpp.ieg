@@ -38,6 +38,16 @@ Sistem **Man Power Planning (MPP), Jadwal Kerja Mingguan, Absensi Shift, dan Int
 
 *(Catatan: Anda dapat mengubah password atau menambah akun baru melalui menu **Pengaturan → Pengguna**).*
 
+### Monitoring 5R
+
+Halaman login (`/login`) punya pilihan **HRIS** atau **Monitoring 5R**. Akun 5R terpisah dari akun HRIS: masuk dengan **NIK + PIN**.
+
+| Role 5R | NIK | PIN | Keterangan |
+| :--- | :--- | :--- | :--- |
+| **Admin** | `admin` | `123456` | Segera ganti PIN setelah login pertama (menu **Ganti PIN**) |
+
+Pengguna, area & PIC, checklist audit, dan aturan poin diatur di **Monitoring 5R → Master Data**. Tabel 5R (`r5_*`) dibuat otomatis di database yang sama saat 5R pertama kali dibuka.
+
 ---
 
 ## 🗄️ Pilihan Database
@@ -75,6 +85,7 @@ Bila ingin menghubungkan ke database MySQL:
 - **`absensi.php`** : Modul absensi harian per shift, BKO, lembur, dan operator pengganti.
 - **`mingguan.php`** : Modul jadwal mingguan 7 hari (Senin–Minggu), kuas jadwal, validasi jam kerja & istirahat, salin minggu, dan kunci jadwal.
 - **`wa.php`** : Modul Order MPP WhatsApp dengan format mention `@nomor` otomatis untuk tag akun WhatsApp dan pratinjau bubble chat.
+- **`5r.php`**, **`api5r.php`**, **`lima_r.php`**, **`index5R.html`** : Monitoring 5R (halaman `/5r`, endpoint JSON, logika temuan/verifikasi/poin/audit, dan antarmuka).
 - **`install.php`** : Halaman informasi status koneksi database dan tombol reset data bawaan.
 - **`database.sql`** : Skema dan data awal database untuk MySQL / phpMyAdmin.
 - **`App.html`**, **`Styles.html`**, **`Index.html`** : Antarmuka frontend responsif, modern, dan kompatibel ganda (Google Apps Script & PHP).
