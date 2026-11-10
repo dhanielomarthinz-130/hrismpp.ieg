@@ -1351,7 +1351,6 @@ function apiDashboard($token, $bulan): array {
     $tm = r5_timmap($areas);
     $all = array_values(array_filter(r5_all_temuan($tm), fn($t) => $t['status'] !== R5_BATAL));
     $bln = array_values(array_filter($all, fn($t) => $t['tanggal'] && r5_bulan($t['tanggal']) === $bulan));
-    $poin = db_all("SELECT * FROM r5_poin");
 
     $aktif = array_values(array_filter($all, fn($t) => in_array($t['status'], [R5_OPEN, R5_REVISI], true)));
     $closedBln = array_values(array_filter($bln, fn($t) => $t['status'] === R5_CLOSED));
@@ -1381,6 +1380,30 @@ function apiDashboard($token, $bulan): array {
 
     $terlambat = array_values(array_filter($aktif, fn($t) => $t['terlambat']));
     usort($terlambat, fn($a, $b) => $a['deadline'] <=> $b['deadline']);
+    $belumRespon = array_values(array_filter($all, fn($t) => $t['status'] === R5_OPEN && !$t['tglTerima'] && $t['responTelat']));
+    usort($belumRespon, fn($a, $b) => $a['batasRespon'] <=> $b['batasRespon']);
+
+    // Poin & KPI per PIC (fokus dashboard) + area tanggung jawab & status shift saat ini
+    $areaNama = [];
+    foreach ($areas as $a) $areaNama[$a['area_id']] = $a['nama'];
+    $apm = r6_area_pic_map();
+    $opId = [];
+    foreach (r5_users_all() as $u) $opId[mb_strtolower($u['nik'])] = $u['operator_id'];
+    $now = r5_now();
+    $pics = array_map(function ($r) use ($apm, $areaNama, $opId, $now) {
+        $k = mb_strtolower($r['nik']);
+        $st = r6_jadwal_status($opId[$k] ?? '', $now);
+        return [
+            'nik' => $r['nik'], 'nama' => $r['nama'], 'poin' => (float)$r['poin'], 'skor' => $r['skor'], 'status' => $r['status'],
+            'ditugaskan' => $r['ditugaskan'], 'selesai' => $r['selesai'], 'menunggu' => $r['menunggu'], 'aktif' => $r['aktif'],
+            'overdue' => $r['overdue'], 'revisi' => $r['revisi'], 'pctTepat' => $r['pctTepat'], 'pctRespon' => $r['pctRespon'],
+            'area' => array_values(array_map(fn($id) => $areaNama[$id] ?? $id, $apm[$k] ?? [])),
+            'shift' => $st['status'], 'shiftLabel' => $st['label'],
+        ];
+    }, r5_kpi_rows($bulan));
+    usort($pics, fn($a, $b) => ($b['poin'] <=> $a['poin']) ?: (($b['skor'] ?? -1) <=> ($a['skor'] ?? -1)) ?: strcmp($a['nama'], $b['nama']));
+    $target = r5_num('KPI_TARGET', 85);
+    $adaSkor = array_values(array_filter($pics, fn($p) => $p['skor'] !== null));
 
     return [
         'bulan' => $bulan,
@@ -1396,9 +1419,17 @@ function apiDashboard($token, $bulan): array {
             'closed' => count($closedBln),
             'tepatPct' => count($closedBln) ? (int)round($tepat / count($closedBln) * 100) : null,
         ],
-        'byR' => $byR, 'byTingkat' => $byTingkat, 'tims' => r5_rekap_tim($bulan, $areas, $poin, $all), 'tren' => $tren,
+        'byR' => $byR, 'byTingkat' => $byTingkat, 'tren' => $tren,
         'terlambat' => array_slice($terlambat, 0, 10),
-        'topPic' => array_slice(r5_leader_pic($bulan, $poin, $all), 0, 5),
+        'belumRespon' => array_slice($belumRespon, 0, 10),
+        'pics' => $pics,
+        'kpiPic' => [
+            'target' => $target,
+            'rata' => $adaSkor ? round(array_sum(array_column($adaSkor, 'skor')) / count($adaSkor), 1) : null,
+            'capai' => count(array_filter($adaSkor, fn($p) => $p['skor'] >= $target)),
+            'dinilai' => count($adaSkor),
+            'bertugas' => count(array_filter($pics, fn($p) => $p['shift'] === 'bertugas')),
+        ],
     ];
 }
 

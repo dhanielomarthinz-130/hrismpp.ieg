@@ -160,6 +160,26 @@ a{color:var(--primary)}
 .kpi .v{font-size:26px;font-weight:800;margin-top:2px;line-height:1.1}
 .kpi .s{font-size:11.5px;color:var(--muted);margin-top:2px}
 .kpi.hero{background:var(--grad);border:0;color:#fff}.kpi.hero .l,.kpi.hero .s{color:rgba(255,255,255,.85)}
+/* Dashboard: grid 3 kolom tetap, pita status, tabel poin per PIC */
+.dash3{display:grid;gap:12px;grid-template-columns:minmax(0,1fr);margin-bottom:12px}
+@media(min-width:1100px){.dash3{grid-template-columns:repeat(3,minmax(0,1fr))}.dash3 .span2{grid-column:span 2}}
+.dash3>.card{min-width:0}
+.strip{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.strip button{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:999px;border:1px solid transparent;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}
+.strip .ok{background:var(--neu-b);color:var(--neu-t);cursor:default}
+.strip .warn{background:var(--warn-b);color:var(--warn-t)}
+.strip .err{background:var(--err-b);color:var(--err-t)}
+.strip svg{width:15px;height:15px}
+.kpi .v.err{color:var(--err-t)}
+.pic-tbl td{vertical-align:middle}
+.pic-name{display:block;border:0;background:none;padding:0;font:inherit;font-weight:700;color:var(--text);cursor:pointer;text-align:left;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pic-meta{font-size:11.5px;color:var(--muted);max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pbar{display:grid;grid-template-columns:52px 64px;align-items:center;gap:8px;justify-content:end}
+.pbar b{text-align:right;font-variant-numeric:tabular-nums}
+.pbar i{display:block;height:6px;border-radius:3px;background:var(--line);position:relative;overflow:hidden}
+.pbar i span{position:absolute;left:0;top:0;bottom:0;background:var(--primary);border-radius:3px}
+.pbar i span.neg{background:var(--err)}
+@media(hover:hover){.pic-name:hover{color:var(--primary)}}
 .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
 .toolbar .grow{flex:1;min-width:140px}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:0 14px;border-radius:8px;font-size:13px;border:1px solid var(--border);background:var(--surface);cursor:pointer;font-weight:600;color:var(--text);text-decoration:none;white-space:nowrap}
@@ -715,47 +735,68 @@ VIEWS.dash = async function () {
   const v = $('#view');
   v.innerHTML = '<div class="toolbar">' + monthInput('fBulan', S.bulan) +
     '<span class="grow"></span><button class="btn" onclick="rekapWA()">' + ic('wa') + 'Rekap ke WA</button>' +
-    '<button class="icon-btn" title="Muat ulang" onclick="VIEWS.dash()">' + ic('refresh') + '</button></div><div id="dashBody"></div>';
+    '<button class="icon-btn" title="Muat ulang" aria-label="Muat ulang" onclick="VIEWS.dash()">' + ic('refresh') + '</button></div><div id="dashBody"></div>';
   $('#fBulan').addEventListener('change', e => { if (e.target.value) { S.bulan = e.target.value; VIEWS.dash(); } });
   const DB = $('#dashBody');
   loading(DB);
   try {
     const d = await call('apiDashboard', S.token, S.bulan);
-    const k = d.kpi;
-    const awal = S.boot.config.skorAwal;
-    const kpi = (l, val, s, cls, onclick) => '<div class="kpi ' + (cls || '') + (onclick ? ' click' : '') + '"' + (onclick ? ' onclick="' + onclick + '"' : '') + '><div class="l">' + l + '</div><div class="v tnum">' + val + '</div><div class="s">' + s + '</div></div>';
-    let h = '<div class="kpis" style="margin-bottom:12px">' +
-      kpi('Temuan ' + fBulan(d.bulan), k.total, 'semua area', 'hero') +
-      kpi('Belum diperbaiki', k.aktif, k.belumDiterima ? (k.belumRespon ? '<span style="color:var(--err-t);font-weight:700">' + k.belumRespon + ' belum direspon PIC</span>' : k.belumDiterima + ' menunggu diterima PIC') : 'status Open & Revisi', '', "go('daftar',{status:'Perbaikan',bulan:''})") +
-      kpi('Menunggu verifikasi', k.menunggu + (k.keberatan ? ' <span class="small" style="font-weight:600">+' + k.keberatan + ' keberatan</span>' : ''), k.lewatSla ? '<span style="color:var(--err-t);font-weight:700">' + k.lewatSla + ' lewat SLA ' + S.boot.config.slaVerif + ' jam</span>' : 'SLA auditor ' + S.boot.config.slaVerif + ' jam', '', canDo('verif') ? "go('verif')" : '') +
-      kpi('Terlambat', '<span style="color:var(--err-t)">' + k.terlambat + '</span>', 'lewat batas waktu', '', "go('daftar',{status:'Terlambat',bulan:''})") +
-      kpi('Selesai', k.closed, 'closed bulan ini', '', "go('daftar',{status:'Closed'})") +
-      kpi('Tepat waktu', k.tepatPct == null ? '-' : k.tepatPct + '%', 'dari temuan selesai') + '</div>';
+    const k = d.kpi, kp = d.kpiPic, c = S.boot.config;
+    const kpi = (l, val, sub, onclick, err) => '<div class="kpi' + (onclick ? ' click' : '') + '"' + (onclick ? ' onclick="' + onclick + '" role="button" tabindex="0"' : '') + '><div class="l">' + l + '</div><div class="v tnum' + (err ? ' err' : '') + '">' + val + '</div><div class="s">' + sub + '</div></div>';
 
-    h += '<div class="grid g2" style="margin-bottom:12px">';
-    const mxSkor = Math.max(awal, ...d.tims.map(x => x.skor));
-    h += '<div class="card"><h3>Skor tim<span class="sub">awal ' + awal + ' · − temuan · + perbaikan</span></h3>' +
-      barList(d.tims.map(a => ({ l: a.tim, v: Math.max(0, a.skor), vl: num(a.skor),
-        sub: a.temuan + ' temuan diterima (' + signed(a.potongan) + ') · perbaikan ' + signed(a.perbaikan) + (a.pelapor ? ' · pelapor ' + signed(a.pelapor) : '') + ' · ' + a.aktif + ' belum selesai' + (a.telatBerjalan ? ' (telat berjalan ' + signed(a.telatBerjalan) + ')' : '') + ' · audit ' + (a.audit == null ? 'belum ada' : num(a.audit) + '%'),
-        tip: 'Tim ' + a.tim + ' (' + a.areas.join(', ') + '): skor ' + a.skor })), mxSkor, true) +
-      '<button class="btn block" style="margin-top:12px" onclick="go(\'poin\')">' + ic('trophy') + 'Peringkat tim</button></div>';
-    h += '<div class="grid">';
-    h += '<div class="card"><h3>Temuan per kategori 6S<span class="sub">' + fBulan(d.bulan) + '</span></h3>' +
+    // 1) Pita status: hanya yang perlu tindakan
+    const st = [];
+    if (k.belumRespon) st.push(['err', k.belumRespon + ' tugas belum direspon PIC', "go('daftar',{status:'Perbaikan',bulan:''})"]);
+    if (k.terlambat) st.push(['err', k.terlambat + ' temuan lewat target', "go('daftar',{status:'Terlambat',bulan:''})"]);
+    if (k.lewatSla) st.push(['warn', k.lewatSla + ' perbaikan lewat SLA verifikasi ' + c.slaVerif + ' jam', canDo('verif') ? "go('verif')" : '']);
+    const bawah = kp.dinilai - kp.capai;
+    if (bawah > 0) st.push(['warn', bawah + ' PIC di bawah target KPI ' + kp.target, canDo('kpi') ? "go('kpi')" : '']);
+    let h = '<div class="strip" role="status">' + (st.length
+      ? st.map(x => '<button type="button" class="' + x[0] + '"' + (x[2] ? ' onclick="' + x[2] + '"' : '') + '>' + esc(x[1]) + '</button>').join('')
+      : '<button type="button" class="ok">' + ic('check') + 'Semua dalam ambang</button>') + '</div>';
+
+    // 2) KPI ringkas
+    h += '<div class="kpis" style="margin-bottom:12px">' +
+      kpi('Temuan ' + fBulan(d.bulan), k.total, 'semua area') +
+      kpi('Belum diperbaiki', k.aktif, k.belumDiterima ? k.belumDiterima + ' menunggu diterima PIC' : 'Open & Revisi', "go('daftar',{status:'Perbaikan',bulan:''})") +
+      kpi('Menunggu verifikasi', k.menunggu, (k.keberatan ? k.keberatan + ' keberatan · ' : '') + 'SLA ' + c.slaVerif + ' jam', canDo('verif') ? "go('verif')" : '') +
+      kpi('Lewat target', k.terlambat, 'belum diperbaiki', "go('daftar',{status:'Terlambat',bulan:''})", k.terlambat > 0) +
+      kpi('Rata-rata KPI PIC', kp.rata == null ? '-' : num(kp.rata), kp.capai + ' dari ' + kp.dinilai + ' capai target ' + kp.target, canDo('kpi') ? "go('kpi')" : '', kp.rata != null && kp.rata < kp.target) +
+      kpi('Tepat waktu', k.tepatPct == null ? '-' : k.tepatPct + '%', k.closed + ' selesai bulan ini', "go('daftar',{status:'Closed'})") + '</div>';
+
+    // 3) Fokus: poin per PIC
+    const pics = d.pics || [];
+    const mx = Math.max(1, ...pics.map(p => Math.abs(p.poin)));
+    const shiftChip = p => p.shift === 'bertugas' ? ' <span class="chip c-ok" title="' + esc(p.shiftLabel) + '">Bertugas</span>' : (p.shift === 'absen' ? ' <span class="chip c-err" title="' + esc(p.shiftLabel) + '">Tidak masuk</span>' : '');
+    h += '<div class="dash3"><div class="card span2"><h3>Poin per PIC<span class="sub">' + fBulan(d.bulan) + ' · ' + pics.length + ' Leader / PIC · ' + kp.bertugas + ' sedang bertugas</span></h3>' +
+      (pics.length ? '<div class="tbl-wrap"><table class="tbl pic-tbl" style="min-width:760px"><tr><th>#</th><th>PIC</th><th class="num">Poin</th><th class="num">KPI</th><th class="num">Ditugaskan</th><th class="num">Selesai</th><th class="num">Lewat target</th><th class="num">Respon</th></tr>' +
+        pics.map((p, i) => '<tr><td><span class="rank ' + (i < 3 && p.poin > 0 ? 'r' + (i + 1) : '') + '">' + (i + 1) + '</span></td>' +
+          '<td><button type="button" class="pic-name" title="Lihat temuan ' + esc(p.nama) + '" onclick="go(\'daftar\',{q:' + esc(JSON.stringify(p.nama)) + ',bulan:\'\'})">' + esc(p.nama) + '</button>' +
+          '<div class="pic-meta" title="' + esc(p.area.join(', ')) + '">' + (p.area.length ? esc(p.area.join(', ')) : 'Area belum diatur') + shiftChip(p) + '</div></td>' +
+          '<td class="num"><div class="pbar"><b>' + signed(p.poin) + '</b><i><span class="' + (p.poin < 0 ? 'neg' : '') + '" style="width:' + (Math.abs(p.poin) / mx * 100) + '%"></span></i></div></td>' +
+          '<td class="num">' + kpiChip(p, kp.target) + '</td><td class="num">' + p.ditugaskan + '</td>' +
+          '<td class="num">' + p.selesai + (p.menunggu ? ' <span class="small muted">+' + p.menunggu + '</span>' : '') + '</td>' +
+          '<td class="num">' + (p.overdue ? '<span class="chip c-err">' + p.overdue + '</span>' : '0') + '</td>' +
+          '<td class="num">' + pctTxt(p.pctRespon) + '</td></tr>').join('') + '</table></div>'
+        : emptyBox('Belum ada Leader / PIC IEG. Tambahkan akun role Leader di HRIS → Pengaturan → Pengguna.')) +
+      '<p class="small muted" style="margin:10px 0 0">Poin PIC: + perbaikan tepat waktu (bonus bila cepat) · − terlambat, revisi, dan tugas yang tidak direspon. Urut dari poin tertinggi; klik nama untuk melihat temuannya.' +
+      (canDo('kpi') ? ' <a href="#" onclick="go(\'kpi\');return false">Rincian KPI PIC</a>' : '') + '</p></div>';
+
+    // Perlu tindakan
+    const urgent = [];
+    (d.belumRespon || []).forEach(t => urgent.push(t));
+    (d.terlambat || []).forEach(t => { if (!urgent.some(x => x.id === t.id)) urgent.push(t); });
+    h += '<div class="card"><h3>Perlu tindakan<span class="sub">belum direspon &amp; lewat target</span></h3>' +
+      (urgent.length ? '<div class="tlist" style="grid-template-columns:1fr">' + urgent.slice(0, 8).map(tItem).join('') + '</div>' : emptyBox('Tidak ada yang tertunda')) + '</div></div>';
+
+    // 4) Pendukung: kategori & tren
+    h += '<div class="dash3"><div class="card"><h3>Temuan per kategori 6S<span class="sub">' + fBulan(d.bulan) + '</span></h3>' +
       barList(S.boot.rList.map(r => ({ l: r, v: d.byR[r] || 0 }))) +
-      '<div class="small muted" style="margin-top:10px">Tingkat: ' + S.boot.tingkat.map(x => x + ' <b>' + (d.byTingkat[x] || 0) + '</b>').join(' · ') + '</div></div>';
-    h += '<div class="card"><h3>Temuan baru per minggu<span class="sub">8 minggu terakhir</span></h3>' +
-      colChart(d.tren.map(t => ({ l: t.label, v: t.baru, tip: 'Minggu ' + t.label + ': ' + t.baru + ' temuan baru, ' + t.selesai + ' selesai' }))) + '</div>';
-    h += '</div></div>';
-
-    h += '<div class="grid g2">';
-    h += '<div class="card"><h3>Temuan terlambat<span class="sub">paling lama di atas</span></h3>' +
-      (d.terlambat.length ? '<div class="tlist" style="grid-template-columns:1fr">' + d.terlambat.map(tItem).join('') + '</div>' : emptyBox('Tidak ada temuan terlambat')) + '</div>';
-    h += '<div class="card"><h3>Kontributor perbaikan<span class="sub">' + fBulan(d.bulan) + '</span></h3>' +
-      (d.topPic.length ? '<div class="tbl-wrap"><table class="tbl" style="min-width:0"><tr><th>#</th><th>PIC</th><th class="num">Poin</th><th class="num">Terlambat</th></tr>' +
-        d.topPic.map((p, i) => '<tr><td><span class="rank ' + (i < 3 ? 'r' + (i + 1) : '') + '">' + (i + 1) + '</span></td><td>' + esc(p.nama) + '</td><td class="num"><b>' + signed(p.poin) + '</b></td><td class="num">' + p.overdue + '</td></tr>').join('') + '</table></div>' : emptyBox('Belum ada perbaikan yang disetujui bulan ini')) +
-      '<p class="small muted" style="margin:10px 0 0">Poin perbaikan masuk ke skor tim pemilik area. Daftar ini menunjukkan siapa yang mengerjakannya.</p></div>';
-    h += '</div>';
+      '<div class="small muted" style="margin-top:10px">Tingkat: ' + S.boot.tingkat.map(x => x + ' <b class="tnum">' + (d.byTingkat[x] || 0) + '</b>').join(' · ') + '</div></div>';
+    h += '<div class="card span2"><h3>Temuan baru per minggu<span class="sub">8 minggu terakhir</span></h3>' +
+      colChart(d.tren.map(t => ({ l: t.label, v: t.baru, tip: 'Minggu ' + t.label + ': ' + t.baru + ' temuan baru, ' + t.selesai + ' selesai' }))) + '</div></div>';
     DB.innerHTML = h;
+    $$('.kpi.click', DB).forEach(el => el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); } }));
   } catch (e) { DB.innerHTML = emptyBox(e.message); }
 };
 
