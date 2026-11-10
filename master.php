@@ -132,6 +132,7 @@ function operators_(): array {
             'pola'     => (int)$r['pola'] === 5 ? 5 : 6,
             'employer' => (string)($r['employer'] ?? ''),
             'role'     => (string)($r['role'] ?? ''),
+            'area6s'   => array_values(array_filter(explode(',', (string)($r['area_6s'] ?? '')))),
             'foto'     => foto_url($r['foto'] ?? '')
         ];
     }
@@ -214,6 +215,16 @@ function set_settings(array $obj): void {
     }
 }
 
+/** Daftar area Monitoring 6S (untuk isian Area 6S di form operator). Kosong bila 6S belum pernah dibuka. */
+function areas_6s_(): array {
+    try {
+        return array_map(fn($a) => ['id' => (string)$a['area_id'], 'nama' => (string)$a['nama']],
+            db_all("SELECT area_id, nama FROM r5_area WHERE aktif <> 'N' ORDER BY area_id"));
+    } catch (Throwable $e) {
+        return [];
+    }
+}
+
 function get_master(array $currentUser): array {
     $shifts = shifts_();
     $s = settings_();
@@ -222,6 +233,7 @@ function get_master(array $currentUser): array {
         'user'        => $currentUser,
         'maintenance' => maintenance_on(),
         'maintenance5r' => maintenance_on('5r'),
+        'areas6s'     => areas_6s_(),
         'menus'       => menus_for_user($currentUser),
         'roMenus'     => readonly_menus_for_user($currentUser),
         'autoApprove' => auto_approve_on(),
@@ -491,6 +503,12 @@ function save_operator(array $p, array $currentUser): array {
         'employer'  => normalize_employer($p['employer'] ?? ''),
         'role'      => (string)($p['role'] ?? '')
     ];
+    // Area 6S (PIC yang bertanggung jawab): hanya diubah bila dikirim dari form (import tidak menyentuhnya)
+    if (array_key_exists('area6s', $p)) {
+        $valid = array_column(areas_6s_(), 'id');
+        $pick = array_values(array_unique(array_filter(array_map('trim', is_array($p['area6s']) ? $p['area6s'] : explode(',', (string)$p['area6s'])))));
+        $data['area_6s'] = implode(',', array_values(array_intersect($pick, $valid)));
+    }
 
     if ($isNew) {
         $data['id'] = $id;

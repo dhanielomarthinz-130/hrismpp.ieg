@@ -301,6 +301,7 @@ function init_db_tables(PDO $pdo, string $driver): void {
     $addCol('users', 'foto', 'VARCHAR(80) NULL');
     $addCol('users', 'operator_id', 'VARCHAR(30) NULL');
     $addCol('operator', 'foto', 'VARCHAR(80) NULL');
+    $addCol('operator', 'area_6s', 'VARCHAR(255) NULL');   // area Monitoring 6S yang menjadi tanggung jawab (PIC per shift)
 
     // Seeding data awal bila tabel users kosong
     $userCount = (int)$pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();

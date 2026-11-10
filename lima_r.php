@@ -12,7 +12,7 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/foto.php';
 
-const R5_VERSION = '3.1';
+const R5_VERSION = '3.2';
 // Lean 6S: Sort, Set in Order, Shine, Standardize, Sustain, Safety
 const R5_LIST    = ['Sort', 'Set in Order', 'Shine', 'Standardize', 'Sustain', 'Safety'];
 /** Penjelasan singkat tiap S (ditampilkan di form temuan). */
@@ -270,6 +270,20 @@ function r5_init(): void {
             db_insert('settings', ['key_name' => 'migr_r6s_shift', 'value' => '1', 'ket' => 'Monitoring 6S: PIC area per shift']);
         });
     }
+    // v3.2: area tanggung jawab akun yang tertaut ke operator disimpan di data operator HRIS (halaman Operator)
+    if (!(int)db_val("SELECT COUNT(*) FROM settings WHERE key_name = 'migr_r6s_area_op'")) {
+        db_transaction(function () {
+            foreach (db_all("SELECT p.area_id, p.nik, u.operator_id, o.area_6s FROM r6_area_pic p JOIN users u ON LOWER(u.username) = LOWER(p.nik)
+                             JOIN operator o ON o.id = u.operator_id") as $r) {
+                $cur = db_val("SELECT area_6s FROM operator WHERE id = ?", [$r['operator_id']]);
+                $l = array_values(array_filter(explode(',', (string)$cur)));
+                if (!in_array($r['area_id'], $l, true)) $l[] = $r['area_id'];
+                db_update('operator', ['area_6s' => implode(',', $l)], 'id = ?', [$r['operator_id']]);
+                db_query("DELETE FROM r6_area_pic WHERE area_id = ? AND LOWER(nik) = ?", [$r['area_id'], mb_strtolower($r['nik'])]);
+            }
+            db_insert('settings', ['key_name' => 'migr_r6s_area_op', 'value' => '1', 'ket' => 'Monitoring 6S: area PIC di data operator']);
+        });
+    }
 }
 
 /* =====================================================================
@@ -326,11 +340,31 @@ function r6_jadwal_status(string $operatorId, int $now): array {
     return ['status' => 'selesai', 'label' => $lbl($todayRow) . ' (sudah selesai)', 'mulai' => $s[0], 'selesai' => $s[1]];
 }
 
-/** Peta username (huruf kecil) -> daftar area tempat ia menjadi PIC. */
+/**
+ * Peta username (huruf kecil) -> daftar area tempat ia menjadi PIC.
+ * Sumber utama: kolom Area 6S di data operator HRIS (akun tertaut lewat users.operator_id);
+ * akun yang belum tertaut ke operator memakai tabel r6_area_pic.
+ */
 function r6_area_pic_map(): array {
     $m = [];
-    foreach (db_all("SELECT area_id, nik FROM r6_area_pic ORDER BY area_id") as $r) $m[mb_strtolower($r['nik'])][] = $r['area_id'];
+    $add = function (string $nik, string $aid) use (&$m) { $k = mb_strtolower($nik); if (!in_array($aid, $m[$k] ?? [], true)) $m[$k][] = $aid; };
+    foreach (db_all("SELECT u.username, o.area_6s FROM users u JOIN operator o ON o.id = u.operator_id
+                     WHERE u.operator_id IS NOT NULL AND u.operator_id <> '' AND o.area_6s IS NOT NULL AND o.area_6s <> ''") as $r) {
+        foreach (array_filter(explode(',', (string)$r['area_6s'])) as $aid) $add($r['username'], trim($aid));
+    }
+    foreach (db_all("SELECT area_id, nik FROM r6_area_pic ORDER BY area_id") as $r) $add($r['nik'], $r['area_id']);
+    foreach ($m as &$l) sort($l);
     return $m;
+}
+
+/** Operator IEG yang memegang area tapi belum punya akun HRIS tertaut (tidak bisa menerima tugas). */
+function r6_area_tanpa_akun(): array {
+    $out = [];
+    foreach (db_all("SELECT o.nama, o.area_6s FROM operator o LEFT JOIN users u ON u.operator_id = o.id
+                     WHERE o.aktif = 1 AND o.area_6s IS NOT NULL AND o.area_6s <> '' AND u.id IS NULL") as $r) {
+        foreach (array_filter(explode(',', (string)$r['area_6s'])) as $aid) $out[trim($aid)][] = $r['nama'];
+    }
+    return $out;
 }
 
 /**
@@ -349,8 +383,8 @@ function r6_pic_bertugas(string $areaId, int $now, array $exclude = []): array {
     foreach (db_all("SELECT pic_nik, COUNT(*) n FROM r5_temuan WHERE status IN (?, ?) GROUP BY pic_nik", [R5_OPEN, R5_REVISI]) as $r) $aktif[mb_strtolower(r5_str($r['pic_nik']))] = (int)$r['n'];
     $rank = ['bertugas' => 0, 'nanti' => 1, 'tanpa_jadwal' => 2, 'tanpa_karyawan' => 2, 'selesai' => 3, 'libur' => 4, 'absen' => 4];
     $kand = [];
-    foreach (db_all("SELECT nik FROM r6_area_pic WHERE area_id = ?", [$area['area_id']]) as $r) {
-        $k = mb_strtolower($r['nik']);
+    foreach (r6_area_pic_map() as $k => $list) {
+        if (!in_array($area['area_id'], $list, true)) continue;
         if (!isset($pool[$k]) || in_array($k, $ex, true)) continue;
         $st = r6_jadwal_status($pool[$k]['operator_id'], $now);
         $kand[] = ['nik' => $pool[$k]['nik'], 'nama' => $pool[$k]['nama'], 'status' => $st['status'], 'label' => $st['label'],
@@ -1420,6 +1454,7 @@ function apiAdminData($token): array {
         $chk[$c['area_id']][] = ['r' => $c['kategori_r'], 'item' => $c['item']];
     }
     $apm = r6_area_pic_map();
+    $tanpaAkun = r6_area_tanpa_akun();
     $now = r5_now();
     $users = array_map(function ($u) use ($tm, $apm, $now) {
         $o = r5_uout($u, $tm, $apm);
@@ -1430,7 +1465,8 @@ function apiAdminData($token): array {
         'users' => $users,
         'areas' => array_map(fn($a) => ['id' => $a['area_id'], 'nama' => $a['nama'], 'tim' => r5_str($a['tim']) !== '' ? r5_str($a['tim']) : $a['nama'],
             'picNik' => r5_str($a['pic_nik']), 'aktif' => $a['aktif'] !== 'N',
-            'pics' => array_keys(array_filter($apm, fn($l) => in_array($a['area_id'], $l, true)))], db_all("SELECT * FROM r5_area ORDER BY area_id")),
+            'pics' => array_keys(array_filter($apm, fn($l) => in_array($a['area_id'], $l, true))),
+            'tanpaAkun' => $tanpaAkun[$a['area_id']] ?? []], db_all("SELECT * FROM r5_area ORDER BY area_id")),
         'config' => array_map(fn($c) => ['key' => $c['key_name'], 'value' => r5_str($c['value']), 'ket' => r5_str($c['ket'])],
             db_all("SELECT * FROM r5_config ORDER BY key_name")),
         'checklist' => $chk,
@@ -1473,7 +1509,12 @@ function apiSaveUser($token, $d): array {
         $nu = r5_find_user($u['nik']);
         if ($areaPic && !$nu['pic']) throw new RuntimeException($u['nama'] . ' bukan Leader / PIC IEG, jadi tidak bisa menjadi PIC area.');
         db_delete('r6_area_pic', 'LOWER(nik) = ?', [mb_strtolower($u['nik'])]);
-        foreach ($areaPic as $aid) db_insert('r6_area_pic', ['area_id' => $aid, 'nik' => $u['nik']]);
+        if ($nu['operator_id'] !== '') {
+            // Akun tertaut ke karyawan: disimpan di data operator HRIS (sama dengan isian Area 6S di halaman Operator)
+            db_update('operator', ['area_6s' => implode(',', $areaPic)], 'id = ?', [$nu['operator_id']]);
+        } else {
+            foreach ($areaPic as $aid) db_insert('r6_area_pic', ['area_id' => $aid, 'nik' => $u['nik']]);
+        }
     });
     return r5_uout(r5_find_user($u['nik']), null, r6_area_pic_map());
 }

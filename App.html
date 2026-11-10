@@ -3048,7 +3048,7 @@
         const act = o => opEdit ? '<button class="btn sm" data-edit="' + o.id + '">Ubah</button>' : '';
         $('#oBody').innerHTML =
             '<div class="only-wide"><div class="table-wrap" style="border:0"><table class="tbl"><thead><tr><th>Nama</th><th>NIK</th><th>Role</th><th>Bagian</th><th>Employer</th><th>Grup</th><th>Pola</th><th>Libur</th><th>Status</th><th></th></tr></thead><tbody>' +
-            list.map(o => '<tr><td><span class="op-name"><span class="op-ava clickable" data-view-foto="' + o.id + '" role="button" tabindex="0" title="Lihat foto">' + avatarHtml(o.nama, o.foto) + '</span><b>' + esc(o.nama) + '</b></span></td><td>' + esc(o.nik) + '</td><td class="small">' + esc(o.role) + '</td><td>' + esc(bagName(o.bagian)) + '</td><td><span class="chip xs ' + (o.employer === 'IEG' ? 'pri' : '') + '">' + esc(o.employer || 'RKA') + '</span></td><td>' + esc(GRUP_LABEL[o.grup] || o.grup) + '</td><td>' + o.pola + ' hari</td><td>' + liburLabel(o.libur) + '</td>' +
+            list.map(o => '<tr><td><span class="op-name"><span class="op-ava clickable" data-view-foto="' + o.id + '" role="button" tabindex="0" title="Lihat foto">' + avatarHtml(o.nama, o.foto) + '</span><b>' + esc(o.nama) + '</b></span></td><td>' + esc(o.nik) + '</td><td class="small">' + esc(o.role) + area6sTxt(o) + '</td><td>' + esc(bagName(o.bagian)) + '</td><td><span class="chip xs ' + (o.employer === 'IEG' ? 'pri' : '') + '">' + esc(o.employer || 'RKA') + '</span></td><td>' + esc(GRUP_LABEL[o.grup] || o.grup) + '</td><td>' + o.pola + ' hari</td><td>' + liburLabel(o.libur) + '</td>' +
                 '<td><span class="chip ' + (o.aktif ? 'ok' : '') + '">' + (o.aktif ? 'Aktif' : 'Nonaktif') + '</span></td><td class="act">' + act(o) + '</td></tr>').join('') +
             '</tbody></table></div></div>' +
             '<div class="only-narrow">' + list.map(o => '<div class="list-item"><span class="op-ava lg clickable" data-view-foto="' + o.id + '" role="button" tabindex="0" title="Lihat foto">' + avatarHtml(o.nama, o.foto) + '</span><div class="grow"><b>' + esc(o.nama) + '</b>' + '<span class="small muted">' + esc(o.employer || 'RKA') + ' · ' + esc(bagName(o.bagian)) + ' · ' + esc(GRUP_LABEL[o.grup] || o.grup) + ' · ' + o.pola + ' hari · libur ' + liburLabel(o.libur) + '</span></div>' +
@@ -3072,6 +3072,11 @@
             buttons: (isAdmin() && menuEdit('operator') ? [{ label: 'Ubah data', onClick: () => opModal(o) }] : []).concat([{ label: 'Tutup', cls: 'primary' }])
         });
     }
+    // Area Monitoring 6S yang dipegang operator (PIC per shift)
+    function area6sTxt(o) {
+        const l = (o.area6s || []).map(id => { const a = (S.master.areas6s || []).find(x => x.id === id); return a ? a.nama : id; });
+        return l.length ? '<div class="small" style="color:var(--primary);margin-top:2px"><span class="material-symbols-outlined" style="font-size:14px;vertical-align:-2px">cleaning_services</span> ' + esc(l.join(', ')) + '</div>' : '';
+    }
     function opModal(o) {
         const isNew = !o;
         o = o || { nama: '', nik: '', bagian: S.op.bagian || (S.master.bagian[0] || {}).kode, grup: 'A', libur: '', hp: '', aktif: true, tglMasuk: '', ket: '', pola: 6, employer: 'RKA', role: '' };
@@ -3092,8 +3097,15 @@
                 '<div class="field"><span>Hari libur rutin</span><div class="days-pick">' + [1, 2, 3, 4, 5, 6, 0].map(d => '<label><input type="checkbox" data-multi="1" name="libur" value="' + d + '"' + (lib.indexOf(String(d)) >= 0 ? ' checked' : '') + '>' + HARI3[d] + '</label>').join('') + '</div><small>Kosongkan untuk memakai bawaan pola (karyawan shift 6 hari dibagikan bergilir saat isi otomatis).</small></div>' +
                 '<div class="grid2"><label class="field"><span>Tanggal masuk</span><input type="date" name="tglMasuk" value="' + esc(o.tglMasuk) + '"></label>' +
                 '<label class="field"><span>Keterangan</span><input name="ket" value="' + esc(o.ket) + '"></label></div>' +
+                ((S.master.areas6s || []).length ? '<div class="field" id="opArea6s"><span>Area gudang 6S (PIC yang bertanggung jawab)</span><div class="days-pick">' +
+                    S.master.areas6s.map(a => '<label><input type="checkbox" data-multi="1" name="area6s" value="' + esc(a.id) + '"' + ((o.area6s || []).indexOf(a.id) >= 0 ? ' checked' : '') + '>' + esc(a.nama) + '</label>').join('') +
+                    '</div><small>Saat ada temuan di area ini, Monitoring 6S otomatis menugaskan PIC yang sedang bertugas sesuai jadwal shift &amp; absensi. Karyawan perlu akun HRIS (role Leader / PIC) yang ditautkan ke data ini agar bisa menerima tugas.</small></div>' : '') +
                 '<label class="check"><input type="checkbox" name="aktif"' + (o.aktif ? ' checked' : '') + '> Aktif</label>',
             onOpen: body => {
+                // Area 6S hanya untuk karyawan IEG
+                const empSel = $('[name=employer]', body), areaBox = $('#opArea6s', body);
+                const syncArea = () => { if (areaBox) areaBox.classList.toggle('hidden', empSel.value !== 'IEG'); };
+                if (empSel) { empSel.addEventListener('change', syncArea); syncArea(); }
                 $$('[data-pola]', body).forEach(b => b.onclick = () => { $$('[data-pola]', body).forEach(x => x.classList.toggle('on', x === b)); $('[name=pola]', body).value = b.dataset.pola; });
                 const box = $('#opFoto', body);
                 const show = (url) => {
@@ -3114,6 +3126,7 @@
                 label: 'Simpan', cls: 'primary', onClick: async () => {
                     const f = formData($('#modalBody'));
                     f.id = isNew ? '' : o.id;
+                    if ($('#opArea6s')) f.area6s = f.employer === 'IEG' ? [].concat(f.area6s || []) : [];
                     try {
                         const r = await call('saveOperator', f);
                         if (fotoPending !== undefined) await call('fotoOperator', { id: r.id || o.id, data: fotoPending });
