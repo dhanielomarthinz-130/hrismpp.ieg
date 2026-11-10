@@ -299,14 +299,25 @@ function r6_jadwal_status(string $operatorId, int $now): array {
     };
     $lbl = fn($r) => (r5_str($r['nama']) !== '' ? r5_str($r['nama']) : r5_str($r['shift'])) . (r5_str($r['mulai']) !== '' ? ' ' . $r['mulai'] . '–' . $r['selesai'] : '');
     $absen = (int)db_val("SELECT COUNT(*) FROM absensi WHERE operator_id = ? AND tanggal = ? AND status IN ('S','I','A','C')", [$operatorId, $today]);
+    // Absensi Hadir / Telat (hari ini, atau kemarin untuk shift lewat tengah malam) = bukti PIC benar-benar masuk
+    $hadir = db_all("SELECT a.tanggal, a.shift, s.nama, s.mulai, s.selesai, 1 AS kerja FROM absensi a LEFT JOIN shift s ON s.kode = a.shift
+                     WHERE a.operator_id = ? AND a.tanggal IN (?, ?) AND a.status IN ('H','T')", [$operatorId, $yday, $today]);
+    $hadirHariIni = (bool)array_filter($hadir, fn($h) => $h['tanggal'] === $today);
     $todayRow = null;
     foreach ($rows as $r) {
         $s = $span($r);
         if ($s && $now >= $s[0] && $now < $s[1] && !($absen && $r['tanggal'] === $today)) {
-            return ['status' => 'bertugas', 'label' => $lbl($r), 'mulai' => $s[0], 'selesai' => $s[1]];
+            $ok = (bool)array_filter($hadir, fn($h) => $h['tanggal'] === $r['tanggal']);
+            return ['status' => 'bertugas', 'label' => $lbl($r) . ($ok ? ' · sudah absen hadir' : ''), 'mulai' => $s[0], 'selesai' => $s[1], 'hadir' => $ok];
         }
         if ($r['tanggal'] === $today) $todayRow = $r;
     }
+    // Tidak sesuai jadwal tapi absen hadir di shift yang sedang berjalan (mis. tukar shift) -> tetap bertugas
+    foreach ($hadir as $h) {
+        $s = $span($h);
+        if ($s && $now >= $s[0] && $now < $s[1]) return ['status' => 'bertugas', 'label' => 'Absen hadir · ' . $lbl($h), 'mulai' => $s[0], 'selesai' => $s[1], 'hadir' => true];
+    }
+    if ($hadirHariIni && !$todayRow) return ['status' => 'tanpa_jadwal', 'label' => 'Absen hadir hari ini, jam shift tidak terbaca', 'mulai' => null, 'selesai' => null];
     if ($absen) return ['status' => 'absen', 'label' => 'Tidak masuk hari ini (absensi)', 'mulai' => null, 'selesai' => null];
     if (!$todayRow) return ['status' => 'tanpa_jadwal', 'label' => 'Jadwal hari ini belum ada', 'mulai' => null, 'selesai' => null];
     $s = $span($todayRow);
@@ -343,9 +354,10 @@ function r6_pic_bertugas(string $areaId, int $now, array $exclude = []): array {
         if (!isset($pool[$k]) || in_array($k, $ex, true)) continue;
         $st = r6_jadwal_status($pool[$k]['operator_id'], $now);
         $kand[] = ['nik' => $pool[$k]['nik'], 'nama' => $pool[$k]['nama'], 'status' => $st['status'], 'label' => $st['label'],
-                   'mulai' => $st['mulai'], 'aktif' => $aktif[$k] ?? 0, 'rank' => $rank[$st['status']] ?? 2];
+                   'mulai' => $st['mulai'], 'aktif' => $aktif[$k] ?? 0, 'rank' => $rank[$st['status']] ?? 2, 'hadir' => !empty($st['hadir'])];
     }
-    usort($kand, fn($a, $b) => ($a['rank'] <=> $b['rank']) ?: ($a['rank'] === 1 ? ($a['mulai'] <=> $b['mulai']) : ($a['aktif'] <=> $b['aktif'])) ?: strcmp($a['nama'], $b['nama']));
+    // Urutan: status jadwal -> yang sudah absen hadir -> shift terdekat / tugas aktif paling sedikit
+    usort($kand, fn($a, $b) => ($a['rank'] <=> $b['rank']) ?: ($b['hadir'] <=> $a['hadir']) ?: ($a['rank'] === 1 ? ($a['mulai'] <=> $b['mulai']) : ($a['aktif'] <=> $b['aktif'])) ?: strcmp($a['nama'], $b['nama']));
     $alasan = [
         'bertugas' => fn($c) => 'Sedang bertugas · ' . $c['label'],
         'nanti' => fn($c) => 'Shift berikutnya hari ini · ' . $c['label'],

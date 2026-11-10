@@ -776,8 +776,9 @@ VIEWS.input = function () {
     '</div><div class="card">' +
     '<div class="field"><label>Foto sebelum (bukti temuan)</label>' + photoPicker('iFoto', 'Ambil foto temuan') + '</div>' +
     '<div class="note" id="iTim" style="margin-bottom:12px" hidden></div>' +
-    '<div class="field"><label for="iPic">PIC perbaikan</label><div class="note" id="iAuto" style="margin-bottom:8px">Pilih area — sistem memilih Leader / PIC area yang sedang bertugas sesuai jadwal shift.</div>' +
-    '<select class="inp" id="iPic"><option value="">— Pilih area dulu —</option></select><span class="hint" id="iPicHint">Biarkan "Otomatis" agar tugas masuk ke PIC yang bertugas.</span></div>' +
+    '<div class="field"><label>PIC perbaikan</label><div class="note" id="iAuto">PIC dipilih otomatis dari jadwal shift &amp; absensi hari ini setelah area dipilih.</div>' +
+    '<button type="button" class="btn ghost sm" id="iGanti" style="margin-top:6px" hidden>Ganti PIC</button>' +
+    '<div id="iPicWrap" style="margin-top:8px" hidden><select class="inp" id="iPic" aria-label="PIC perbaikan"><option value="">— Pilih area dulu —</option></select></div></div>' +
     '<label class="chk" style="margin-bottom:12px"><input type="checkbox" id="iBer"><span>Tandai sebagai temuan berulang<br><span class="small muted">Sistem juga mendeteksi otomatis dari lokasi + kategori.</span></span></label>' +
     '<div class="note" id="iEst" style="margin-bottom:12px">Pilih area, kategori, dan tingkat untuk melihat dampak poin.</div>' +
     (canEdit('input') ? '<button class="btn primary block" id="iSubmit">' + ic('plus') + 'Simpan temuan</button>' : '<div class="note warn">Akses Anda untuk Input Temuan hanya lihat saja.</div>') + '</div></div>';
@@ -787,9 +788,11 @@ VIEWS.input = function () {
   const setPic = async () => {
     const a = B.areas.find(x => x.id === F.areaId);
     const sel = $('#iPic'), box = $('#iAuto');
+    const manual = on => { $('#iPicWrap').hidden = !on; $('#iGanti').textContent = on ? 'Pakai PIC otomatis' : 'Ganti PIC'; if (!on) sel.value = ''; };
+    manual(false); $('#iGanti').hidden = true;
     if (!a) {
       sel.innerHTML = '<option value="">— Pilih area dulu —</option>';
-      box.className = 'note'; box.textContent = 'Pilih area — sistem memilih Leader / PIC area yang sedang bertugas sesuai jadwal shift.';
+      box.className = 'note'; box.textContent = 'PIC dipilih otomatis dari jadwal shift & absensi hari ini setelah area dipilih.';
       $('#iTim').hidden = true; return;
     }
     const mandiri = S.user.tim && S.user.tim === a.tim;
@@ -806,12 +809,15 @@ VIEWS.input = function () {
     sel.innerHTML = (r.pic ? '<option value="">Otomatis — ' + esc(r.pic.nama) + '</option>' : '<option value="">— Pilih PIC —</option>') +
       (areaPic.length ? '<optgroup label="PIC area ' + esc(a.nama) + '">' + areaPic.map(u => opt(u, lbl[u.nik.toLowerCase()])).join('') + '</optgroup>' : '') +
       (lain.length ? '<optgroup label="PIC lain">' + lain.map(u => opt(u)).join('') + '</optgroup>' : '');
+    $('#iGanti').onclick = () => manual($('#iPicWrap').hidden);
     if (r.pic) {
+      $('#iGanti').hidden = false;
       box.className = 'note';
       box.innerHTML = ic('check') + ' Tugas akan masuk ke <b>' + esc(r.pic.nama) + '</b><div class="small" style="margin-top:2px">' + esc(r.alasan) + ' · harus diterima dalam ' + r.slaRespon + ' jam' + (r.mulai ? ' sejak shift mulai' : '') + '</div>' +
         ((r.kandidat || []).length > 1 ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' + r.kandidat.map(k => '<span class="small" title="' + esc(k.label) + '">' + esc(k.nama) + ' ' + jadChip(k.status) + '</span>').join('') + '</div>' : '');
     } else {
-      box.className = 'note warn'; box.textContent = r.alasan || 'Area ini belum punya PIC.';
+      box.className = 'note warn'; box.textContent = (r.alasan || 'Area ini belum punya PIC.') + ' Pilih PIC secara manual:';
+      manual(true);
     }
   };
   const est = () => {
@@ -840,6 +846,7 @@ VIEWS.input = function () {
     const miss = [];
     if (!payload.areaId) miss.push('area'); if (!payload.kategoriR) miss.push('kategori 6S'); if (!payload.tingkat) miss.push('tingkat');
     if (!payload.deskripsi) miss.push('deskripsi'); if (!payload.foto) miss.push('foto');
+    if (!payload.picNik && !$('#iPicWrap').hidden) miss.push('PIC');
     if (miss.length) return toast('Lengkapi: ' + miss.join(', '), true);
     const btn = $('#iSubmit'); btn.disabled = true; btn.textContent = 'Menyimpan…';
     try {
