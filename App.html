@@ -2608,55 +2608,47 @@
 
     /* =========================== DATA ABSENSI =========================== */
     let daData = null;
-    const DA_CHIP = { H: 'ok', T: 'info', S: 'warn', I: 'warn', A: 'err', C: 'pri' };
     async function renderDataAbsen() {
         const today = S.master.today;
-        S.da = S.da || { from: today, to: today, shift: '', bagian: '', status: '', employer: '', q: '' };
+        S.da = S.da || { tanggal: today, bagian: '', employer: 'IEG', q: '' };
         const f = S.da;
+        if (f.employer !== 'IEG' && f.employer !== 'RKA') f.employer = 'IEG';
+        f.tanggal = monday(f.tanggal || today);
         $('#view').innerHTML =
-            '<div class="toolbar">' +
-            '<button class="btn sm" id="daPrev" aria-label="Hari sebelumnya"><span class="material-symbols-outlined" style="font-size:16px">chevron_left</span></button>' +
-            '<input type="date" id="daFrom" value="' + f.from + '" aria-label="Dari tanggal">' +
-            '<input type="date" id="daTo" value="' + f.to + '" aria-label="Sampai tanggal">' +
-            '<button class="btn sm" id="daNext" aria-label="Hari berikutnya"><span class="material-symbols-outlined" style="font-size:16px">chevron_right</span></button>' +
-            '<div class="seg" id="daRange"><button type="button" data-dr="1">Hari ini</button><button type="button" data-dr="7">7 hari</button><button type="button" data-dr="M">Bulan ini</button></div>' +
-            '<div class="seg" id="daEmpSeg" role="group" aria-label="Employer">' + [['', 'Semua'], ['RKA', 'RKA'], ['IEG', 'IEG']].map(e => '<button type="button" data-de="' + e[0] + '" class="' + (f.employer === e[0] ? 'on' : '') + '">' + e[1] + '</button>').join('') + '</div>' +
+            '<div class="da-tabs" role="tablist" aria-label="Employer">' + ['IEG', 'RKA'].map(e =>
+                '<button type="button" role="tab" data-de="' + e + '" class="da-tab' + (f.employer === e ? ' on' : '') + '" aria-selected="' + (f.employer === e) + '">' +
+                '<span class="material-symbols-outlined">' + (e === 'IEG' ? 'badge' : 'groups') + '</span><span class="da-tab-l">Employee ' + e + '</span><b class="da-tab-n" id="daN' + e + '">–</b></button>').join('') +
+            '</div>' +
+            '<div class="toolbar wk-filter da-filter">' +
+            '<button class="btn sm" id="daPrev" aria-label="Minggu sebelumnya"><span class="material-symbols-outlined" style="font-size:16px">chevron_left</span></button>' +
+            '<input type="date" id="daDate" value="' + f.tanggal + '" aria-label="Minggu">' +
+            '<button class="btn sm" id="daNext" aria-label="Minggu berikutnya"><span class="material-symbols-outlined" style="font-size:16px">chevron_right</span></button>' +
+            '<select id="daBag"><option value="">Semua divisi</option>' + S.master.bagian.map(b => '<option value="' + b.kode + '"' + (f.bagian === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') + '</select>' +
+            '<input type="search" id="daQ" placeholder="Cari nama / NIK…" value="' + esc(f.q) + '" style="flex:1 1 140px">' +
             '</div>' +
             '<div class="toolbar">' +
-            '<input type="search" id="daQ" placeholder="Cari nama / NIK…" value="' + esc(f.q) + '" style="flex:1 1 160px">' +
-            '<select id="daShift"><option value="">Semua shift</option>' + (S.master.shifts || []).map(s => '<option value="' + s.kode + '"' + (f.shift === s.kode ? ' selected' : '') + '>' + esc(s.nama) + '</option>').join('') + '</select>' +
-            '<select id="daBag"><option value="">Semua divisi</option>' + S.master.bagian.map(b => '<option value="' + b.kode + '"' + (f.bagian === b.kode ? ' selected' : '') + '>' + esc(b.nama) + '</option>').join('') + '</select>' +
-            '<select id="daSt"><option value="">Semua status</option>' + Object.keys(STATUS).map(k => '<option value="' + k + '"' + (f.status === k ? ' selected' : '') + '>' + STATUS[k] + '</option>').join('') + '</select>' +
-            '<button class="btn sm" id="daXls"><span class="material-symbols-outlined">download</span> Excel</button>' +
+            '<button class="btn sm ghost" id="daToday"><span class="material-symbols-outlined">today</span> Minggu ini</button>' +
+            '<button class="btn sm ghost" id="daXls"><span class="material-symbols-outlined">download</span> Excel</button>' +
             '<button class="btn sm btn-wa" id="daShare"><span class="material-symbols-outlined">share</span> Share Shift Hari Ini</button>' +
             '</div>' +
-            '<div id="daStats"></div><div class="card" style="padding:0" id="daBody"><div class="empty">Memuat…</div></div>';
-        const setRange = (a, b) => { f.from = a; f.to = b; $('#daFrom').value = a; $('#daTo').value = b; loadDataAbsen(); };
-        $('#daFrom').onchange = e => { f.from = e.target.value; if (f.to < f.from) { f.to = f.from; $('#daTo').value = f.to; } loadDataAbsen(); };
-        $('#daTo').onchange = e => { f.to = e.target.value; if (f.to < f.from) { f.from = f.to; $('#daFrom').value = f.from; } loadDataAbsen(); };
-        const span = () => Math.round((utc(f.to) - utc(f.from)) / 864e5) + 1;
-        $('#daPrev').onclick = () => { const n = span(); setRange(addDays(f.from, -n), addDays(f.to, -n)); };
-        $('#daNext').onclick = () => { const n = span(); setRange(addDays(f.from, n), addDays(f.to, n)); };
-        $$('[data-dr]').forEach(b => b.onclick = () => {
-            const v = b.dataset.dr;
-            if (v === '1') setRange(today, today);
-            else if (v === '7') setRange(addDays(today, -6), today);
-            else setRange(today.slice(0, 8) + '01', today);
-        });
+            '<div id="daStats"></div><div id="daBody"><div class="card empty">Memuat…</div></div>';
+        const setWeek = d => { f.tanggal = monday(d); $('#daDate').value = f.tanggal; loadDataAbsen(); };
+        $('#daPrev').onclick = () => setWeek(addDays(f.tanggal, -7));
+        $('#daNext').onclick = () => setWeek(addDays(f.tanggal, 7));
+        $('#daToday').onclick = () => setWeek(today);
+        $('#daDate').onchange = e => { if (e.target.value) setWeek(e.target.value); };
         let qT = null;
-        $('#daQ').oninput = e => { f.q = e.target.value; clearTimeout(qT); qT = setTimeout(loadDataAbsen, 300); };
-        $('#daShift').onchange = e => { f.shift = e.target.value; loadDataAbsen(); };
-        $('#daBag').onchange = e => { f.bagian = e.target.value; loadDataAbsen(); };
-        $('#daSt').onchange = e => { f.status = e.target.value; loadDataAbsen(); };
+        $('#daQ').oninput = e => { f.q = e.target.value; clearTimeout(qT); qT = setTimeout(drawDataAbsen, 200); };
+        $('#daBag').onchange = e => { f.bagian = e.target.value; drawDataAbsen(); };
         $$('[data-de]').forEach(b => b.onclick = () => {
             f.employer = b.dataset.de;
-            $$('[data-de]').forEach(x => x.classList.toggle('on', x === b));
-            loadDataAbsen();
+            $$('[data-de]').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-selected', x === b); });
+            drawDataAbsen();
         });
         $('#daShare').onclick = daShareModal;
         $('#daXls').onclick = async () => {
             try {
-                const r = await call('absensiListXls', S.da);
+                const r = await call('absensiListXls', { from: f.tanggal, to: addDays(f.tanggal, 6), employer: f.employer, bagian: f.bagian, q: f.q });
                 const a = document.createElement('a');
                 a.href = 'data:' + r.mime + ';base64,' + r.base64; a.download = r.name;
                 document.body.appendChild(a); a.click(); a.remove();
@@ -2733,61 +2725,94 @@
         toast('WhatsApp dibuka' + (copied ? ' — teks juga sudah disalin.' : '.'), 'ok');
     }
     async function loadDataAbsen() {
-        try { daData = await call('absensiList', S.da); } catch (e) { return fail(e); }
+        const f = S.da;
+        try { daData = await call('absensiList', { from: f.tanggal, to: addDays(f.tanggal, 6) }); } catch (e) { return fail(e); }
         if (S.page !== 'data_absen') return;
         drawDataAbsen();
     }
+    // Grid mingguan seperti Jadwal: semua karyawan (aktif / yang punya absensi) x 7 hari
+    function daGrid() {
+        const f = S.da, d = daData;
+        const days = [0, 1, 2, 3, 4, 5, 6].map(i => addDays(f.tanggal, i));
+        const people = {};
+        (S.master.operators || []).forEach(o => {
+            if (!o.aktif || /vacant/i.test(o.nama)) return;
+            people[o.id] = { id: o.id, nama: o.nama, nik: o.nik || '', bagian: o.bagian, employer: String(o.employer || 'RKA').toUpperCase() === 'IEG' ? 'IEG' : 'RKA', foto: o.foto || '', role: o.role || '', cells: {} };
+        });
+        d.rows.forEach(r => {
+            const p = people[r.operatorId] = people[r.operatorId] || { id: r.operatorId, nama: r.nama, nik: r.nik, bagian: r.bagian, employer: r.employer === 'IEG' ? 'IEG' : 'RKA', foto: r.foto, role: '', cells: {} };
+            (p.cells[r.tanggal] = p.cells[r.tanggal] || []).push(r);
+        });
+        const all = Object.keys(people).map(k => people[k]);
+        const q = (f.q || '').toLowerCase();
+        const rows = all.filter(p => p.employer === f.employer &&
+            (!f.bagian || p.bagian === f.bagian || Object.keys(p.cells).some(t => p.cells[t].some(r => r.bagian === f.bagian))) &&
+            (!q || p.nama.toLowerCase().indexOf(q) >= 0 || String(p.nik).toLowerCase().indexOf(q) >= 0))
+            .sort((a, b) => a.nama.localeCompare(b.nama, 'id', { sensitivity: 'base' }));
+        const counts = { IEG: 0, RKA: 0 };
+        all.forEach(p => { counts[p.employer]++; });
+        return { days: days, rows: rows, counts: counts };
+    }
     function drawDataAbsen() {
-        const d = daData, f = S.da;
-        const today = S.master.today;
-        $$('[data-dr]').forEach(b => b.classList.toggle('on',
-            (b.dataset.dr === '1' && f.from === today && f.to === today) ||
-            (b.dataset.dr === '7' && f.from === addDays(today, -6) && f.to === today) ||
-            (b.dataset.dr === 'M' && f.from === today.slice(0, 8) + '01' && f.to === today)));
-        $('#pageSub').textContent = (d.from === d.to ? fmtTgl(d.from) : fmtShort(d.from) + ' – ' + fmtShort(d.to)) + ' · ' + d.total + ' catatan absensi';
-        const c = d.count, hadir = c.H + c.T;
+        const f = S.da, today = S.master.today;
+        const g = daGrid(), days = g.days, rows = g.rows;
+        ['IEG', 'RKA'].forEach(e => { const n = $('#daN' + e); if (n) n.textContent = g.counts[e]; });
+        const d0 = days[0], d6 = days[6];
+        $('#pageSub').textContent = 'Employee ' + f.employer + ' · Minggu ' + (+d0.slice(8)) + ' ' + BULAN[+d0.slice(5, 7) - 1] + ' – ' + (+d6.slice(8)) + ' ' + BULAN[+d6.slice(5, 7) - 1] + ' ' + d6.slice(0, 4);
+        // Ringkasan minggu ini (sesuai tab & filter)
+        const c = { H: 0, T: 0, S: 0, I: 0, A: 0, C: 0 };
+        let total = 0, lembur = 0;
+        rows.forEach(p => Object.keys(p.cells).forEach(t => p.cells[t].forEach(r => { total++; if (c[r.status] !== undefined) c[r.status]++; lembur += r.lembur || 0; })));
+        const hadir = c.H + c.T;
         $('#daStats').innerHTML = '<div class="kpis da-kpis">' +
-            '<div class="kpi"><div class="lbl">Total diabsen</div><div class="val">' + d.total + '</div><div class="sub">catatan</div></div>' +
-            '<div class="kpi"><div class="lbl">Hadir</div><div class="val" style="color:var(--ok)">' + hadir + '</div><div class="sub">Telat ' + c.T + (d.total ? ' · ' + Math.round(hadir / d.total * 100) + '%' : '') + '</div></div>' +
-            '<div class="kpi"><div class="lbl">Sakit / Izin / Cuti</div><div class="val">' + (c.S + c.I + c.C) + '</div><div class="sub">S ' + c.S + ' · I ' + c.I + ' · C ' + c.C + '</div></div>' +
-            '<div class="kpi"><div class="lbl">Alpa</div><div class="val" style="color:' + (c.A ? 'var(--err)' : 'inherit') + '">' + c.A + '</div><div class="sub">Lembur total ' + (Math.round(d.lembur * 10) / 10) + ' jam</div></div>' +
+            '<div class="kpi"><div class="lbl">Karyawan ' + esc(f.employer) + '</div><div class="val">' + rows.length + '</div><div class="sub">' + total + ' catatan absensi</div></div>' +
+            '<div class="kpi"><div class="lbl">Hadir</div><div class="val" style="color:var(--ok)">' + hadir + '</div><div class="sub">Telat ' + c.T + (total ? ' · ' + Math.round(hadir / total * 100) + '%' : '') + '</div></div>' +
+            '<div class="kpi"><div class="lbl">Sakit / Izin / Cuti</div><div class="val" style="color:var(--warn)">' + (c.S + c.I + c.C) + '</div><div class="sub">S ' + c.S + ' · I ' + c.I + ' · C ' + c.C + '</div></div>' +
+            '<div class="kpi"><div class="lbl">Alpa</div><div class="val" style="color:' + (c.A ? 'var(--err)' : 'inherit') + '">' + c.A + '</div><div class="sub">Lembur ' + (Math.round(lembur * 10) / 10) + ' jam</div></div>' +
             '</div>';
-        if (!d.rows.length) {
-            $('#daBody').innerHTML = '<div class="empty"><div class="big"><span class="material-symbols-outlined">event_busy</span></div><p>Belum ada data absensi untuk filter ini.</p>' +
-                (allowedPages().some(p => p.id === 'absensi') ? '<button class="btn sm primary" onclick="go(\'absensi\')">Buka Absensi Shift</button>' : '') + '</div>';
+        if (!rows.length) {
+            $('#daBody').innerHTML = '<div class="card empty"><div class="big"><span class="material-symbols-outlined">group_off</span></div><p>Tidak ada karyawan ' + esc(f.employer) + ' untuk filter ini.</p></div>';
             return;
         }
-        const multiDay = d.from !== d.to;
-        const jamAbs = r => r.updatedAt ? esc(r.updatedAt.slice(11, 16)) : '—';
-        const stChip = r => '<span class="chip xs ' + (DA_CHIP[r.status] || '') + '">' + esc(STATUS[r.status] || r.status) + '</span>';
-        let lastDay = '';
-        const wideRows = d.rows.map(r => {
-            let sep = '';
-            if (multiDay && r.tanggal !== lastDay) {
-                lastDay = r.tanggal;
-                const n = d.rows.filter(x => x.tanggal === r.tanggal);
-                const h = n.filter(x => x.status === 'H' || x.status === 'T').length;
-                sep = '<tr class="da-day"><td colspan="10"><b>' + esc(fmtTgl(r.tanggal)) + '</b><span class="muted small"> · ' + n.length + ' diabsen · ' + h + ' hadir</span></td></tr>';
-            }
-            return sep + '<tr><td class="nowrap">' + esc(fmtShort(r.tanggal)) + '</td><td>' + esc(shiftName(r.shift)) + '</td>' +
-                '<td><span class="op-name"><span class="op-ava">' + avatarHtml(r.nama, r.foto) + '</span><b>' + esc(r.nama) + '</b></span></td>' +
-                '<td>' + esc(r.nik) + '</td><td>' + esc(bagName(r.bagian)) + '</td><td><span class="chip xs ' + (r.employer === 'IEG' ? 'pri' : '') + '">' + esc(r.employer || '—') + '</span></td>' +
-                '<td>' + stChip(r) + '</td><td class="num">' + (r.lembur ? r.lembur + ' j' : '—') + '</td>' +
-                '<td class="small">' + (r.ket ? esc(r.ket) : '<span class="muted">—</span>') + '</td>' +
-                '<td class="small muted nowrap">' + esc(r.updatedBy || '—') + ' · ' + jamAbs(r) + '</td></tr>';
-        }).join('');
-        lastDay = '';
-        const narrow = d.rows.map(r => {
-            let sep = '';
-            if (r.tanggal !== lastDay) { lastDay = r.tanggal; sep = '<div class="da-day-n">' + esc(fmtTgl(r.tanggal)) + '</div>'; }
-            return sep + '<div class="list-item"><span class="op-ava lg">' + avatarHtml(r.nama, r.foto) + '</span><div class="grow"><b>' + esc(r.nama) + '</b>' +
-                '<span class="small muted">' + esc(shiftName(r.shift)) + ' · ' + esc(bagName(r.bagian)) + ' · ' + esc(r.employer) + (r.lembur ? ' · lembur ' + r.lembur + ' j' : '') + (r.ket ? ' · ' + esc(r.ket) : '') + '</span></div>' +
-                '<div class="da-st">' + stChip(r) + '<span class="small muted">' + jamAbs(r) + '</span></div></div>';
-        }).join('');
-        $('#daBody').innerHTML =
-            '<div class="only-wide"><div class="table-wrap" style="border:0"><table class="tbl"><thead><tr><th>Tanggal</th><th>Shift</th><th>Nama</th><th>NIK</th><th>Divisi</th><th>Employer</th><th>Status</th><th class="num">Lembur</th><th>Catatan</th><th>Diabsen oleh</th></tr></thead><tbody>' +
-            wideRows + '</tbody></table></div></div>' +
-            '<div class="only-narrow">' + narrow + '</div>';
+        let h = '<div class="table-wrap wk-wrap"><table class="wk da-wk"><thead><tr><th class="c-no">No</th><th class="c-nama">Nama Karyawan</th><th class="c-bag">Divisi</th><th class="c-nik wide-only">NIK</th>' +
+            days.map(t => '<th class="c-day' + (t === today ? ' today' : '') + '"><span>' + HARI3[dow(t)] + '</span><b>' + (+t.slice(8)) + '</b></th>').join('') +
+            '<th class="c-jam" title="Jumlah hari hadir (termasuk telat)">Hadir</th><th class="c-hari" title="Total lembur (jam)">Lembur</th></tr></thead><tbody>';
+        rows.forEach((p, idx) => {
+            let nh = 0, nl = 0;
+            const cells = days.map(t => {
+                const list = p.cells[t] || [];
+                if (!list.length) return '<td class="c-day' + (t === today ? ' today' : '') + '"><span class="da-c' + (t > today ? ' fut' : '') + '" title="' + (t > today ? 'Belum waktunya' : 'Belum diabsen') + '">·</span></td>';
+                const r = list[list.length - 1];
+                list.forEach(x => { if (x.status === 'H' || x.status === 'T') nh++; nl += x.lembur || 0; });
+                const tip = list.map(x => shiftName(x.shift) + ': ' + (STATUS[x.status] || x.status) + (x.lembur ? ' · lembur ' + x.lembur + ' jam' : '') + (x.ket ? ' · ' + x.ket : '') +
+                    (x.updatedBy ? ' · oleh ' + x.updatedBy + (x.updatedAt ? ' ' + x.updatedAt.slice(11, 16) : '') : '')).join('\n');
+                return '<td class="c-day' + (t === today ? ' today' : '') + '"><span class="da-c st-' + esc(r.status) + '" title="' + esc(tip) + '"><b>' + esc(r.status) + '</b>' +
+                    '<small>' + esc(list.map(x => x.shift).join('/')) + '</small>' + (list.some(x => x.lembur) ? '<i class="da-ot" aria-label="lembur"></i>' : '') + '</span></td>';
+            }).join('');
+            h += '<tr><td class="c-no">' + (idx + 1) + '</td>' +
+                '<td class="c-nama"><div class="wk-nm"><span class="op-ava clickable" data-view-foto="' + esc(p.id) + '" role="button" tabindex="0" title="Lihat foto">' + avatarHtml(p.nama, p.foto) + '</span>' +
+                '<div class="wk-nm-txt"><b>' + esc(p.nama) + '</b><small>' + esc((p.role ? p.role + ' · ' : '') + p.employer) + '</small></div></div></td>' +
+                '<td class="c-bag"><span class="badge-bag">' + esc(bagName(p.bagian)) + '</span></td>' +
+                '<td class="c-nik wide-only">' + esc(p.nik) + '</td>' + cells +
+                '<td class="c-jam' + (nh ? ' good' : '') + '">' + nh + '</td><td class="c-hari">' + (nl ? Math.round(nl * 10) / 10 : '—') + '</td></tr>';
+        });
+        h += '</tbody><tfoot>';
+        const per = pred => days.map(t => rows.filter(p => (p.cells[t] || []).some(pred)).length);
+        const foot = (label, arr, cls) => '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td colspan="3" class="c-foot">' + label + '</td><td class="wide-only"></td>' +
+            arr.map(n => '<td>' + (n || '') + '</td>').join('') + '<td colspan="2"></td></tr>';
+        h += foot('Hadir / Telat', per(r => r.status === 'H' || r.status === 'T'), 'tot');
+        h += foot('Sakit / Izin / Cuti', per(r => r.status === 'S' || r.status === 'I' || r.status === 'C'));
+        h += foot('Alpa', per(r => r.status === 'A'));
+        h += foot('Belum diabsen', days.map(t => t > today ? 0 : rows.filter(p => !(p.cells[t] || []).length).length));
+        h += '</tfoot></table></div>' +
+            '<div class="legend da-legend">' + Object.keys(STATUS).map(k => '<span class="da-lg"><span class="da-c st-' + k + '"><b>' + k + '</b></span>' + STATUS[k] + '</span>').join('') +
+            '<span class="da-lg"><span class="da-c">·</span>Belum diabsen</span><span class="da-lg"><span class="da-c st-H"><b>H</b><i class="da-ot"></i></span>Ada lembur</span></div>';
+        $('#daBody').innerHTML = h;
+        $$('#daBody [data-view-foto]').forEach(b => {
+            const open = () => { const o = (S.master.operators || []).find(x => x.id === b.dataset.viewFoto); if (o) fotoViewModal(o); };
+            b.onclick = open;
+            b.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+        });
     }
 
     /* =========================== OPERATOR =========================== */

@@ -2469,6 +2469,172 @@
         flex: none;
     }
 
+    /* Data Absensi: tab Employee IEG / RKA */
+    .da-tabs {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 4px;
+        padding: 4px;
+        margin-bottom: 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-lg, 14px);
+        background: var(--surface-2);
+        max-width: 440px;
+    }
+
+    .da-tab {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-height: 42px;
+        padding: 0 14px;
+        border: 0;
+        border-radius: calc(var(--r-lg, 14px) - 4px);
+        background: transparent;
+        color: var(--text-2);
+        font: inherit;
+        font-size: 13.5px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background-color .18s ease, color .18s ease, box-shadow .18s ease;
+    }
+
+    .da-tab .material-symbols-outlined {
+        font-size: 19px;
+    }
+
+    .da-tab-n {
+        min-width: 24px;
+        padding: 1px 7px;
+        border-radius: 999px;
+        background: var(--surface-3);
+        color: var(--text-2);
+        font-size: 11.5px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .da-tab.on {
+        background: var(--surface);
+        color: var(--primary);
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .08), 0 0 0 1px var(--line);
+    }
+
+    .da-tab.on .da-tab-n {
+        background: var(--primary);
+        color: #fff;
+    }
+
+    @media (hover: hover) {
+        .da-tab:not(.on):hover {
+            color: var(--text);
+            background: var(--surface-3);
+        }
+    }
+
+    .da-tab:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 1px;
+    }
+
+    /* Data Absensi: sel status di grid mingguan */
+    .da-wk .c-day {
+        min-width: 46px;
+        padding: 3px;
+    }
+
+    .da-wk tbody td.c-day.today {
+        background: var(--primary-soft);
+    }
+
+    .da-c {
+        position: relative;
+        display: inline-flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        min-width: 34px;
+        height: 30px;
+        border-radius: 6px;
+        color: var(--text-3);
+        font-size: 12px;
+        line-height: 1;
+        cursor: default;
+    }
+
+    .da-c b {
+        font-size: 12px;
+        font-weight: 700;
+    }
+
+    .da-c small {
+        margin-top: 2px;
+        font-size: 9px;
+        font-weight: 600;
+        opacity: .75;
+        letter-spacing: .02em;
+    }
+
+    .da-c.fut {
+        opacity: .35;
+    }
+
+    .da-c.st-H { background: var(--ok-bg); color: var(--ok); }
+    .da-c.st-T { background: var(--info-bg); color: var(--info); }
+    .da-c.st-S,
+    .da-c.st-I { background: var(--warn-bg); color: var(--warn); }
+    .da-c.st-C { background: var(--primary-soft); color: var(--primary); }
+    .da-c.st-A { background: var(--err-bg); color: var(--err); }
+
+    .da-ot {
+        position: absolute;
+        top: 3px;
+        right: 3px;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--pink, var(--primary));
+    }
+
+    .da-wk .c-jam.good {
+        color: var(--ok);
+    }
+
+    .da-legend {
+        gap: 6px 14px;
+    }
+
+    .da-lg {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-2);
+    }
+
+    .da-lg .da-c {
+        width: 26px;
+        min-width: 26px;
+        height: 22px;
+    }
+
+    @media (max-width: 767px) {
+        .da-tabs {
+            max-width: none;
+        }
+
+        .da-filter #daDate {
+            flex: 1 1 calc(100% - 96px);
+        }
+
+        .da-filter #daBag,
+        .da-filter #daQ {
+            flex: 1 1 100% !important;
+            min-width: 0;
+        }
+    }
+
     /* Tombol status "Belum Disubmit" (Jadwal IEG) */
     .btn.warn-solid {
         background: #FEF3C7;
