@@ -111,6 +111,18 @@ const R6_CHECK_AMAN = [
     'A09' => [['Safety', 'Pelindung mesin terpasang dan tombol darurat berfungsi']],
 ];
 
+/** Area tambahan setelah data awal (dibuat sekali lewat migrasi): nama => checklist khusus. */
+const R6_AREA_TAMBAHAN = [
+    'Meja Admin' => [
+        ['Sort', 'Di meja hanya dokumen & ATK yang dipakai shift berjalan'],
+        ['Set in Order', 'Dokumen masuk/keluar di tray berlabel, ATK di tempat standar'],
+        ['Shine', 'Meja, keyboard, dan monitor bersih dari debu & sampah kertas'],
+        ['Standardize', 'Kabel komputer & printer rapi dan berlabel'],
+        ['Sustain', 'Dokumen selesai diarsipkan di akhir shift'],
+        ['Safety', 'Stopkontak tidak bertumpuk dan kabel tidak melintang di jalur kaki'],
+    ],
+];
+
 const R5_CHECK_KHUSUS = [
     'A01' => [['Sort', 'Jalur hand pallet/forklift bebas hambatan'], ['Set in Order', 'Palet tersusun sesuai marka lantai, tidak melewati garis'],
               ['Shine', 'Tidak ada stretch film/kardus bekas tercecer'], ['Standardize', 'Rak tidak rusak/bengkok dan label lokasi rak lengkap']],
@@ -282,6 +294,21 @@ function r5_init(): void {
                 db_query("DELETE FROM r6_area_pic WHERE area_id = ? AND LOWER(nik) = ?", [$r['area_id'], mb_strtolower($r['nik'])]);
             }
             db_insert('settings', ['key_name' => 'migr_r6s_area_op', 'value' => '1', 'ket' => 'Monitoring 6S: area PIC di data operator']);
+        });
+    }
+    // Area tambahan (mis. Meja Admin): dibuat sekali bila belum ada area dengan nama yang sama
+    foreach (R6_AREA_TAMBAHAN as $nama => $khusus) {
+        $flag = 'migr_r6s_area_' . substr(md5($nama), 0, 8);
+        if ((int)db_val("SELECT COUNT(*) FROM settings WHERE key_name = ?", [$flag])) continue;
+        db_transaction(function () use ($nama, $khusus, $flag) {
+            if (!(int)db_val("SELECT COUNT(*) FROM r5_area WHERE LOWER(nama) = ?", [mb_strtolower($nama)])) {
+                $n = 1;
+                foreach (db_all("SELECT area_id FROM r5_area") as $a) if (preg_match('/^A(\d+)$/', $a['area_id'], $m)) $n = max($n, (int)$m[1] + 1);
+                $id = 'A' . str_pad((string)$n, 2, '0', STR_PAD_LEFT);
+                db_insert('r5_area', ['area_id' => $id, 'nama' => $nama, 'pic_nik' => '', 'aktif' => 'Y', 'tim' => $nama]);
+                foreach (array_merge(R5_CHECK_UMUM, $khusus) as $c) db_insert('r5_checklist', ['area_id' => $id, 'kategori_r' => $c[0], 'item' => $c[1], 'aktif' => 'Y']);
+            }
+            db_insert('settings', ['key_name' => $flag, 'value' => '1', 'ket' => 'Monitoring 6S: area ' . $nama]);
         });
     }
 }
