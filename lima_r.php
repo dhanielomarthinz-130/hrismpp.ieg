@@ -395,50 +395,69 @@ function r6_area_tanpa_akun(): array {
 }
 
 /**
- * Pilih PIC yang menerima temuan di area ini:
- * 1) PIC area yang sedang bertugas (paling sedikit tugas aktif), 2) PIC area dengan shift berikutnya hari ini,
- * 3) PIC area yang jadwalnya tidak terbaca, 4) PIC cadangan area, 5) PIC area lain yang ada.
+ * Pilih PIC yang menerima temuan di area ini, sesuai jam temuan:
+ * 1) PIC area yang sedang bertugas (sudah absen hadir didahulukan, lalu tugas aktif paling sedikit),
+ *    lalu PIC area dengan shift berikutnya hari ini, lalu PIC area yang jadwalnya tidak terbaca
+ * 2) PIC cadangan area
+ * 3) Area belum diatur / semua PIC area libur: Leader / PIC IEG mana pun yang sedang bertugas
+ *    (atau shift berikutnya) menurut jadwal & absensi
+ * 4) Terakhir: Leader / PIC IEG dengan tugas aktif paling sedikit
  */
 function r6_pic_bertugas(string $areaId, int $now, array $exclude = []): array {
     $area = r5_find_area($areaId);
-    $none = ['pic' => null, 'status' => '', 'alasan' => 'Area ini belum punya PIC. Atur di Master Data → Pengguna (Area tanggung jawab).', 'mulai' => null, 'kandidat' => []];
-    if (!$area) return $none;
+    $none = ['pic' => null, 'status' => '', 'alasan' => 'Belum ada akun Leader / PIC IEG yang aktif. Tambahkan di HRIS → Pengaturan → Pengguna.', 'mulai' => null, 'kandidat' => []];
+    if (!$area) return ['alasan' => 'Area tidak ditemukan.'] + $none;
     $ex = array_map('mb_strtolower', $exclude);
     $pool = [];
-    foreach (r5_users_all() as $u) if ($u['pic']) $pool[mb_strtolower($u['nik'])] = $u;
+    foreach (r5_users_all() as $u) if ($u['pic'] && !in_array(mb_strtolower($u['nik']), $ex, true)) $pool[mb_strtolower($u['nik'])] = $u;
+    if (!$pool) return $none;
     $aktif = [];
     foreach (db_all("SELECT pic_nik, COUNT(*) n FROM r5_temuan WHERE status IN (?, ?) GROUP BY pic_nik", [R5_OPEN, R5_REVISI]) as $r) $aktif[mb_strtolower(r5_str($r['pic_nik']))] = (int)$r['n'];
     $rank = ['bertugas' => 0, 'nanti' => 1, 'tanpa_jadwal' => 2, 'tanpa_karyawan' => 2, 'selesai' => 3, 'libur' => 4, 'absen' => 4];
-    $kand = [];
-    foreach (r6_area_pic_map() as $k => $list) {
-        if (!in_array($area['area_id'], $list, true)) continue;
-        if (!isset($pool[$k]) || in_array($k, $ex, true)) continue;
-        $st = r6_jadwal_status($pool[$k]['operator_id'], $now);
-        $kand[] = ['nik' => $pool[$k]['nik'], 'nama' => $pool[$k]['nama'], 'status' => $st['status'], 'label' => $st['label'],
-                   'mulai' => $st['mulai'], 'aktif' => $aktif[$k] ?? 0, 'rank' => $rank[$st['status']] ?? 2, 'hadir' => !empty($st['hadir'])];
-    }
-    // Urutan: status jadwal -> yang sudah absen hadir -> shift terdekat / tugas aktif paling sedikit
-    usort($kand, fn($a, $b) => ($a['rank'] <=> $b['rank']) ?: ($b['hadir'] <=> $a['hadir']) ?: ($a['rank'] === 1 ? ($a['mulai'] <=> $b['mulai']) : ($a['aktif'] <=> $b['aktif'])) ?: strcmp($a['nama'], $b['nama']));
-    $alasan = [
+    $stCache = [];
+    $build = function (array $keys) use ($pool, $aktif, $rank, $now, &$stCache): array {
+        $kand = [];
+        foreach ($keys as $k) {
+            if (!isset($pool[$k])) continue;
+            $st = $stCache[$k] ??= r6_jadwal_status($pool[$k]['operator_id'], $now);
+            $kand[] = ['nik' => $pool[$k]['nik'], 'nama' => $pool[$k]['nama'], 'status' => $st['status'], 'label' => $st['label'],
+                       'mulai' => $st['mulai'], 'aktif' => $aktif[$k] ?? 0, 'rank' => $rank[$st['status']] ?? 2, 'hadir' => !empty($st['hadir'])];
+        }
+        // Urutan: status jadwal -> yang sudah absen hadir -> shift terdekat / tugas aktif paling sedikit
+        usort($kand, fn($a, $b) => ($a['rank'] <=> $b['rank']) ?: ($b['hadir'] <=> $a['hadir']) ?: ($a['rank'] === 1 ? ($a['mulai'] <=> $b['mulai']) : ($a['aktif'] <=> $b['aktif'])) ?: strcmp($a['nama'], $b['nama']));
+        return $kand;
+    };
+    $out = fn($c, $why, $list) => ['pic' => ['nik' => $c['nik'], 'nama' => $c['nama']], 'status' => $c['status'], 'alasan' => $why,
+                                   'mulai' => $c['status'] === 'nanti' ? $c['mulai'] : null,
+                                   'kandidat' => array_map(fn($x) => array_diff_key($x, ['rank' => 1, 'mulai' => 1]), $list)];
+    $why = [
         'bertugas' => fn($c) => 'Sedang bertugas · ' . $c['label'],
         'nanti' => fn($c) => 'Shift berikutnya hari ini · ' . $c['label'],
-        'tanpa_jadwal' => fn($c) => 'PIC area · jadwal hari ini belum ada',
-        'tanpa_karyawan' => fn($c) => 'PIC area · akun belum ditautkan ke karyawan IEG (jadwal tidak terbaca)',
-        'selesai' => fn($c) => 'PIC area · shift hari ini sudah selesai',
+        'tanpa_jadwal' => fn($c) => 'jadwal hari ini belum ada',
+        'tanpa_karyawan' => fn($c) => 'akun belum ditautkan ke karyawan IEG (jadwal tidak terbaca)',
+        'selesai' => fn($c) => 'shift hari ini sudah selesai',
+        'libur' => fn($c) => $c['label'],
+        'absen' => fn($c) => $c['label'],
     ];
-    $out = fn($c, $why) => ['pic' => ['nik' => $c['nik'], 'nama' => $c['nama']], 'status' => $c['status'], 'alasan' => $why,
-                            'mulai' => $c['status'] === 'nanti' ? $c['mulai'] : null,
-                            'kandidat' => array_map(fn($x) => array_diff_key($x, ['rank' => 1, 'mulai' => 1]), $kand)];
-    if ($kand && $kand[0]['rank'] < 4) return $out($kand[0], $alasan[$kand[0]['status']]($kand[0]));
-    // Semua PIC area libur / tidak masuk (atau belum diatur) -> PIC cadangan area
+    // 1) PIC area
+    $areaKeys = array_keys(array_filter(r6_area_pic_map(), fn($l) => in_array($area['area_id'], $l, true)));
+    $kand = $build($areaKeys);
+    if ($kand && $kand[0]['rank'] <= 1) return $out($kand[0], $why[$kand[0]['status']]($kand[0]), $kand);
+    if ($kand && $kand[0]['rank'] < 4) return $out($kand[0], 'PIC area · ' . $why[$kand[0]['status']]($kand[0]), $kand);
+    // 2) PIC cadangan area
     $cad = mb_strtolower(r5_str($area['pic_nik']));
-    if ($cad !== '' && isset($pool[$cad]) && !in_array($cad, $ex, true)) {
-        $st = r6_jadwal_status($pool[$cad]['operator_id'], $now);
-        $c = ['nik' => $pool[$cad]['nik'], 'nama' => $pool[$cad]['nama'], 'status' => $st['status'], 'label' => $st['label'], 'mulai' => $st['mulai']];
-        return $out($c, $kand ? 'PIC cadangan area (PIC area lain libur / tidak masuk)' : 'PIC cadangan area');
+    if ($cad !== '' && isset($pool[$cad])) {
+        $c = $build([$cad])[0];
+        if ($c['rank'] < 4) return $out($c, ($kand ? 'PIC cadangan area (PIC area lain libur / tidak masuk) · ' : 'PIC cadangan area · ') . $why[$c['status']]($c), $kand ?: [$c]);
     }
-    if ($kand) return $out($kand[0], 'PIC area (' . $kand[0]['label'] . ')');
-    return $none;
+    // 3) Leader / PIC IEG mana pun yang sedang bertugas / shift berikutnya
+    $all = $build(array_keys($pool));
+    $tugas = array_values(array_filter($all, fn($x) => $x['rank'] <= 1));
+    $ket = $areaKeys ? ' (PIC area libur / tidak masuk)' : ' (area ini belum punya PIC khusus)';
+    if ($tugas) return $out($tugas[0], $why[$tugas[0]['status']]($tugas[0]) . $ket, array_slice($tugas, 0, 8));
+    // 4) Tidak ada jadwal yang terbaca: tugas aktif paling sedikit
+    usort($all, fn($a, $b) => (($a['rank'] === 4) <=> ($b['rank'] === 4)) ?: ($a['aktif'] <=> $b['aktif']) ?: strcmp($a['nama'], $b['nama']));
+    return $out($all[0], 'Tidak ada PIC yang terbaca sedang bertugas · dipilih yang tugas aktifnya paling sedikit', array_slice($all, 0, 8));
 }
 
 /** Batas respon PIC: SLA dihitung sejak sekarang, atau sejak shift PIC mulai bila shift-nya belum mulai. */

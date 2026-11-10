@@ -807,7 +807,7 @@ VIEWS.input = function () {
     const areaPic = B.users.filter(u => lbl[u.nik.toLowerCase()] !== undefined);
     const lain = B.users.filter(u => lbl[u.nik.toLowerCase()] === undefined);
     sel.innerHTML = (r.pic ? '<option value="">Otomatis — ' + esc(r.pic.nama) + '</option>' : '<option value="">— Pilih PIC —</option>') +
-      (areaPic.length ? '<optgroup label="PIC area ' + esc(a.nama) + '">' + areaPic.map(u => opt(u, lbl[u.nik.toLowerCase()])).join('') + '</optgroup>' : '') +
+      (areaPic.length ? '<optgroup label="Kandidat sesuai jadwal hari ini">' + areaPic.map(u => opt(u, lbl[u.nik.toLowerCase()])).join('') + '</optgroup>' : '') +
       (lain.length ? '<optgroup label="PIC lain">' + lain.map(u => opt(u)).join('') + '</optgroup>' : '');
     $('#iGanti').onclick = () => manual($('#iPicWrap').hidden);
     if (r.pic) {
@@ -816,7 +816,7 @@ VIEWS.input = function () {
       box.innerHTML = ic('check') + ' Tugas akan masuk ke <b>' + esc(r.pic.nama) + '</b><div class="small" style="margin-top:2px">' + esc(r.alasan) + ' · harus diterima dalam ' + r.slaRespon + ' jam' + (r.mulai ? ' sejak shift mulai' : '') + '</div>' +
         ((r.kandidat || []).length > 1 ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' + r.kandidat.map(k => '<span class="small" title="' + esc(k.label) + '">' + esc(k.nama) + ' ' + jadChip(k.status) + '</span>').join('') + '</div>' : '');
     } else {
-      box.className = 'note warn'; box.textContent = (r.alasan || 'Area ini belum punya PIC.') + ' Pilih PIC secara manual:';
+      box.className = 'note warn'; box.textContent = (r.alasan || 'Belum ada PIC.') + ' Pilih PIC secara manual:';
       manual(true);
     }
   };
