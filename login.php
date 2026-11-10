@@ -475,7 +475,7 @@ ob_start();
                 </div>
                 <div class="auth-swap hidden" id="brand5r">
                 <h2>Area kerja rapi, temuan tertutup tepat waktu.</h2>
-                <p>Lapor temuan 6S (6S + Aman/K3) dengan foto, PIC memperbaiki, auditor memverifikasi — skor tim dihitung otomatis.</p>
+                <p>Lapor temuan 6S (Sort, Set in Order, Shine, Standardize, Sustain, Safety) dengan foto, PIC memperbaiki, auditor memverifikasi — skor tim dihitung otomatis.</p>
                 <ul class="auth-feats">
                     <li>
                         <span class="material-symbols-outlined">photo_camera</span>

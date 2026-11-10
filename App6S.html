@@ -759,7 +759,7 @@ VIEWS.input = function () {
     '<div class="field"><label for="iArea">Area</label><select class="inp" id="iArea"><option value="">— Pilih area —</option>' +
     B.areas.map(a => '<option value="' + esc(a.id) + '"' + (a.id === F.areaId ? ' selected' : '') + '>' + esc(a.nama) + '</option>').join('') + '</select></div>' +
     '<div class="field"><label for="iLok">Lokasi detail</label><input class="inp" id="iLok" placeholder="contoh: Rak A-03, Meja 2, Mesin 1"><span class="hint">Lokasi yang sama + kategori sama dalam ' + B.config.hariBerulang + ' hari dihitung temuan berulang.</span></div>' +
-    '<div class="field"><label>Kategori 6S</label><div class="seg" id="iR">' + B.rList.map(r => '<button type="button" data-v="' + r + '">' + r + '</button>').join('') + '</div></div>' +
+    '<div class="field"><label>Kategori 6S</label><div class="seg" id="iR">' + B.rList.map(r => '<button type="button" data-v="' + esc(r) + '" title="' + esc((B.rInfo || {})[r] || '') + '">' + esc(r) + '</button>').join('') + '</div><span class="hint" id="iRInfo">Pilih salah satu dari 6S.</span></div>' +
     '<div class="field"><label>Tingkat</label><div class="seg" id="iT">' + B.tingkat.map(x => '<button type="button" data-v="' + x + '">' + x + ' · ' + B.config.deadline[x] + ' jam</button>').join('') + '</div></div>' +
     '<div class="field"><label for="iDesk">Deskripsi temuan</label><textarea class="inp" id="iDesk" placeholder="Jelaskan kondisi yang ditemukan"></textarea></div>' +
     '</div><div class="card">' +
@@ -801,6 +801,7 @@ VIEWS.input = function () {
   };
   const seg = (id, key) => $$('#' + id + ' button').forEach(b => b.addEventListener('click', () => {
     $$('#' + id + ' button').forEach(x => x.classList.remove('on')); b.classList.add('on'); F[key] = b.dataset.v; est();
+    if (id === 'iR') $('#iRInfo').textContent = (B.rInfo || {})[F.r] || '';
   }));
   seg('iR', 'r'); seg('iT', 'tingkat');
   $('#iArea').addEventListener('change', e => { F.areaId = e.target.value; setPic(); est(); });
@@ -1185,7 +1186,7 @@ VIEWS.admin = async function () {
       S.cekArea = aid;
       const list = (D.checklist && D.checklist[aid]) || [];
       h = '<div class="card"><div class="toolbar"><select class="inp grow" id="ckArea">' + D.areas.map(a => '<option value="' + esc(a.id) + '"' + (a.id === aid ? ' selected' : '') + '>' + esc(a.id + ' · ' + a.nama) + '</option>').join('') + '</select></div>' +
-        '<p class="small muted" style="margin-top:0">Satu baris satu item, format <b>Kategori | Item</b>. Kategori: ' + S.boot.rList.join(', ') + '.</p>' +
+        '<p class="small muted" style="margin-top:0">Satu baris satu item, format <b>Kategori | Item</b>. Kategori: ' + S.boot.rList.join(', ') + ' (nama lama Ringkas/Rapi/Resik/Rawat/Rajin juga diterima).</p>' +
         '<textarea class="inp" id="ckTxt" style="min-height:260px;font-family:ui-monospace,monospace;font-size:12.5px">' + esc(list.map(c => c.r + ' | ' + c.item).join('\n')) + '</textarea>' +
         '<div class="small muted" id="ckInfo" style="margin:8px 0 12px">' + list.length + ' item</div><button class="btn primary" id="ckSave">Simpan checklist</button></div>';
     } else {
@@ -1216,7 +1217,7 @@ VIEWS.admin = async function () {
       $('#ckArea').onchange = e => { S.cekArea = e.target.value; draw(); };
       $('#ckTxt').oninput = () => { $('#ckInfo').textContent = parseCk().length + ' item'; };
       $('#ckSave').onclick = async () => {
-        const rows = parseCk().map(x => ({ r: (S.boot.rList.find(r => r.toLowerCase() === x.r.toLowerCase()) || x.r), item: x.item }));
+        const rows = parseCk();   // nama kategori dinormalisasi di server
         try { const r = await call('apiSaveChecklist', S.token, S.cekArea, rows); if (!D.checklist || Array.isArray(D.checklist)) D.checklist = {}; D.checklist[S.cekArea] = r; toast('Checklist ' + S.cekArea + ' disimpan (' + r.length + ' item)'); draw(); }
         catch (e) { toast(e.message, true); }
       };

@@ -40,7 +40,7 @@ Sistem **Man Power Planning (MPP), Jadwal Kerja Mingguan, Absensi Shift, dan Int
 
 ### Monitoring 6S
 
-6S = 5R (Ringkas, Rapi, Resik, Rawat, Rajin) + **Aman** (K3 / Safety). Alamat lama `/5r` (termasuk QR yang sudah dicetak) otomatis dialihkan ke `/6s`.
+Kategori Lean 6S: **Sort** (Seiri), **Set in Order** (Seiton), **Shine** (Seiso), **Standardize** (Seiketsu), **Sustain** (Shitsuke), dan **Safety** (Keselamatan). Data 5R lama otomatis dikonversi (Ringkas → Sort, Rapi → Set in Order, Resik → Shine, Rawat → Standardize, Rajin → Sustain). Alamat lama `/5r` (termasuk QR yang sudah dicetak) otomatis dialihkan ke `/6s`.
 
 Satu akun untuk dua aplikasi: di halaman login (`/login`) pilih **HRIS** atau **Monitoring 6S**, lalu masuk dengan **username + password HRIS** yang sama. Dari sidebar HRIS ada tautan **Monitoring 6S**, dan dari 6S ada menu **Buka HRIS** — tanpa login ulang.
 

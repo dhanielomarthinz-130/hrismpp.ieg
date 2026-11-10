@@ -13,8 +13,28 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/foto.php';
 
 const R5_VERSION = '3.0';
-// 6S = 6S + Aman (K3 / Safety)
-const R5_LIST    = ['Ringkas', 'Rapi', 'Resik', 'Rawat', 'Rajin', 'Aman'];
+// Lean 6S: Sort, Set in Order, Shine, Standardize, Sustain, Safety
+const R5_LIST    = ['Sort', 'Set in Order', 'Shine', 'Standardize', 'Sustain', 'Safety'];
+/** Penjelasan singkat tiap S (ditampilkan di form temuan). */
+const R6_INFO = [
+    'Sort'         => 'Seiri · Pisahkan — singkirkan barang yang tidak diperlukan di area kerja',
+    'Set in Order' => 'Seiton · Tata — barang punya tempat & label, mudah diambil dan dikembalikan',
+    'Shine'        => 'Seiso · Bersihkan — area bebas kotoran, debu, dan sisa material',
+    'Standardize'  => 'Seiketsu · Standarisasi — aturan, jadwal, dan standar visual dijalankan konsisten',
+    'Sustain'      => 'Shitsuke · Budayakan — disiplin menjalankan 6S setiap hari',
+    'Safety'       => 'Keselamatan — cegah kecelakaan & cedera (APD, jalur evakuasi, APAR, alat aman)',
+];
+/** Kolom skor di tabel r5_audit (nama lama dipertahankan) untuk tiap S. */
+const R6_AUDIT_COL = ['Sort' => 'ringkas', 'Set in Order' => 'rapi', 'Shine' => 'resik', 'Standardize' => 'rawat', 'Sustain' => 'rajin', 'Safety' => 'aman'];
+/** Nama kategori lama (5R / Jepang) -> nama 6S, untuk konversi data & tempel checklist. */
+const R6_ALIAS = [
+    'ringkas' => 'Sort', 'seiri' => 'Sort', 'pisahkan' => 'Sort',
+    'rapi' => 'Set in Order', 'set in order' => 'Set in Order', 'seiton' => 'Set in Order', 'tata' => 'Set in Order',
+    'resik' => 'Shine', 'seiso' => 'Shine', 'bersihkan' => 'Shine',
+    'rawat' => 'Standardize', 'seiketsu' => 'Standardize', 'standarisasi' => 'Standardize', 'standardise' => 'Standardize',
+    'rajin' => 'Sustain', 'shitsuke' => 'Sustain', 'budayakan' => 'Sustain',
+    'aman' => 'Safety', 'k3' => 'Safety', 'keselamatan' => 'Safety',
+];
 const R5_TINGKAT = ['Minor', 'Mayor', 'Kritis'];
 const R5_ROLES   = ['Admin', 'Auditor', 'PIC', 'Viewer'];
 const R5_OPEN = 'Open', R5_WAIT = 'Menunggu Verifikasi', R5_REVISI = 'Revisi', R5_CLOSED = 'Closed', R5_BATAL = 'Batal', R5_KEBERATAN = 'Keberatan';
@@ -65,47 +85,47 @@ const R5_AREAS_SEED = [
 ];
 
 const R5_CHECK_UMUM = [
-    ['Ringkas', 'Tidak ada barang/alat yang tidak diperlukan di area'],
-    ['Rapi', 'Semua barang berada di lokasi yang ditentukan dan berlabel'],
-    ['Resik', 'Lantai/permukaan bersih dari debu, sampah, dan sisa lakban'],
-    ['Rawat', 'Standar visual (marka, label, foto kondisi ideal) terpasang dan terbaca'],
-    ['Rajin', 'Checklist kebersihan harian terisi lengkap'],
-    ['Aman', 'Jalur evakuasi, APAR, dan kotak P3K bebas hambatan, terlihat, dan mudah dijangkau'],
-    ['Aman', 'Pekerja memakai APD sesuai area (sepatu safety, sarung tangan, rompi bila perlu)'],
+    ['Sort', 'Tidak ada barang/alat yang tidak diperlukan di area'],
+    ['Set in Order', 'Semua barang berada di lokasi yang ditentukan dan berlabel'],
+    ['Shine', 'Lantai/permukaan bersih dari debu, sampah, dan sisa lakban'],
+    ['Standardize', 'Standar visual (marka, label, foto kondisi ideal) terpasang dan terbaca'],
+    ['Sustain', 'Checklist kebersihan harian terisi lengkap'],
+    ['Safety', 'Jalur evakuasi, APAR, dan kotak P3K bebas hambatan, terlihat, dan mudah dijangkau'],
+    ['Safety', 'Pekerja memakai APD sesuai area (sepatu safety, sarung tangan, rompi bila perlu)'],
 ];
 
-/** Item checklist Aman (K3) khusus per area bawaan. */
+/** Item checklist Safety khusus per area bawaan. */
 const R6_CHECK_AMAN = [
-    'A01' => [['Aman', 'Tumpukan palet stabil, tidak miring, dan tidak melebihi batas tinggi']],
-    'A02' => [['Aman', 'Barang berat disimpan di level rak bawah']],
-    'A03' => [['Aman', 'Cutter disimpan dengan mata pisau tertutup setelah dipakai']],
-    'A04' => [['Aman', 'Paket retur tidak menutupi jalur jalan dan pintu darurat']],
-    'A05' => [['Aman', 'Rak sample stabil dan tidak kelebihan beban']],
-    'A06' => [['Aman', 'Kabel tidak melintang di jalur kaki dan cutter tertutup setelah dipakai']],
-    'A07' => [['Aman', 'Kabel charger/lampu rekam tidak melintang dan stopkontak tidak bertumpuk']],
-    'A08' => [['Aman', 'Rak gimmick stabil, barang di level atas tidak berisiko jatuh']],
-    'A09' => [['Aman', 'Pelindung mesin terpasang dan tombol darurat berfungsi']],
+    'A01' => [['Safety', 'Tumpukan palet stabil, tidak miring, dan tidak melebihi batas tinggi']],
+    'A02' => [['Safety', 'Barang berat disimpan di level rak bawah']],
+    'A03' => [['Safety', 'Cutter disimpan dengan mata pisau tertutup setelah dipakai']],
+    'A04' => [['Safety', 'Paket retur tidak menutupi jalur jalan dan pintu darurat']],
+    'A05' => [['Safety', 'Rak sample stabil dan tidak kelebihan beban']],
+    'A06' => [['Safety', 'Kabel tidak melintang di jalur kaki dan cutter tertutup setelah dipakai']],
+    'A07' => [['Safety', 'Kabel charger/lampu rekam tidak melintang dan stopkontak tidak bertumpuk']],
+    'A08' => [['Safety', 'Rak gimmick stabil, barang di level atas tidak berisiko jatuh']],
+    'A09' => [['Safety', 'Pelindung mesin terpasang dan tombol darurat berfungsi']],
 ];
 
 const R5_CHECK_KHUSUS = [
-    'A01' => [['Ringkas', 'Jalur hand pallet/forklift bebas hambatan'], ['Rapi', 'Palet tersusun sesuai marka lantai, tidak melewati garis'],
-              ['Resik', 'Tidak ada stretch film/kardus bekas tercecer'], ['Rawat', 'Rak tidak rusak/bengkok dan label lokasi rak lengkap']],
-    'A02' => [['Ringkas', 'Tidak ada campur SKU dalam satu bin'], ['Rapi', 'Label lokasi Bin & PL lengkap dan sesuai isi'],
-              ['Resik', 'Bin bersih dari debu dan sobekan kardus'], ['Rawat', 'Tangga/step ladder dalam kondisi baik']],
-    'A03' => [['Ringkas', 'Bahan kemas di meja hanya untuk kebutuhan shift berjalan'], ['Rapi', 'Lakban, cutter, printer label ada di posisi standar'],
-              ['Resik', 'Sisa potongan kardus/bubble dibuang tiap akhir shift'], ['Rawat', 'Alat kemas bersih dan berfungsi']],
-    'A04' => [['Ringkas', 'Tidak ada paket retur tertahan melewati SLA di lantai'], ['Rapi', 'Paket retur ditempatkan per ekspedisi/status'],
-              ['Rapi', 'Zona karantina/barang rusak terpisah dan berlabel'], ['Resik', 'Tidak ada sisa plastik/kardus retur tercecer']],
-    'A05' => [['Ringkas', 'Tidak ada sample tanpa identitas'], ['Rapi', 'Sample dikelompokkan per brand/campaign dan berlabel'],
-              ['Resik', 'Rak dan lantai bersih'], ['Rawat', 'Stok sample sesuai daftar']],
-    'A06' => [['Ringkas', 'Meja hanya berisi barang retur yang sedang diproses'], ['Rapi', 'Cutter, scanner, kamera di posisi standar'],
-              ['Resik', 'Meja bersih dari sisa lakban/plastik'], ['Rawat', 'Kabel scanner/kamera rapi dan berfungsi']],
-    'A07' => [['Ringkas', 'Meja hanya berisi order KOL yang sedang diproses'], ['Rapi', 'Alat rekam video & packing di posisi standar'],
-              ['Resik', 'Meja bersih dari sisa lakban/plastik'], ['Rawat', 'Kamera/HP rekam berfungsi, kabel rapi']],
-    'A08' => [['Ringkas', 'Tidak ada gimmick rusak/kedaluwarsa di rak'], ['Rapi', 'Gimmick tersusun per brand/jenis dan berlabel'],
-              ['Resik', 'Rak bebas debu'], ['Rawat', 'FIFO berjalan, label tanggal terlihat']],
-    'A09' => [['Ringkas', 'Tidak ada sampah liner/backing stiker di sekitar mesin'], ['Rapi', 'Gimmick belum/sudah tempel dipisah dan berlabel'],
-              ['Resik', 'Mesin bersih dari sisa lem/stiker'], ['Rawat', 'Pengecekan harian mesin terisi']],
+    'A01' => [['Sort', 'Jalur hand pallet/forklift bebas hambatan'], ['Set in Order', 'Palet tersusun sesuai marka lantai, tidak melewati garis'],
+              ['Shine', 'Tidak ada stretch film/kardus bekas tercecer'], ['Standardize', 'Rak tidak rusak/bengkok dan label lokasi rak lengkap']],
+    'A02' => [['Sort', 'Tidak ada campur SKU dalam satu bin'], ['Set in Order', 'Label lokasi Bin & PL lengkap dan sesuai isi'],
+              ['Shine', 'Bin bersih dari debu dan sobekan kardus'], ['Standardize', 'Tangga/step ladder dalam kondisi baik']],
+    'A03' => [['Sort', 'Bahan kemas di meja hanya untuk kebutuhan shift berjalan'], ['Set in Order', 'Lakban, cutter, printer label ada di posisi standar'],
+              ['Shine', 'Sisa potongan kardus/bubble dibuang tiap akhir shift'], ['Standardize', 'Alat kemas bersih dan berfungsi']],
+    'A04' => [['Sort', 'Tidak ada paket retur tertahan melewati SLA di lantai'], ['Set in Order', 'Paket retur ditempatkan per ekspedisi/status'],
+              ['Set in Order', 'Zona karantina/barang rusak terpisah dan berlabel'], ['Shine', 'Tidak ada sisa plastik/kardus retur tercecer']],
+    'A05' => [['Sort', 'Tidak ada sample tanpa identitas'], ['Set in Order', 'Sample dikelompokkan per brand/campaign dan berlabel'],
+              ['Shine', 'Rak dan lantai bersih'], ['Standardize', 'Stok sample sesuai daftar']],
+    'A06' => [['Sort', 'Meja hanya berisi barang retur yang sedang diproses'], ['Set in Order', 'Cutter, scanner, kamera di posisi standar'],
+              ['Shine', 'Meja bersih dari sisa lakban/plastik'], ['Standardize', 'Kabel scanner/kamera rapi dan berfungsi']],
+    'A07' => [['Sort', 'Meja hanya berisi order KOL yang sedang diproses'], ['Set in Order', 'Alat rekam video & packing di posisi standar'],
+              ['Shine', 'Meja bersih dari sisa lakban/plastik'], ['Standardize', 'Kamera/HP rekam berfungsi, kabel rapi']],
+    'A08' => [['Sort', 'Tidak ada gimmick rusak/kedaluwarsa di rak'], ['Set in Order', 'Gimmick tersusun per brand/jenis dan berlabel'],
+              ['Shine', 'Rak bebas debu'], ['Standardize', 'FIFO berjalan, label tanggal terlihat']],
+    'A09' => [['Sort', 'Tidak ada sampah liner/backing stiker di sekitar mesin'], ['Set in Order', 'Gimmick belum/sudah tempel dipisah dan berlabel'],
+              ['Shine', 'Mesin bersih dari sisa lem/stiker'], ['Standardize', 'Pengecekan harian mesin terisi']],
 ];
 
 /* =====================================================================
@@ -159,7 +179,7 @@ function r5_init(): void {
     $pdo->exec("CREATE TABLE IF NOT EXISTS r5_audit_detail (
         id $autoInc, audit_id VARCHAR(40) NOT NULL, kategori_r VARCHAR(20) NOT NULL, item VARCHAR(255) NULL,
         skor INT NOT NULL DEFAULT 0, catatan TEXT NULL)");
-    // Kolom tambahan v3.0 (6S): skor audit kategori Aman
+    // Kolom tambahan v3.0 (6S): skor audit Safety (kolom 'aman')
     $acols = $isSqlite
         ? array_column($pdo->query("PRAGMA table_info(r5_audit)")->fetchAll(), 'name')
         : array_column($pdo->query("SHOW COLUMNS FROM r5_audit")->fetchAll(), 'Field');
@@ -198,18 +218,29 @@ function r5_init(): void {
         });
     }
 
-    // 6S -> 6S: area yang belum punya checklist Aman mendapat item Aman umum (+ khusus area bawaan)
+    // 5R -> 6S: nama kategori lama (Ringkas, Rapi, Resik, Rawat, Rajin, Aman) diganti nama 6S
+    if (!(int)db_val("SELECT COUNT(*) FROM settings WHERE key_name = 'migr_r6s_nama'")) {
+        db_transaction(function () {
+            $map = ['Ringkas' => 'Sort', 'Rapi' => 'Set in Order', 'Resik' => 'Shine', 'Rawat' => 'Standardize', 'Rajin' => 'Sustain', 'Aman' => 'Safety'];
+            foreach (['r5_temuan', 'r5_checklist', 'r5_audit_detail'] as $tbl) {
+                foreach ($map as $lama => $baru) db_query("UPDATE $tbl SET kategori_r = ? WHERE kategori_r = ?", [$baru, $lama]);
+            }
+            db_insert('settings', ['key_name' => 'migr_r6s_nama', 'value' => '1', 'ket' => 'Kategori 5R diganti nama 6S']);
+        });
+    }
+
+    // Area yang belum punya checklist Safety mendapat item Safety umum (+ khusus area bawaan)
     if (!(int)db_val("SELECT COUNT(*) FROM settings WHERE key_name = 'migr_r6s_aman'")) {
         db_transaction(function () {
-            $umum = array_values(array_filter(R5_CHECK_UMUM, fn($c) => $c[0] === 'Aman'));
+            $umum = array_values(array_filter(R5_CHECK_UMUM, fn($c) => $c[0] === 'Safety'));
             foreach (db_all("SELECT area_id FROM r5_area") as $a) {
                 $id = $a['area_id'];
-                if ((int)db_val("SELECT COUNT(*) FROM r5_checklist WHERE area_id = ? AND kategori_r = 'Aman'", [$id])) continue;
+                if ((int)db_val("SELECT COUNT(*) FROM r5_checklist WHERE area_id = ? AND kategori_r = 'Safety'", [$id])) continue;
                 foreach (array_merge($umum, R6_CHECK_AMAN[$id] ?? []) as $c) {
                     db_insert('r5_checklist', ['area_id' => $id, 'kategori_r' => $c[0], 'item' => $c[1], 'aktif' => 'Y']);
                 }
             }
-            db_insert('settings', ['key_name' => 'migr_r6s_aman', 'value' => '1', 'ket' => 'Monitoring 5R menjadi 6S (kategori Aman)']);
+            db_insert('settings', ['key_name' => 'migr_r6s_aman', 'value' => '1', 'ket' => 'Monitoring 6S: item checklist Safety']);
         });
     }
 }
@@ -219,6 +250,12 @@ function r5_init(): void {
  * ===================================================================== */
 function r5_str($v): string { return $v === null ? '' : trim((string)$v); }
 function r5_norm($s): string { return preg_replace('/\s+/', ' ', mb_strtolower(r5_str($s))); }
+/** Normalisasi nama kategori: 'set in order', 'Rapi', 'Seiton' -> 'Set in Order'. */
+function r6_kategori(string $r): string {
+    $k = r5_norm($r);
+    foreach (R5_LIST as $x) if (mb_strtolower($x) === $k) return $x;
+    return R6_ALIAS[$k] ?? $r;
+}
 function r5_round1($n): float { return round((float)$n * 10) / 10; }
 function r5_now(): int { return (int)floor(microtime(true) * 1000); }
 function r5_fmt(?int $ms, string $f): string {
@@ -422,7 +459,7 @@ function apiBootstrap($token): array {
         'areas' => $areas,
         // Pilihan PIC: hanya Leader / PIC IEG
         'users' => array_values(array_map(fn($x) => r5_uout($x, $tm), array_filter($users, fn($x) => $x['pic']))),
-        'rList' => R5_LIST, 'tingkat' => R5_TINGKAT, 'roles' => R5_ROLES,
+        'rList' => R5_LIST, 'rInfo' => R6_INFO, 'tingkat' => R5_TINGKAT, 'roles' => R5_ROLES,
         'config' => [
             'skorAwal' => r5_num('SKOR_AWAL_AREA', 100),
             'deadline' => ['Minor' => r5_num('DEADLINE_JAM_MINOR', 72), 'Mayor' => r5_num('DEADLINE_JAM_MAYOR', 48), 'Kritis' => r5_num('DEADLINE_JAM_KRITIS', 24)],
@@ -1046,7 +1083,7 @@ function apiSaveAudit($token, $d): array {
     $row = ['audit_id' => $id, 'tanggal' => $now, 'area_id' => $area['area_id'], 'nama_area' => $area['nama'],
             'auditor_nik' => $u['nik'], 'auditor_nama' => $u['nama'],
             'total_persen' => r5_round1($tot / (count($items) * 5) * 100), 'catatan' => r5_str($d['catatan'] ?? '')];
-    foreach (R5_LIST as $r) $row[strtolower($r)] = isset($perR[$r]) ? r5_round1($perR[$r]['s'] / ($perR[$r]['n'] * 5) * 100) : null;
+    foreach (R5_LIST as $r) $row[R6_AUDIT_COL[$r]] = isset($perR[$r]) ? r5_round1($perR[$r]['s'] / ($perR[$r]['n'] * 5) * 100) : null;
     db_transaction(function () use ($row, $items, $id) {
         db_insert('r5_audit', $row);
         foreach ($items as $i) {
@@ -1065,7 +1102,7 @@ function apiListAudit($token, $bulan): array {
         if (r5_bulan((int)$a['tanggal']) !== $bulan) continue;
         $o = ['id' => $a['audit_id'], 'tanggal' => (int)$a['tanggal'], 'areaId' => $a['area_id'], 'area' => r5_str($a['nama_area']),
               'auditor' => r5_str($a['auditor_nama']), 'total' => (float)$a['total_persen'], 'catatan' => r5_str($a['catatan'])];
-        foreach (R5_LIST as $r) { $v = $a[strtolower($r)]; $o[$r] = $v === null || $v === '' ? null : (float)$v; }
+        foreach (R5_LIST as $r) { $v = $a[R6_AUDIT_COL[$r]] ?? null; $o[$r] = $v === null || $v === '' ? null : (float)$v; }
         $out[] = $o;
     }
     return $out;
@@ -1157,6 +1194,7 @@ function apiSaveChecklist($token, $areaId, $items): array {
         if (!is_array($i)) continue;
         $r = r5_str($i['r'] ?? ''); $item = r5_str($i['item'] ?? '');
         if ($item === '') continue;
+        $r = r6_kategori($r);
         if (!in_array($r, R5_LIST, true)) throw new RuntimeException('Kategori "' . $r . '" tidak dikenal. Pakai: ' . implode(', ', R5_LIST) . '.');
         $clean[] = [$r, mb_substr($item, 0, 255)];
     }
