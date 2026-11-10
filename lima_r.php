@@ -12,7 +12,7 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/foto.php';
 
-const R5_VERSION = '3.3';
+const R5_VERSION = '3.4';
 // Lean 6S: Sort, Set in Order, Shine, Standardize, Sustain, Safety
 const R5_LIST    = ['Sort', 'Set in Order', 'Shine', 'Standardize', 'Sustain', 'Safety'];
 /** Penjelasan singkat tiap S (ditampilkan di form temuan). */
@@ -81,6 +81,7 @@ const R5_DEFAULT_CONFIG = [
     ['POTONG_TIDAK_RESPON', 1, 'Potongan poin PIC bila tugas tidak diterima sampai batas respon (tugas dialihkan otomatis ke PIC yang bertugas)'],
     ['KPI_BOBOT_RESPON', 10, 'Bobot KPI: tugas diterima PIC sebelum batas respon'],
     ['POIN_LAPOR_PIC', 2, 'Poin untuk PIC yang menemukan temuan di area PIC lain (dikembalikan bila temuan batal)'],
+    ['TUGAS_OTOMATIS', 0, 'Pembagian tugas: 0 = PIC mana pun mengambil sendiri dari Tugas tersedia (satu temuan satu PIC), 1 = otomatis ke PIC area yang bertugas sesuai shift'],
     ['FAKTOR_POTONG_PIC', 1, 'Pengali potongan temuan untuk PIC yang bertanggung jawab atas area (1 = sama dengan potongan tim, 0 = PIC tidak dipotong)'],
 ];
 
@@ -472,6 +473,9 @@ function r6_pindah_potongan(array $t, string $nikBaru, string $namaBaru, int $no
     r5_log_poin('PIC', $nikBaru, $namaBaru, $sum, $t['id'], 'Potongan temuan dialihkan dari ' . r5_str($t['pic_nama']), $now);
 }
 
+/** true = tugas otomatis ke PIC area yang bertugas; false = PIC mana pun mengambil sendiri (bawaan). */
+function r6_otomatis(): bool { return r5_num('TUGAS_OTOMATIS', 0) >= 1; }
+
 /** Batas respon PIC: SLA dihitung sejak sekarang, atau sejak shift PIC mulai bila shift-nya belum mulai. */
 function r6_batas_respon(?int $mulaiShift, int $now): int {
     $base = ($mulaiShift && $mulaiShift > $now) ? $mulaiShift : $now;
@@ -495,7 +499,8 @@ function r6_eskalasi(): void {
     if ($done) return;
     $done = true;
     $now = r5_now();
-    $rows = db_all("SELECT * FROM r5_temuan WHERE status = ? AND tgl_terima IS NULL AND batas_respon IS NOT NULL AND batas_respon < ?", [R5_OPEN, $now]);
+    $rows = db_all("SELECT * FROM r5_temuan WHERE status = ? AND tgl_terima IS NULL AND batas_respon IS NOT NULL AND batas_respon < ?
+                    AND pic_nik IS NOT NULL AND pic_nik <> ''", [R5_OPEN, $now]);
     foreach ($rows as $t0) {
         db_transaction(function () use ($t0, $now) {
             $t = r5_find_temuan($t0['id']);
@@ -757,6 +762,7 @@ function apiBootstrap($token): array {
             'kpiTarget' => r5_num('KPI_TARGET', 85),
             'slaRespon' => r5_num('SLA_RESPON_JAM', 4), 'targetMaks' => r5_num('TARGET_MAKS_JAM', 168),
             'poinLaporPic' => r5_num('POIN_LAPOR_PIC', 2), 'faktorPotongPic' => r5_num('FAKTOR_POTONG_PIC', 1),
+            'tugasOtomatis' => r6_otomatis(),
         ],
         'access' => r5_access_for($u),
         'bulanIni' => r5_bulan(r5_now()),
@@ -855,8 +861,11 @@ function apiCreateTemuan($token, $d): array {
     if (!in_array($ting, R5_TINGKAT, true)) throw new RuntimeException('Pilih tingkat temuan.');
     if (r5_str($d['deskripsi'] ?? '') === '') throw new RuntimeException('Deskripsi temuan wajib diisi.');
     if (empty($d['foto'])) throw new RuntimeException('Foto sebelum (bukti temuan) wajib diunggah.');
-    // PIC otomatis: Leader / PIC area yang bertugas sesuai jadwal shift HRIS (pelapor boleh memilih PIC lain)
     $now0 = r5_now();
+    $otomatis = r6_otomatis();
+    $pic = null; $tugas = ['ket' => '', 'mulai' => null];
+    if ($otomatis) {
+    // PIC otomatis: Leader / PIC area yang bertugas sesuai jadwal shift HRIS (pelapor boleh memilih PIC lain)
     $auto = r6_pic_bertugas($area['area_id'], $now0);
     $pilih = r5_str($d['picNik'] ?? '');
     if ($pilih === '' && !$auto['pic']) throw new RuntimeException('Area ini belum punya PIC. Atur di Master Data → Pengguna (Area tanggung jawab).');
@@ -869,10 +878,11 @@ function apiCreateTemuan($token, $d): array {
         $st = r6_jadwal_status($pic['operator_id'], $now0);
         $tugas = ['ket' => 'Dipilih pelapor · ' . $st['label'], 'mulai' => $st['status'] === 'nanti' ? $st['mulai'] : null];
     }
+    }
 
     $fotoId = foto_save((string)$d['foto'], R5_FOTO_DIM, true);
     try {
-        return db_transaction(function () use ($u, $d, $area, $kat, $ting, $pic, $fotoId, $tugas) {
+        return db_transaction(function () use ($u, $d, $area, $kat, $ting, $pic, $fotoId, $tugas, $otomatis) {
             $now = r5_now();
             $id = r5_next_id($now);
             $tm = r5_timmap();
@@ -891,17 +901,25 @@ function apiCreateTemuan($token, $d): array {
                 'lokasi' => mb_substr(r5_str($d['lokasi'] ?? ''), 0, 200), 'kategori_r' => $kat, 'tingkat' => $ting,
                 'deskripsi' => r5_str($d['deskripsi']), 'foto_before' => $fotoId,
                 'pelapor_nik' => $u['nik'], 'pelapor_nama' => $u['nama'], 'mandiri' => $mandiri ? 'Y' : 'N',
-                'berulang' => $berulang ? 'Y' : 'N', 'pic_nik' => $pic['nik'], 'pic_nama' => $pic['nama'],
+                'berulang' => $berulang ? 'Y' : 'N', 'pic_nik' => $pic ? $pic['nik'] : '', 'pic_nama' => $pic ? $pic['nama'] : '',
                 'deadline' => $deadline, 'status' => R5_OPEN, 'poin_area' => $potong, 'poin_pic' => null,
                 'revisi' => 0, 'pelapor_area_id' => r5_str($u['area_id']),
                 // PIC menerima tugas & menentukan target; sampai itu batas standar yang berlaku
                 'deadline_standar' => $deadline, 'tgl_terima' => null, 'batas_respon' => r6_batas_respon($tugas['mulai'], $now),
-                'respon_lewat' => 'N', 'riwayat' => r6_riwayat(null, 'Ditugaskan', $u['nama'], 'Ke ' . $pic['nama'] . ' · ' . $tugas['ket'], $now),
+                'respon_lewat' => 'N', 'riwayat' => $pic
+                    ? r6_riwayat(null, 'Ditugaskan', $u['nama'], 'Ke ' . $pic['nama'] . ' · ' . $tugas['ket'], $now)
+                    : r6_riwayat(null, 'Menunggu diambil', 'Sistem', 'Masuk Tugas tersedia · Leader / PIC mana pun bisa mengambil & memprosesnya', $now),
             ];
             db_insert('r5_temuan', $row);
             if ($potong != 0) {
                 r5_log_poin('AREA', $area['area_id'], $area['nama'], $potong, $id,
                     'Temuan ' . implode(', ', $ket) . ($timPelapor !== '' && !$mandiri ? ' · dilaporkan tim ' . $timPelapor : ''), $now);
+            }
+            $bonusLapor = r5_num('POIN_LAPOR_PIC', 2);
+            if (!$otomatis) {
+                // Ambil bebas: tidak ada PIC area; penemu (Leader / PIC) mendapat poin
+                if ($bonusLapor > 0 && !empty($u['pic'])) r5_log_poin('PIC', $u['nik'], $u['nama'], $bonusLapor, $id, 'Menemukan temuan di ' . $area['nama'], $now);
+                return r5_tout(r5_find_temuan($id), $tm);
             }
             // Poin per PIC: PIC penanggung jawab area dipotong, PIC penemu dari area lain mendapat poin
             $pelArea = r6_area_pic_map()[mb_strtolower($u['nik'])] ?? [];
@@ -914,7 +932,6 @@ function apiCreateTemuan($token, $d): array {
                 r5_log_poin('PIC', $pic['nik'], $pic['nama'], $potPic, $id,
                     'Temuan ' . $ting . ($berulang ? ' berulang' : '') . ' di ' . $area['nama'] . ($mandiriPic ? ' (lapor mandiri)' : ' · ditemukan ' . $u['nama']), $now);
             }
-            $bonusLapor = r5_num('POIN_LAPOR_PIC', 2);
             if (!$mandiriPic && $bonusLapor > 0 && !empty($u['pic'])) {
                 r5_log_poin('PIC', $u['nik'], $u['nama'], $bonusLapor, $id, 'Menemukan temuan di ' . $area['nama'] . ' (PIC ' . $pic['nama'] . ')', $now);
             }
@@ -971,23 +988,75 @@ function apiTerimaTugas($token, $id, $target, $alasan): array {
     return db_transaction(function () use ($u, $id, $target, $alasan) {
         $t = r5_find_temuan($id);
         if (!$t) throw new RuntimeException('Temuan tidak ditemukan.');
-        if (mb_strtolower(r5_str($t['pic_nik'])) !== mb_strtolower($u['nik']) && $u['role'] !== 'Admin')
-            throw new RuntimeException('Hanya PIC temuan ini yang bisa menerima tugas.');
-        if ($t['status'] !== R5_OPEN || $t['tgl_terima'] !== null) throw new RuntimeException('Tugas ini sudah diterima.');
         $now = r5_now();
+        if (r5_str($t['pic_nik']) === '') return r6_ambil($t, $u, (int)$target, r5_str($alasan), $now);
+        if (mb_strtolower(r5_str($t['pic_nik'])) !== mb_strtolower($u['nik']) && $u['role'] !== 'Admin')
+            throw new RuntimeException('Sedang diproses oleh ' . r5_str($t['pic_nama']) . '.');
+        if ($t['status'] !== R5_OPEN || $t['tgl_terima'] !== null) throw new RuntimeException('Tugas ini sudah diterima.');
         $target = (int)$target;
-        $std = (int)($t['deadline_standar'] ?: $t['deadline']);
-        $maks = $t['tingkat'] === 'Kritis' ? $std : max($std, (int)$t['tanggal'] + (int)(r5_num('TARGET_MAKS_JAM', 168) * 3600000));
-        $maks = max($maks, $now + 2 * 3600000);   // batas standar sudah lewat: tetap bisa diterima dengan target terdekat (alasan wajib)
         $alasan = r5_str($alasan);
-        if ($target < $now + 30 * 60000) throw new RuntimeException('Target selesai minimal 30 menit dari sekarang.');
-        if ($target > $maks + 60000) throw new RuntimeException('Target terlalu lama. Paling lambat ' . r5_fmt($maks, 'd/m/Y H:i') . ' WIB' . ($t['tingkat'] === 'Kritis' ? ' (temuan Kritis).' : '.'));
-        if ($target > $std + 60000 && $alasan === '') throw new RuntimeException('Target melewati batas standar (' . r5_fmt($std, 'd/m H:i') . '). Tulis alasannya, mis. pekerjaan lain yang sedang dikerjakan.');
+        r6_cek_target($t, $target, $alasan, $now);
         $telat = $t['batas_respon'] && $now > (int)$t['batas_respon'];
         db_update('r5_temuan', ['deadline' => $target, 'tgl_terima' => $now, 'target_alasan' => $alasan,
             'respon_lewat' => ($telat || $t['respon_lewat'] === 'Y') ? 'Y' : 'N',
             'riwayat' => r6_riwayat($t['riwayat'], 'Diterima', $u['nama'], 'Target selesai ' . r5_fmt($target, 'd/m H:i') . ($alasan !== '' ? ' · ' . $alasan : ''), $now)],
             'id = ?', [$t['id']]);
+        return r5_tout(r5_find_temuan($id), r5_timmap());
+    });
+}
+
+/** Validasi target selesai yang ditentukan PIC (maks. TARGET_MAKS_JAM; Kritis maks. batas standar). */
+function r6_cek_target(array $t, int $target, string $alasan, int $now): void {
+    $std = (int)($t['deadline_standar'] ?: $t['deadline']);
+    $maks = $t['tingkat'] === 'Kritis' ? $std : max($std, (int)$t['tanggal'] + (int)(r5_num('TARGET_MAKS_JAM', 168) * 3600000));
+    $maks = max($maks, $now + 2 * 3600000);   // batas standar sudah lewat: tetap bisa diambil dengan target terdekat (alasan wajib)
+    if ($target < $now + 30 * 60000) throw new RuntimeException('Target selesai minimal 30 menit dari sekarang.');
+    if ($target > $maks + 60000) throw new RuntimeException('Target terlalu lama. Paling lambat ' . r5_fmt($maks, 'd/m/Y H:i') . ' WIB' . ($t['tingkat'] === 'Kritis' ? ' (temuan Kritis).' : '.'));
+    if ($target > $std + 60000 && $alasan === '') throw new RuntimeException('Target melewati batas standar (' . r5_fmt($std, 'd/m H:i') . '). Tulis alasannya, mis. pekerjaan lain yang sedang dikerjakan.');
+}
+
+/** Leader / PIC mengambil temuan yang belum diproses siapa pun. Hanya satu orang yang bisa mengambil (dikunci). */
+function r6_ambil(array $t, array $u, int $target, string $alasan, int $now): array {
+    if (empty($u['pic']) && $u['role'] !== 'Admin') throw new RuntimeException('Hanya Leader / PIC IEG yang bisa mengambil & memproses temuan.');
+    if (!in_array($t['status'], [R5_OPEN, R5_REVISI], true)) throw new RuntimeException('Temuan ini sudah tidak bisa diambil (status ' . $t['status'] . ').');
+    $upd = ['pic_nik' => $u['nik'], 'pic_nama' => $u['nama'], 'tgl_terima' => $now, 'respon_lewat' => 'N'];
+    if ($t['status'] === R5_OPEN) {
+        r6_cek_target($t, $target, $alasan, $now);
+        $upd += ['deadline' => $target, 'target_alasan' => $alasan];
+        $ket = 'Target selesai ' . r5_fmt($target, 'd/m H:i') . ($alasan !== '' ? ' · ' . $alasan : '');
+    } else {
+        $ket = 'Melanjutkan revisi · target ' . r5_fmt((int)$t['deadline'], 'd/m H:i');
+    }
+    $upd['riwayat'] = r6_riwayat($t['riwayat'], 'Diambil', $u['nama'], $ket, $now);
+    // Dikunci: hanya berhasil bila belum ada yang mengambil
+    if (db_update('r5_temuan', $upd, "id = ? AND (pic_nik IS NULL OR pic_nik = '')", [$t['id']]) !== 1) {
+        $x = r5_find_temuan($t['id']);
+        throw new RuntimeException('Temuan ini baru saja diambil oleh ' . r5_str($x['pic_nama'] ?? '') . '.');
+    }
+    return r5_tout(r5_find_temuan($t['id']), r5_timmap());
+}
+
+/** Batalkan proses: PIC melepas temuan (alasan wajib, tercatat di riwayat) dan temuan kembali ke Tugas tersedia. */
+function apiLepasTugas($token, $id, $alasan): array {
+    $u = r5_auth($token);
+    if (r6_otomatis()) throw new RuntimeException('Mode tugas otomatis aktif: gunakan Alihkan ke PIC lain.');
+    $acc = r5_access_for($u);
+    $boleh = fn($m) => in_array($m, $acc['menus'], true) && !in_array($m, $acc['ro'], true);
+    $alasan = r5_str($alasan);
+    if ($alasan === '') throw new RuntimeException('Tulis keterangan kenapa proses dibatalkan.');
+    return db_transaction(function () use ($u, $id, $alasan, $boleh) {
+        $t = r5_find_temuan($id);
+        if (!$t) throw new RuntimeException('Temuan tidak ditemukan.');
+        if (r5_str($t['pic_nik']) === '') throw new RuntimeException('Temuan ini belum diambil siapa pun.');
+        if (!in_array($t['status'], [R5_OPEN, R5_REVISI], true)) throw new RuntimeException('Hanya temuan yang belum diperbaiki yang bisa dibatalkan prosesnya.');
+        $isPic = mb_strtolower(r5_str($t['pic_nik'])) === mb_strtolower($u['nik']);
+        if (!(($isPic && $boleh('tugas')) || $boleh('verif') || $boleh('admin'))) throw new RuntimeException('Hanya PIC yang memproses, auditor, atau admin yang bisa membatalkan proses.');
+        $now = r5_now();
+        $upd = ['pic_nik' => '', 'pic_nama' => '', 'tgl_terima' => null, 'target_alasan' => '', 'respon_lewat' => 'N',
+                'batas_respon' => r6_batas_respon(null, $now),
+                'riwayat' => r6_riwayat($t['riwayat'], 'Proses dibatalkan', $u['nama'], ($isPic ? '' : 'Proses ' . r5_str($t['pic_nama']) . ' · ') . 'Keterangan: ' . $alasan . ' · kembali ke Tugas tersedia', $now)];
+        if ($t['status'] === R5_OPEN) $upd['deadline'] = (int)($t['deadline_standar'] ?: $t['deadline']);
+        db_update('r5_temuan', $upd, 'id = ?', [$t['id']]);
         return r5_tout(r5_find_temuan($id), r5_timmap());
     });
 }
@@ -1034,6 +1103,7 @@ function apiListTemuan($token, $f): array {
     $st = (string)($f['status'] ?? '');
     $rows = array_filter($rows, function ($t) use ($f, $q, $me, $scope, $st) {
         if ($scope === 'mine' && (mb_strtolower($t['picNik']) !== $me || $t['status'] === R5_BATAL)) return false;
+        if ($scope === 'tersedia' && ($t['picNik'] !== '' || !in_array($t['status'], [R5_OPEN, R5_REVISI], true))) return false;
         if ($scope === 'verifikasi' && $t['status'] !== R5_WAIT && $t['status'] !== R5_KEBERATAN) return false;
         if (!empty($f['bulan']) && (!$t['tanggal'] || r5_bulan($t['tanggal']) !== $f['bulan'])) return false;
         if (!empty($f['areaId']) && $t['areaId'] !== $f['areaId']) return false;
@@ -1060,17 +1130,28 @@ function apiSubmitPerbaikan($token, $id, $catatan, $foto): array {
     if (empty($foto)) throw new RuntimeException('Foto sesudah perbaikan wajib diunggah.');
     $t0 = r5_find_temuan($id);
     if (!$t0) throw new RuntimeException('Temuan tidak ditemukan.');
-    if (mb_strtolower(r5_str($t0['pic_nik'])) !== mb_strtolower($u['nik']) && $u['role'] !== 'Admin')
-        throw new RuntimeException('Hanya PIC temuan ini yang bisa mengirim perbaikan.');
+    $kosong = r5_str($t0['pic_nik']) === '';
+    if ($kosong && empty($u['pic']) && $u['role'] !== 'Admin') throw new RuntimeException('Hanya Leader / PIC IEG yang bisa memproses temuan.');
+    if (!$kosong && mb_strtolower(r5_str($t0['pic_nik'])) !== mb_strtolower($u['nik']) && $u['role'] !== 'Admin')
+        throw new RuntimeException('Sedang diproses oleh ' . r5_str($t0['pic_nama']) . '.');
     if (!in_array($t0['status'], [R5_OPEN, R5_REVISI], true)) throw new RuntimeException('Status temuan sudah ' . $t0['status'] . '.');
     $fotoId = foto_save((string)$foto, R5_FOTO_DIM, true);
     try {
-        return db_transaction(function () use ($id, $catatan, $fotoId) {
+        return db_transaction(function () use ($id, $catatan, $fotoId, $u) {
             $t = r5_find_temuan($id);
             if (!in_array($t['status'], [R5_OPEN, R5_REVISI], true)) throw new RuntimeException('Status temuan sudah ' . $t['status'] . '.');
             $old = r5_str($t['foto_after']);
             $now = r5_now();
             $upd = ['foto_after' => $fotoId, 'catatan_perbaikan' => r5_str($catatan), 'tgl_perbaikan' => $now, 'status' => R5_WAIT];
+            if (r5_str($t['pic_nik']) === '') {   // belum diambil: langsung diperbaiki = diambil oleh pengirim
+                $upd += ['pic_nik' => $u['nik'], 'pic_nama' => $u['nama'], 'tgl_terima' => $now, 'respon_lewat' => 'N',
+                         'riwayat' => r6_riwayat($t['riwayat'], 'Diambil', $u['nama'], 'Langsung diperbaiki', $now)];
+                if (db_update('r5_temuan', $upd, "id = ? AND (pic_nik IS NULL OR pic_nik = '')", [$t['id']]) !== 1) {
+                    throw new RuntimeException('Temuan ini baru saja diambil oleh PIC lain.');
+                }
+                if ($old !== '') foto_delete_file($old);
+                return r5_tout(r5_find_temuan($id), r5_timmap());
+            }
             if ($t['tgl_terima'] === null) {   // langsung diperbaiki tanpa menentukan target = menerima dengan batas standar
                 $upd['tgl_terima'] = $now;
                 if ($t['batas_respon'] && $now > (int)$t['batas_respon']) $upd['respon_lewat'] = 'Y';
@@ -1373,7 +1454,7 @@ function r5_kpi_rows(string $bulan, ?string $onlyNik = null): array {
         $basisSelesai = $r['ditugaskan'] - $r['keberatan'];
         $r['pctSelesai'] = $pct($r['selesai'] + $r['menunggu'] * 0.5, $basisSelesai);   // menunggu verifikasi dihitung setengah
         $r['skorOverdue'] = max(0, 100 - 25 * $r['overdue']);
-        $r['pctRespon'] = $pct($r['respon'], $r['responDue']);
+        $r['pctRespon'] = r6_otomatis() ? $pct($r['respon'], $r['responDue']) : null;   // ambil bebas: tidak ada kewajiban respon
         $r['rataJam'] = $r['selesai'] ? round($r['jamTotal'] / $r['selesai'], 1) : null;
         unset($r['jamTotal']);
         // Skor KPI = rata-rata berbobot komponen yang sudah ada datanya
@@ -1474,8 +1555,10 @@ function apiDashboard($token, $bulan): array {
             'menunggu' => count(array_filter($all, fn($t) => $t['status'] === R5_WAIT)),
             'lewatSla' => count(array_filter($all, fn($t) => $t['status'] === R5_WAIT && $t['tglPerbaikan'] && r5_now() - $t['tglPerbaikan'] > r5_num('SLA_VERIFIKASI_JAM', 24) * 3600000)),
             'keberatan' => count(array_filter($all, fn($t) => $t['status'] === R5_KEBERATAN)),
-            'belumDiterima' => count(array_filter($all, fn($t) => $t['status'] === R5_OPEN && !$t['tglTerima'])),
-            'belumRespon' => count(array_filter($all, fn($t) => $t['status'] === R5_OPEN && !$t['tglTerima'] && $t['responTelat'])),
+            'belumDiterima' => count(array_filter($all, fn($t) => $t['status'] === R5_OPEN && !$t['tglTerima'] && $t['picNik'] !== '')),
+            'belumRespon' => count(array_filter($all, fn($t) => $t['status'] === R5_OPEN && !$t['tglTerima'] && $t['picNik'] !== '' && $t['responTelat'])),
+            'belumDiambil' => count(array_filter($all, fn($t) => in_array($t['status'], [R5_OPEN, R5_REVISI], true) && $t['picNik'] === '')),
+            'belumDiambilLama' => count(array_filter($all, fn($t) => in_array($t['status'], [R5_OPEN, R5_REVISI], true) && $t['picNik'] === '' && $t['responTelat'])),
             'terlambat' => count($terlambat),
             'closed' => count($closedBln),
             'tepatPct' => count($closedBln) ? (int)round($tepat / count($closedBln) * 100) : null,
@@ -1768,5 +1851,5 @@ const R5_API = [
     'apiSubmitPerbaikan', 'apiVerifikasi', 'apiBatalkanTemuan', 'apiDashboard', 'apiLeaderboard', 'apiChecklist',
     'apiSaveAudit', 'apiListAudit', 'apiAdminData', 'apiSaveUser', 'apiSaveArea', 'apiSaveChecklist',
     'apiImportUsers', 'apiSaveConfig', 'apiKeberatan', 'apiPutusKeberatan', 'apiKpiPic',
-    'apiPicBertugas', 'apiTerimaTugas', 'apiAlihkan', 'apiRiwayatPoinPic',
+    'apiPicBertugas', 'apiTerimaTugas', 'apiAlihkan', 'apiRiwayatPoinPic', 'apiLepasTugas',
 ];

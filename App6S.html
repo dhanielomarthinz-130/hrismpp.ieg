@@ -426,7 +426,9 @@ function durasi(ms) {
   if (h) return h + ' jam ' + m + ' mnt';
   return m + ' mnt';
 }
-const menungguTerima = t => t.status === 'Open' && !t.tglTerima;
+const belumDiambil = t => (t.status === 'Open' || t.status === 'Revisi') && !t.picNik;
+const menungguTerima = t => t.status === 'Open' && !t.tglTerima && !!t.picNik;
+const modeBebas = () => !(S.boot && S.boot.config && S.boot.config.tugasOtomatis);
 /* Input datetime-local selalu dibaca/ditulis sebagai WIB (UTC+7), apa pun zona waktu perangkat */
 function toWib(ms) { const d = new Date(ms + 7 * 36e5); return d.toISOString().slice(0, 16); }
 function fromWib(v) { const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v || ''); return m ? Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5]) - 7 * 36e5 : 0; }
@@ -434,6 +436,7 @@ const JAD_CLS = { bertugas: 'c-ok', nanti: 'c-info', selesai: 'c-neu', libur: 'c
 const JAD_TXT = { bertugas: 'Bertugas', nanti: 'Shift nanti', selesai: 'Shift selesai', libur: 'Libur', absen: 'Tidak masuk', tanpa_jadwal: 'Tanpa jadwal', tanpa_karyawan: 'Belum tertaut' };
 function jadChip(st) { return '<span class="chip ' + (JAD_CLS[st] || 'c-neu') + '">' + (JAD_TXT[st] || esc(st)) + '</span>'; }
 function sisa(t) {
+  if (belumDiambil(t)) return t.responTelat ? 'Belum diambil · sudah lama menunggu' : 'Menunggu diambil PIC';
   if (menungguTerima(t)) return t.responTelat ? 'Belum diterima PIC · lewat batas respon' : 'Menunggu PIC menerima · respon sebelum ' + fDate(t.batasRespon);
   if (t.status === 'Closed') return t.terlambat ? 'Selesai (terlambat)' : 'Selesai tepat waktu';
   if (t.status === 'Batal') return 'Dibatalkan';
@@ -448,6 +451,7 @@ function signed(n) { return (n > 0 ? '+' : '') + num(n); }
 function statusChip(t) {
   if (t.status === 'Open' || t.status === 'Revisi') {
     if (t.terlambat) return '<span class="chip c-err">Terlambat</span>';
+    if (belumDiambil(t)) return t.responTelat ? '<span class="chip c-err">Belum diambil</span>' : '<span class="chip c-warn">Tersedia</span>';
     if (menungguTerima(t)) return t.responTelat ? '<span class="chip c-err">Belum direspon PIC</span>' : '<span class="chip c-warn">Menunggu PIC</span>';
     return t.status === 'Revisi' ? '<span class="chip c-warn">Revisi</span>' : '<span class="chip c-info">Open</span>';
   }
@@ -599,6 +603,7 @@ async function refreshBadges() {
     if (canDo('tugas')) {
       const r = await call('apiListTemuan', S.token, { scope: 'mine', status: 'Aktif' });
       S.badge.tugas = r.filter(t => t.status === 'Open' || t.status === 'Revisi').length;
+      if (modeBebas() && (S.user.pic || S.user.role === 'Admin')) S.badge.tugas += (await call('apiListTemuan', S.token, { scope: 'tersedia' })).length;
     }
     if (canDo('verif')) {
       const v = await call('apiListTemuan', S.token, { scope: 'verifikasi' });
@@ -673,7 +678,7 @@ function waTemuan(t) {
     'Tim penanggung jawab : ' + (t.tim || t.area),
     'Kategori : ' + t.r + ' · ' + t.tingkat + (t.berulang ? ' · BERULANG' : ''),
     'Temuan : ' + t.deskripsi,
-    'PIC : @' + t.pic,
+    (t.picNik ? 'PIC : @' + t.pic : 'PIC : belum diambil — Leader / PIC mana pun bisa memproses'),
     (menungguTerima(t) ? 'Mohon diterima & tentukan target sebelum : ' + fDate(t.batasRespon) + ' WIB (batas standar ' + fDate(t.deadlineStandar) + ')' : 'Target selesai : ' + fDate(t.deadline) + ' WIB'),
     'Status : ' + t.status + (t.terlambat && (t.status === 'Open' || t.status === 'Revisi') ? ' (TERLAMBAT)' : ''),
     'Pelapor : ' + t.pelapor + (t.timPelapor ? ' (Tim ' + t.timPelapor + ')' : ''),
@@ -746,6 +751,7 @@ VIEWS.dash = async function () {
 
     // 1) Pita status: hanya yang perlu tindakan
     const st = [];
+    if (k.belumDiambil) st.push([k.belumDiambilLama ? 'err' : 'warn', k.belumDiambil + ' temuan belum diambil PIC' + (k.belumDiambilLama ? ' (' + k.belumDiambilLama + ' sudah lama)' : ''), canDo('tugas') ? "go('tugas',{tab:'tersedia'})" : "go('daftar',{status:'Perbaikan',bulan:''})"]);
     if (k.belumRespon) st.push(['err', k.belumRespon + ' tugas belum direspon PIC', "go('daftar',{status:'Perbaikan',bulan:''})"]);
     if (k.terlambat) st.push(['err', k.terlambat + ' temuan lewat target', "go('daftar',{status:'Terlambat',bulan:''})"]);
     if (k.lewatSla) st.push(['warn', k.lewatSla + ' perbaikan lewat SLA verifikasi ' + c.slaVerif + ' jam', canDo('verif') ? "go('verif')" : '']);
@@ -758,7 +764,7 @@ VIEWS.dash = async function () {
     // 2) KPI ringkas
     h += '<div class="kpis" style="margin-bottom:12px">' +
       kpi('Temuan ' + fBulan(d.bulan), k.total, 'semua area') +
-      kpi('Belum diperbaiki', k.aktif, k.belumDiterima ? k.belumDiterima + ' menunggu diterima PIC' : 'Open & Revisi', "go('daftar',{status:'Perbaikan',bulan:''})") +
+      kpi('Belum diperbaiki', k.aktif, k.belumDiambil ? k.belumDiambil + ' belum diambil PIC' : k.belumDiterima ? k.belumDiterima + ' menunggu diterima PIC' : 'Open & Revisi', "go('daftar',{status:'Perbaikan',bulan:''})") +
       kpi('Menunggu verifikasi', k.menunggu, (k.keberatan ? k.keberatan + ' keberatan · ' : '') + 'SLA ' + c.slaVerif + ' jam', canDo('verif') ? "go('verif')" : '') +
       kpi('Lewat target', k.terlambat, 'belum diperbaiki', "go('daftar',{status:'Terlambat',bulan:''})", k.terlambat > 0) +
       kpi('Rata-rata KPI PIC', kp.rata == null ? '-' : num(kp.rata), kp.capai + ' dari ' + kp.dinilai + ' capai target ' + kp.target, canDo('kpi') ? "go('kpi')" : '', kp.rata != null && kp.rata < kp.target) +
@@ -769,7 +775,7 @@ VIEWS.dash = async function () {
     const mx = Math.max(1, ...pics.map(p => Math.abs(p.poin)));
     const shiftChip = p => p.shift === 'bertugas' ? ' <span class="chip c-ok" title="' + esc(p.shiftLabel) + '">Bertugas</span>' : (p.shift === 'absen' ? ' <span class="chip c-err" title="' + esc(p.shiftLabel) + '">Tidak masuk</span>' : '');
     h += '<div class="dash3"><div class="card span2"><h3>Poin per PIC<span class="sub">' + fBulan(d.bulan) + ' · ' + pics.length + ' Leader / PIC · ' + kp.bertugas + ' sedang bertugas</span></h3>' +
-      (pics.length ? '<div class="tbl-wrap"><table class="tbl pic-tbl" style="min-width:760px"><tr><th>#</th><th>PIC</th><th class="num">Poin</th><th class="num">KPI</th><th class="num">Ditugaskan</th><th class="num">Selesai</th><th class="num">Lewat target</th><th class="num">Respon</th></tr>' +
+      (pics.length ? '<div class="tbl-wrap"><table class="tbl pic-tbl" style="min-width:760px"><tr><th>#</th><th>PIC</th><th class="num">Poin</th><th class="num">KPI</th><th class="num">' + (modeBebas() ? 'Diambil' : 'Ditugaskan') + '</th><th class="num">Selesai</th><th class="num">Lewat target</th><th class="num">Respon</th></tr>' +
         pics.map((p, i) => '<tr><td><span class="rank ' + (i < 3 && p.poin > 0 ? 'r' + (i + 1) : '') + '">' + (i + 1) + '</span></td>' +
           '<td><button type="button" class="pic-name" title="Riwayat poin ' + esc(p.nama) + '" onclick="openPoinPic(' + esc(JSON.stringify(p.nik)) + ',' + esc(JSON.stringify(d.bulan)) + ')">' + esc(p.nama) + '</button>' +
           '<div class="pic-meta" title="' + esc(p.area.join(', ')) + '">' + (p.area.length ? esc(p.area.join(', ')) : 'Area belum diatur') + shiftChip(p) + '</div></td>' +
@@ -779,14 +785,16 @@ VIEWS.dash = async function () {
           '<td class="num">' + (p.overdue ? '<span class="chip c-err">' + p.overdue + '</span>' : '0') + '</td>' +
           '<td class="num">' + pctTxt(p.pctRespon) + '</td></tr>').join('') + '</table></div>'
         : emptyBox('Belum ada Leader / PIC IEG. Tambahkan akun role Leader di HRIS → Pengaturan → Pengguna.')) +
-      '<p class="small muted" style="margin:10px 0 0">Poin PIC: <b>+</b> menemukan temuan di area PIC lain, perbaikan tepat waktu (bonus bila cepat) · <b>−</b> temuan di area yang ia pegang, terlambat, revisi, tugas tidak direspon. Klik nama untuk melihat riwayat poinnya.' +
+      '<p class="small muted" style="margin:10px 0 0">' + (modeBebas()
+        ? 'Semua PIC berhak melakukan 6S: <b>+</b> menemukan temuan, menyelesaikan temuan tepat waktu (bonus bila cepat) · <b>−</b> terlambat dan revisi. Makin banyak yang diproses, makin banyak poinnya.'
+        : 'Poin PIC: <b>+</b> menemukan temuan di area PIC lain, perbaikan tepat waktu (bonus bila cepat) · <b>−</b> temuan di area yang ia pegang, terlambat, revisi, tugas tidak direspon.') + ' Klik nama untuk melihat riwayat poinnya.' +
       (canDo('kpi') ? ' <a href="#" onclick="go(\'kpi\');return false">Rincian KPI PIC</a>' : '') + '</p></div>';
 
     // Perlu tindakan
     const urgent = [];
     (d.belumRespon || []).forEach(t => urgent.push(t));
     (d.terlambat || []).forEach(t => { if (!urgent.some(x => x.id === t.id)) urgent.push(t); });
-    h += '<div class="card"><h3>Perlu tindakan<span class="sub">belum direspon &amp; lewat target</span></h3>' +
+    h += '<div class="card"><h3>Perlu tindakan<span class="sub">' + (modeBebas() ? 'lama belum diambil' : 'belum direspon') + ' &amp; lewat target</span></h3>' +
       (urgent.length ? '<div class="tlist" style="grid-template-columns:1fr">' + urgent.slice(0, 8).map(tItem).join('') + '</div>' : emptyBox('Tidak ada yang tertunda')) + '</div></div>';
 
     // 4) Pendukung: kategori & tren
@@ -831,6 +839,15 @@ VIEWS.input = function () {
     const sel = $('#iPic'), box = $('#iAuto');
     const manual = on => { $('#iPicWrap').hidden = !on; $('#iGanti').textContent = on ? 'Pakai PIC otomatis' : 'Ganti PIC'; if (!on) sel.value = ''; };
     manual(false); $('#iGanti').hidden = true;
+    if (modeBebas()) {
+      // Ambil bebas: temuan tidak terikat PIC / gudang mana pun
+      F.autoPic = null;
+      box.className = 'note';
+      box.innerHTML = ic('check') + ' Temuan masuk ke <b>Tugas tersedia</b>. Leader / PIC mana pun bisa mengambil &amp; memprosesnya — satu temuan hanya diproses satu orang.';
+      $('#iTim').hidden = !a;
+      if (a) $('#iTim').innerHTML = 'Area: <b>' + esc(a.nama) + '</b> · dilaporkan oleh ' + esc(S.user.nama);
+      est(); return;
+    }
     if (!a) {
       sel.innerHTML = '<option value="">— Pilih area dulu —</option>';
       box.className = 'note'; box.textContent = 'PIC dipilih otomatis dari jadwal shift & absensi hari ini setelah area dipilih.';
@@ -865,6 +882,14 @@ VIEWS.input = function () {
   const est = () => {
     if (!F.areaId || !F.tingkat) return;
     const c = B.config, ket = [];
+    if (modeBebas()) {
+      let pb = c.potong[F.tingkat]; if ($('#iBer').checked) { pb *= c.faktorBerulang; ket.push('berulang ×' + c.faktorBerulang); }
+      const a0 = B.areas.find(x => x.id === F.areaId), plus0 = F.tingkat === 'Kritis' ? c.poinTepatKritis : c.poinTepat;
+      $('#iEst').innerHTML = (S.user.pic && c.poinLaporPic ? 'Anda mendapat <b>+' + num(c.poinLaporPic) + '</b> sebagai penemu. ' : '') +
+        'PIC yang mengambil &amp; menyelesaikannya dalam batas standar <b>' + c.deadline[F.tingkat] + ' jam</b> mendapat <b>+' + plus0 + '</b> (bonus +' + c.bonusCepat + ' bila sangat cepat). ' +
+        'Skor area ' + esc(a0 ? a0.nama : '') + ' dipotong <b>−' + num(pb) + '</b>' + (ket.length ? ' (' + ket.join(', ') + ')' : '') + '.';
+      return;
+    }
     // Poin per PIC: PIC penanggung jawab dipotong, penemu dari area lain mendapat poin
     const sel = $('#iPic'), man = sel && sel.value && !$('#iPicWrap').hidden;
     const pic = man ? { nik: sel.value, nama: (B.users.find(u => u.nik === sel.value) || {}).nama || sel.value } : F.autoPic;
@@ -901,7 +926,7 @@ VIEWS.input = function () {
       const t = await call('apiCreateTemuan', S.token, payload);
       refreshBadges();
       openModal('Temuan tersimpan',
-        '<div class="note" style="margin-bottom:12px"><b>' + esc(t.id) + '</b> · ' + esc(t.area) + '<br>PIC: <b>' + esc(t.pic) + '</b> · harus diterima sebelum ' + fDate(t.batasRespon) + '<br>Batas standar perbaikan ' + fDate(t.deadlineStandar) + ' (PIC menentukan target)<br>Skor Tim ' + esc(t.tim) + ': <b>' + signed(t.poinArea) + '</b>' + (t.berulang ? ' (berulang)' : '') + (t.mandiri ? ' (lapor mandiri)' : '') + '</div>' +
+        '<div class="note" style="margin-bottom:12px"><b>' + esc(t.id) + '</b> · ' + esc(t.area) + '<br>' + (t.picNik ? 'PIC: <b>' + esc(t.pic) + '</b> · harus diterima sebelum ' + fDate(t.batasRespon) : 'Masuk <b>Tugas tersedia</b> — Leader / PIC mana pun bisa mengambilnya') + '<br>Batas standar perbaikan ' + fDate(t.deadlineStandar) + ' (PIC menentukan target)<br>Skor Tim ' + esc(t.tim) + ': <b>' + signed(t.poinArea) + '</b>' + (t.berulang ? ' (berulang)' : '') + (t.mandiri ? ' (lapor mandiri)' : '') + '</div>' +
         '<div class="grid g2"><button class="btn" onclick="closeModal();go(\'input\')">' + ic('plus') + 'Input lagi</button>' +
         '<button class="btn primary" id="okWa">' + ic('wa') + 'Bagikan ke WA</button></div>');
       $('#okWa').onclick = () => shareWA(waTemuan(t));
@@ -918,7 +943,7 @@ function tItem(t) {
     '<div class="b"><div class="id">' + esc(t.id) + ' · ' + esc(t.area) + '</div>' +
     '<div class="d">' + esc(t.deskripsi) + '</div>' +
     '<div class="meta">' + statusChip(t) + rChip(t.r) + tingkatChip(t.tingkat) + (t.berulang ? '<span class="chip nodot c-err">Berulang</span>' : '') + '</div>' +
-    '<div class="foot"><span>PIC: ' + esc(t.pic) + '</span><span>' + esc(sisa(t)) + '</span></div></div></button>';
+    '<div class="foot"><span>' + (t.picNik ? ((t.status === 'Open' || t.status === 'Revisi') && t.tglTerima ? 'Diproses: ' : 'PIC: ') + esc(t.pic) : 'Belum diambil') + '</span><span>' + esc(sisa(t)) + '</span></div></div></button>';
 }
 async function renderList(scope, opt) {
   const B = S.boot;
@@ -937,7 +962,7 @@ async function renderList(scope, opt) {
     try {
       let rows = await call('apiListTemuan', S.token, f);
       if (scope === 'verifikasi') rows = rows.filter(t => t.picNik.toLowerCase() !== S.user.nik.toLowerCase());
-      const msg = scope === 'mine' ? 'Tidak ada tugas perbaikan. Mantap!' : scope === 'verifikasi' ? 'Tidak ada perbaikan atau keberatan yang perlu diputuskan.' : 'Tidak ada temuan untuk filter ini.';
+      const msg = scope === 'tersedia' ? 'Tidak ada temuan yang menunggu diambil.' : scope === 'mine' ? (modeBebas() ? 'Belum ada temuan yang Anda proses. Ambil dari tab Tersedia.' : 'Tidak ada tugas perbaikan. Mantap!') : scope === 'verifikasi' ? 'Tidak ada perbaikan atau keberatan yang perlu diputuskan.' : 'Tidak ada temuan untuk filter ini.';
       LB.innerHTML = '<div class="small muted" style="margin-bottom:8px">' + rows.length + ' temuan</div>' + (rows.length ? '<div class="tlist">' + rows.map(tItem).join('') + '</div>' : emptyBox(msg));
     } catch (e) { LB.innerHTML = emptyBox(e.message); }
   };
@@ -949,7 +974,19 @@ async function renderList(scope, opt) {
 }
 VIEWS.daftar = opt => renderList('', opt);
 VIEWS.tugas = async opt => {
-  await renderList('mine', opt);
+  opt = opt || {};
+  const bebas = modeBebas() && (S.user.pic || S.user.role === 'Admin');
+  const tab = bebas ? (opt.tab || S.tugasTab || 'tersedia') : 'mine';
+  S.tugasTab = tab;
+  const o = Object.assign({}, opt); delete o.tab;
+  await renderList(tab, o);
+  if (bebas && S.view === 'tugas') {
+    const bar = document.createElement('div');
+    bar.className = 'tabs'; bar.style.marginBottom = '12px';
+    bar.innerHTML = '<button data-tt="tersedia"' + (tab === 'tersedia' ? ' class="on"' : '') + '>Tersedia untuk diambil</button><button data-tt="mine"' + (tab === 'mine' ? ' class="on"' : '') + '>Sedang saya proses</button>';
+    $('#view').prepend(bar);
+    $$('[data-tt]', bar).forEach(b => b.onclick = () => go('tugas', { tab: b.dataset.tt }));
+  }
   // Kartu KPI pribadi untuk PIC
   if (!S.user.pic) return;
   try {
@@ -1047,8 +1084,10 @@ function renderDetail(t) {
     '<dt>Area</dt><dd>' + esc(t.area) + (t.lokasi ? ' · ' + esc(t.lokasi) : '') + '</dd>' +
     '<dt>Tim</dt><dd><b>' + esc(t.tim) + '</b></dd>' +
     '<dt>Temuan</dt><dd>' + esc(t.deskripsi) + '</dd>' +
-    '<dt>PIC</dt><dd>' + esc(t.pic) + '</dd>' +
-    (menungguTerima(t)
+    '<dt>PIC</dt><dd>' + (t.picNik ? esc(t.pic) + ((t.status === 'Open' || t.status === 'Revisi') && t.tglTerima ? ' <span class="chip c-info">Sedang diproses sejak ' + fDate(t.tglTerima) + '</span>' : '') : '<span class="chip c-warn">Belum diambil</span> <span class="small muted">siapa pun bisa memproses</span>') + '</dd>' +
+    (belumDiambil(t) && t.status === 'Open'
+      ? '<dt>Batas standar</dt><dd>' + fDate(t.deadlineStandar) + ' <span class="small muted">(target ditentukan PIC saat mengambil)</span></dd>' :
+     menungguTerima(t)
       ? '<dt>Respon PIC</dt><dd>' + (t.responTelat ? '<b style="color:var(--err-t)">Lewat batas respon</b> ' : 'Sebelum ') + fDate(t.batasRespon) + '</dd>' +
         '<dt>Batas standar</dt><dd>' + fDate(t.deadlineStandar) + ' <span class="small muted">(target ditentukan PIC saat menerima)</span></dd>'
       : '<dt>Target selesai</dt><dd>' + fDate(t.deadline) + ' <span class="small muted">(' + esc(sisa(t)) + ')</span>' +
@@ -1057,25 +1096,35 @@ function renderDetail(t) {
     (t.poinPic != null ? '<dt>Poin perbaikan</dt><dd><b>' + signed(t.poinPic) + '</b> untuk Tim ' + esc(t.tim) + '</dd>' : '') + '</dl>' +
     '<div class="timeline">' + timeline(t) + '</div>';
 
-  // Terima tugas & tentukan target (PIC yang ditugaskan)
-  const bisaTerima = (isPic || role === 'Admin') && menungguTerima(t) && canEdit('tugas');
-  if (bisaTerima) {
+  // Ambil (temuan tersedia) atau terima (tugas otomatis) & tentukan target
+  const bisaAmbil = belumDiambil(t) && canEdit('tugas') && (S.user.pic || role === 'Admin');
+  const bisaTerima = bisaAmbil || ((isPic || role === 'Admin') && menungguTerima(t) && canEdit('tugas'));
+  if (bisaAmbil && t.status === 'Revisi') {
+    h += '<div class="card" style="margin-top:12px;background:var(--surface-2)"><h3>Ambil &amp; lanjutkan revisi</h3>' +
+      '<div class="note warn" style="margin-bottom:10px">Ditolak: ' + esc(t.catatanVerifikasi) + '<div class="small" style="margin-top:4px">Target tetap ' + fDate(t.deadline) + '</div></div>' +
+      '<button class="btn primary block" id="tAmbilRev">' + ic('check') + 'Ambil tugas ini</button></div>';
+  } else if (bisaTerima) {
     const c = S.boot.config, now = Date.now(), std = t.deadlineStandar || t.deadline;
     const maks = Math.max(t.tingkat === 'Kritis' ? std : Math.max(std, t.tanggal + c.targetMaks * 36e5), now + 2 * 36e5);
     const besok = fromWib(toWib(now + 864e5).slice(0, 10) + 'T12:00');
     const quick = [['+2 jam', now + 2 * 36e5], ['+4 jam', now + 4 * 36e5], ['+8 jam', now + 8 * 36e5], ['Besok 12:00', besok], ['Batas standar', std]]
       .filter(q => q[1] >= now + 30 * 6e4 && q[1] <= maks);
-    h += '<div class="card" style="margin-top:12px;background:var(--surface-2)"><h3>Terima tugas &amp; tentukan target</h3>' +
-      '<div class="note' + (t.responTelat ? ' warn' : '') + '" style="margin-bottom:10px">' + (t.responTelat ? 'Batas respon sudah lewat. Segera terima agar tidak dialihkan ke PIC lain.' : 'Terima sebelum <b>' + fDate(t.batasRespon) + '</b>, atau tugas otomatis dialihkan ke PIC lain yang bertugas.') +
+    h += '<div class="card" style="margin-top:12px;background:var(--surface-2)"><h3>' + (bisaAmbil ? 'Ambil &amp; proses temuan ini' : 'Terima tugas &amp; tentukan target') + '</h3>' +
+      '<div class="note' + (t.responTelat && !bisaAmbil ? ' warn' : '') + '" style="margin-bottom:10px">' + (bisaAmbil ? 'Setelah diambil, temuan ini terkunci untuk Anda dan tampil <b>Sedang diproses oleh ' + esc(S.user.nama) + '</b>. Tentukan kapan bisa selesai.' : t.responTelat ? 'Batas respon sudah lewat. Segera terima agar tidak dialihkan ke PIC lain.' : 'Terima sebelum <b>' + fDate(t.batasRespon) + '</b>, atau tugas otomatis dialihkan ke PIC lain yang bertugas.') +
       '<div class="small" style="margin-top:4px">Batas standar ' + esc(t.tingkat) + ': ' + fDate(std) + ' · paling lambat ' + fDate(maks) + (t.tingkat === 'Kritis' ? ' (Kritis tidak boleh melewati standar)' : '') + '</div></div>' +
       '<div class="seg" id="tQuick" style="margin-bottom:10px">' + quick.map(q => '<button type="button" data-ms="' + q[1] + '">' + q[0] + '</button>').join('') + '</div>' +
       '<div class="field"><label for="tTarget">Target selesai (WIB)</label><input class="inp" type="datetime-local" id="tTarget" value="' + toWib(Math.max(now + 36e5, Math.min(std, maks))) + '" min="' + toWib(now + 30 * 6e4) + '" max="' + toWib(maks) + '"></div>' +
       '<div class="field" id="tAlasanBox" hidden><label for="tAlasan">Alasan melewati batas standar</label><textarea class="inp" id="tAlasan" placeholder="mis. sedang stock opname, menunggu material"></textarea></div>' +
-      '<button class="btn primary block" id="tGo">' + ic('check') + 'Terima tugas</button></div>';
+      '<button class="btn primary block" id="tGo">' + ic('check') + (bisaAmbil ? 'Ambil tugas' : 'Terima tugas') + '</button></div>';
+  }
+  // Sedang diproses PIC lain
+  if (t.picNik && !isPic && (t.status === 'Open' || t.status === 'Revisi') && t.tglTerima) {
+    h += '<div class="note" style="margin-top:12px">Sedang diproses oleh <b>' + esc(t.pic) + '</b> sejak ' + fDate(t.tglTerima) + ' · target ' + fDate(t.deadline) + '</div>';
   }
   // Aksi PIC (bisa langsung kirim perbaikan tanpa menerima dulu, mis. perbaikan kecil yang selesai saat itu juga)
-  if ((isPic || role === 'Admin') && (t.status === 'Open' || t.status === 'Revisi') && canEdit('tugas')) {
-    h += '<div class="card" style="margin-top:12px;background:var(--surface-2)"><h3>' + (menungguTerima(t) ? 'Atau langsung kirim perbaikan' : 'Kirim perbaikan') + '</h3>' +
+  if (((isPic || role === 'Admin') && t.picNik || bisaAmbil) && (t.status === 'Open' || t.status === 'Revisi') && canEdit('tugas')) {
+    h += '<div class="card" style="margin-top:12px;background:var(--surface-2)"><h3>' + (bisaAmbil ? 'Atau langsung kirim perbaikan' : menungguTerima(t) ? 'Atau langsung kirim perbaikan' : 'Kirim perbaikan') + '</h3>' +
+      (bisaAmbil ? '<p class="small muted" style="margin-top:0">Sudah dibereskan? Kirim foto sesudahnya — temuan otomatis tercatat diproses oleh Anda.</p>' : '') +
       (t.status === 'Revisi' ? '<div class="note warn" style="margin-bottom:10px">Ditolak: ' + esc(t.catatanVerifikasi) + '</div>' : '') +
       '<div class="field">' + photoPicker('pFoto', 'Ambil foto sesudah perbaikan') + '</div>' +
       '<div class="field"><label for="pCat">Catatan perbaikan</label><textarea class="inp" id="pCat" placeholder="Apa yang sudah dilakukan"></textarea></div>' +
@@ -1098,8 +1147,10 @@ function renderDetail(t) {
         '<div class="field"><label for="vCat">Catatan (wajib bila ditolak)</label><textarea class="inp" id="vCat"></textarea></div>' +
         '<div class="grid g2"><button class="btn danger" id="vNo">Tolak, perbaiki lagi</button><button class="btn ok" id="vYes">Setujui &amp; tutup</button></div>') + '</div>';
   }
-  const bisaAlih = (t.status === 'Open' || t.status === 'Revisi') && ((isPic && canEdit('tugas')) || canEdit('verif') || canEdit('admin'));
+  const bisaAlih = !!t.picNik && (t.status === 'Open' || t.status === 'Revisi') && ((isPic && canEdit('tugas')) || canEdit('verif') || canEdit('admin'));
+  const bisaLepas = bisaAlih && modeBebas();
   h += '<div class="grid g2" style="margin-top:12px"><button class="btn" id="dWa">' + ic('wa') + 'Bagikan ke WA</button>' +
+    (bisaLepas ? '<button class="btn" id="dLepas">Batalkan proses</button>' : '') +
     (bisaAlih ? '<button class="btn" id="dAlih">Alihkan ke PIC lain</button>' : '') +
     (canEdit('admin') && t.status !== 'Batal' ? '<button class="btn danger" id="dCancel">Batalkan temuan</button>' : '') + '</div>';
   $('#sheet').innerHTML = '<div class="sheet-h"><h2>' + esc(t.id) + '</h2><button class="icon-btn" onclick="closeModal()" aria-label="Tutup">' + ic('x') + '</button></div>' + h;
@@ -1117,10 +1168,29 @@ function renderDetail(t) {
       const alasan = $('#tAlasan').value.trim();
       if (target > std + 6e4 && !alasan) return toast('Tulis alasan karena target melewati batas standar.', true);
       const b = $('#tGo'); b.disabled = true;
-      try { const r = await call('apiTerimaTugas', S.token, t.id, target, alasan); toast('Tugas diterima · target ' + fDate(r.deadline)); renderDetail(r); afterChange(); }
-      catch (e) { toast(e.message, true); b.disabled = false; }
+      try { const r = await call('apiTerimaTugas', S.token, t.id, target, alasan); toast((bisaAmbil ? 'Tugas diambil' : 'Tugas diterima') + ' · target ' + fDate(r.deadline)); renderDetail(r); afterChange(); }
+      catch (e) { toast(e.message, true); b.disabled = false; if (/diambil oleh|Sedang diproses/.test(e.message)) openDetail(t.id); }
     };
   }
+  if ($('#tAmbilRev')) $('#tAmbilRev').onclick = async () => {
+    const b = $('#tAmbilRev'); b.disabled = true;
+    try { const r = await call('apiTerimaTugas', S.token, t.id, 0, ''); toast('Tugas diambil'); renderDetail(r); afterChange(); }
+    catch (e) { toast(e.message, true); b.disabled = false; if (/diambil oleh/.test(e.message)) openDetail(t.id); }
+  };
+  if ($('#dLepas')) $('#dLepas').onclick = () => {
+    openModal('Batalkan proses ' + t.id,
+      '<div class="note" style="margin-bottom:12px">Temuan dilepas dari <b>' + esc(t.pic) + '</b> dan kembali ke <b>Tugas tersedia</b> agar bisa diambil PIC lain. Keterangan tercatat di riwayat.</div>' +
+      '<div class="field"><label for="lAlasan">Keterangan kenapa batal *</label><textarea class="inp" id="lAlasan" placeholder="mis. dipanggil ke area lain, butuh alat yang belum ada"></textarea></div>' +
+      '<div class="grid g2"><button class="btn" id="lBack">Kembali</button><button class="btn danger" id="lGo">Batalkan proses</button></div>');
+    $('#lBack').onclick = () => renderDetailInModal(t);
+    $('#lGo').onclick = async () => {
+      const alasan = $('#lAlasan').value.trim();
+      if (!alasan) { $('#lAlasan').focus(); return toast('Keterangan kenapa batal wajib diisi.', true); }
+      $('#lGo').disabled = true;
+      try { const r = await call('apiLepasTugas', S.token, t.id, alasan); toast('Proses dibatalkan, temuan kembali tersedia'); renderDetailInModal(r); afterChange(); }
+      catch (e) { toast(e.message, true); $('#lGo').disabled = false; }
+    };
+  };
   if ($('#dAlih')) $('#dAlih').onclick = () => {
     const ap = (S.boot.areas.find(a => a.id === t.areaId) || {}).pics || [];
     const lain = S.boot.users.filter(u => u.nik.toLowerCase() !== t.picNik.toLowerCase());
@@ -1149,7 +1219,7 @@ function renderDetail(t) {
       if (!foto) return toast('Foto sesudah perbaikan wajib diambil.', true);
       const b = $('#pSend'); b.disabled = true; b.textContent = 'Mengirim…';
       try { const r = await call('apiSubmitPerbaikan', S.token, t.id, $('#pCat').value.trim(), foto); toast('Perbaikan terkirim, menunggu verifikasi'); renderDetail(r); afterChange(); }
-      catch (e) { toast(e.message, true); b.disabled = false; b.textContent = 'Kirim untuk verifikasi'; }
+      catch (e) { toast(e.message, true); b.disabled = false; b.textContent = 'Kirim untuk verifikasi'; if (/diambil oleh|Sedang diproses/.test(e.message)) openDetail(t.id); }
     };
   }
   if ($('#kAju')) $('#kAju').onclick = () => {

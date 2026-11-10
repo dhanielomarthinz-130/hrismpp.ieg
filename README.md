@@ -46,7 +46,17 @@ Satu akun untuk dua aplikasi: di halaman login (`/login`) pilih **HRIS** atau **
 
 Role 6S bawaan mengikuti role HRIS: Admin → Admin, Supervisor → Auditor, Leader → PIC, Viewer → Viewer. Admin 6S bisa mengubah role, tim/area, dan status aktif 6S per user.
 
-**Alur temuan (PIC otomatis per shift):**
+**Pembagian tugas.** Diatur dengan aturan `TUGAS_OTOMATIS` di Master Data → Aturan poin.
+
+**Mode bawaan: ambil bebas (`TUGAS_OTOMATIS` = 0).** Semua Leader / PIC berhak melakukan 6S dan tidak terikat ke gudang mana pun.
+
+- **Temuan baru**: masuk ke **Tugas Saya → Tersedia untuk diambil**.
+- **Mengambil**: PIC menekan **Ambil tugas** dan menentukan target. Temuan lalu terkunci dan tampil **"Sedang diproses oleh …"**. Kalau dua orang mengambil bersamaan, hanya satu yang berhasil.
+- **Langsung beres**: PIC bisa langsung mengirim foto perbaikan. Temuan otomatis tercatat diproses olehnya.
+- **Batalkan proses**: keterangan wajib diisi dan tercatat di riwayat. Temuan kembali ke daftar Tersedia.
+- **Poin**: penemu +`POIN_LAPOR_PIC`. Yang menyelesaikan mendapat poin tepat waktu. Makin banyak yang diproses, makin banyak poinnya.
+
+**Mode otomatis per shift (`TUGAS_OTOMATIS` = 1):**
 
 1. **Lapor**: pelapor memilih area. Sistem memilih Leader / PIC area yang **sedang bertugas** menurut jadwal shift HRIS dan melewati yang libur atau tidak masuk di absensi. Bila belum ada yang bertugas, dipilih PIC dengan shift berikutnya, lalu PIC cadangan area. Pelapor tetap boleh memilih PIC lain.
 2. **Terima & tentukan target**: PIC menerima tugas dalam `SLA_RESPON_JAM` (dihitung sejak shift-nya mulai) dan menentukan target selesai sendiri. Target yang melewati batas standar tingkat temuan wajib diberi alasan. Temuan Kritis tidak boleh melewati batas standar.
