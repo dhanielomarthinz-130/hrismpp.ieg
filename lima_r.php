@@ -1604,7 +1604,45 @@ function apiLeaderboard($token, $bulan): array {
         $p['tim'] = $aid !== '' ? ($tm[$aid] ?? '') : '';
         return $p;
     }, r5_leader_pic($bulan, $poin, $all));
-    return ['bulan' => $bulan, 'tims' => r5_rekap_tim($bulan, $areas, $poin, $all), 'pics' => $pics,
+    // Papan poin per user (username): semua Leader / PIC + siapa pun yang punya poin PIC bulan ini
+    $papan = [];
+    $row = fn($nik, $nama) => ['nik' => $nik, 'nama' => $nama, 'poin' => 0.0, 'lapor' => 0.0, 'perbaikan' => 0.0, 'potongan' => 0.0,
+        'ditemukan' => 0, 'diproses' => 0, 'selesai' => 0, 'tepat' => 0, 'telat' => 0, 'revisi' => 0, 'overdue' => 0];
+    foreach (r5_users_all() as $x) if ($x['pic']) $papan[mb_strtolower($x['nik'])] = $row($x['nik'], $x['nama']);
+    foreach (r5_leader_pic($bulan, $poin, $all) as $p) {
+        $k = mb_strtolower($p['nik']);
+        $papan[$k] = ($papan[$k] ?? $row($p['nik'], $p['nama']));
+        $papan[$k]['poin'] = (float)$p['poin']; $papan[$k]['tepat'] = $p['tepat']; $papan[$k]['telat'] = $p['telat'];
+        $papan[$k]['revisi'] = $p['revisi']; $papan[$k]['overdue'] = $p['overdue'];
+        $papan[$k]['potongan'] += (float)$p['telatBerjalan'];
+    }
+    foreach ($poin as $p) {
+        if ($p['jenis'] !== 'PIC' || $p['bulan'] !== $bulan) continue;
+        $k = mb_strtolower($p['ref_id']); if (!isset($papan[$k])) continue;
+        $v = (float)$p['poin']; $ket = r5_str($p['ket']);
+        if (strpos($ket, 'Menemukan') === 0) $papan[$k]['lapor'] += $v;
+        elseif (strpos($ket, 'Perbaikan tepat') === 0) $papan[$k]['perbaikan'] += $v;
+        else $papan[$k]['potongan'] += $v;   // terlambat, revisi, tidak merespon, temuan di area sendiri, pembatalan
+    }
+    foreach ($all as $t) {
+        $pk = mb_strtolower($t['picNik']); $lk = mb_strtolower($t['pelaporNik']);
+        if (isset($papan[$lk]) && $t['tanggal'] && r5_bulan($t['tanggal']) === $bulan) $papan[$lk]['ditemukan']++;
+        if (!isset($papan[$pk])) continue;
+        if (in_array($t['status'], [R5_OPEN, R5_REVISI, R5_WAIT, R5_KEBERATAN], true)) $papan[$pk]['diproses']++;
+        if ($t['status'] === R5_CLOSED && $t['tglVerifikasi'] && r5_bulan($t['tglVerifikasi']) === $bulan) $papan[$pk]['selesai']++;
+    }
+    $papan = array_values(array_map(function ($r) {
+        foreach (['poin', 'lapor', 'perbaikan', 'potongan'] as $f) $r[$f] = r5_round1($r[$f]);
+        return $r;
+    }, $papan));
+    usort($papan, fn($a, $b) => ($b['poin'] <=> $a['poin']) ?: ($b['selesai'] <=> $a['selesai']) ?: ($b['ditemukan'] <=> $a['ditemukan']) ?: strcmp($a['nama'], $b['nama']));
+    $riwayatPic = [];
+    foreach (db_all("SELECT * FROM r5_poin WHERE bulan = ? AND jenis = 'PIC' ORDER BY ts DESC, id DESC LIMIT 300", [$bulan]) as $p) {
+        $riwayatPic[] = ['ts' => (int)$p['ts'], 'nik' => r5_str($p['ref_id']), 'nama' => r5_str($p['nama']), 'poin' => (float)$p['poin'],
+                         'temuanId' => r5_str($p['temuan_id']), 'ket' => r5_str($p['ket'])];
+    }
+    return ['bulan' => $bulan, 'papan' => $papan, 'riwayatPic' => $riwayatPic,
+            'tims' => r5_rekap_tim($bulan, $areas, $poin, $all), 'pics' => $pics,
             'riwayat' => $riwayat, 'skorAwal' => r5_num('SKOR_AWAL_AREA', 100)];
 }
 
