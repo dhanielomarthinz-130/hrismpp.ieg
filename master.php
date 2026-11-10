@@ -221,6 +221,7 @@ function get_master(array $currentUser): array {
     return [
         'user'        => $currentUser,
         'maintenance' => maintenance_on(),
+        'maintenance5r' => maintenance_on('5r'),
         'menus'       => menus_for_user($currentUser),
         'roMenus'     => readonly_menus_for_user($currentUser),
         'autoApprove' => auto_approve_on(),

@@ -31,9 +31,14 @@ if (isset($_GET['mt'])) {
     exit;
 }
 
-$maintenance     = (string)get_setting('maintenance', '0') === '1';
+// Maintenance per aplikasi (HRIS / Monitoring 5R). Layar maintenance penuh hanya bila keduanya aktif.
+$mtHris          = (string)get_setting('maintenance', '0') === '1';
+$mt5r            = (string)get_setting('maintenance_5r', '0') === '1';
+$maintenance     = $mtHris || $mt5r;
 $mtBypass        = hash_equals($mtToken, (string)($_COOKIE['hris_mt'] ?? ''));
-$showMaintenance = $maintenance && !$mtBypass;
+$showMaintenance = $mtHris && $mt5r && !$mtBypass;
+$mtLabel         = $mtHris && $mt5r ? 'HRIS & Monitoring 5R' : ($mtHris ? 'HRIS' : 'Monitoring 5R');
+$mtBlocked       = ['hris' => $mtHris && !$mtBypass, '5r' => $mt5r && !$mtBypass];
 
 ob_start();
 ?>
@@ -512,8 +517,10 @@ ob_start();
                         <p>Kami sedang melakukan pemeliharaan sistem.<br>Silakan coba kembali beberapa saat lagi.</p>
                     </div>
 <?php else: ?>
-<?php if ($maintenance): ?>
-                    <div class="mt-banner"><span class="material-symbols-outlined">construction</span>Mode maintenance aktif — hanya super admin yang dapat masuk.</div>
+<?php if ($maintenance && $mtBypass): ?>
+                    <div class="mt-banner"><span class="material-symbols-outlined">construction</span>Maintenance <?= $mtLabel ?> aktif — hanya super admin yang dapat masuk.</div>
+<?php elseif ($maintenance): ?>
+                    <div class="mt-banner"><span class="material-symbols-outlined">construction</span><?= $mtLabel ?> sedang maintenance — sementara hanya <?= $mtHris ? 'Monitoring 5R' : 'HRIS' ?> yang bisa digunakan.</div>
 <?php endif; ?>
                     <div class="app-switch" id="appSwitch" role="radiogroup" aria-label="Pilih aplikasi" data-app="hris">
                         <button type="button" role="radio" aria-checked="true" data-app="hris"><span class="material-symbols-outlined" aria-hidden="true">badge</span>HRIS</button>
@@ -617,6 +624,9 @@ ob_start();
             let app = params.get('app') === '5r' ? '5r' : (params.get('app') === 'hris' ? 'hris' : null);
             if (!app) { try { app = localStorage.getItem('login_app'); } catch (e) { } }
             if (app !== '5r') app = 'hris';
+            // Aplikasi yang sedang maintenance tidak bisa dipilih
+            const MT = <?= json_encode($mtBlocked) ?>;
+            if (MT[app]) app = app === '5r' ? 'hris' : '5r';
             const sw = document.getElementById('appSwitch');
             function fade(els, fn) {
                 els.forEach(el => el && el.classList.add('fading'));
@@ -653,8 +663,14 @@ ob_start();
             sw.addEventListener('keydown', function (e) {
                 if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
                 e.preventDefault();
+                if (MT[app === 'hris' ? '5r' : 'hris']) return;
                 setApp(app === 'hris' ? '5r' : 'hris', true);
                 sw.querySelector('[data-app="' + app + '"]').focus();
+            });
+            sw.querySelectorAll('button').forEach(b => {
+                if (!MT[b.dataset.app]) return;
+                b.disabled = true; b.style.opacity = '.45'; b.style.cursor = 'not-allowed';
+                b.title = 'Sedang maintenance';
             });
             setApp(app, false);
 
@@ -680,7 +696,8 @@ ob_start();
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             username: document.getElementById('lgUser').value.trim(),
-                            password: passInput.value
+                            password: passInput.value,
+                            app: app
                         })
                     });
                     const r = await res.json();

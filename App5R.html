@@ -378,8 +378,10 @@ const MENU = [
   { id: 'qr', t: 'QR Area', i: 'qr', roles: ['Admin'] }
 ];
 const BNAV = ['dash', 'input', 'tugas', 'poin'];
-const can = (m) => !m.roles || m.roles.indexOf(S.user.role) >= 0;
+// Akses menu diatur super admin di HRIS → Control Akses → Monitoring 5R
+const can = (m) => !!(S.boot && S.boot.access && S.boot.access.menus.indexOf(m.id) >= 0);
 const canDo = (id) => { const m = MENU.find(x => x.id === id); return m && can(m); };
+const canEdit = (id) => canDo(id) && S.boot.access.ro.indexOf(id) < 0;
 
 /* ---------- Util ---------- */
 const store = {
@@ -455,6 +457,7 @@ async function call(fn, ...args) {
   if (!res) throw new Error('Tidak ada respon dari server.');
   if (res.ok) return res.data;
   if (res.error === 'SESI_HABIS') { logout(true); throw new Error('Sesi berakhir, silakan masuk lagi.'); }
+  if (res.error === 'MAINTENANCE') { store.del('hris_token'); showLogin('Monitoring 5R sedang maintenance. Silakan coba lagi nanti.'); throw new Error('Monitoring 5R sedang maintenance.'); }
   if (res.error === 'GANTI_PASSWORD') { location.replace(HOME_URL); throw new Error('Ganti password awal di HRIS terlebih dahulu.'); }
   throw new Error(res.error);
 }
@@ -548,7 +551,11 @@ function drawer(open) { $('#side').classList.toggle('open', open); $('#scrim').c
 const VIEWS = {};
 function go(id, opt) {
   const m = MENU.find(x => x.id === id);
-  if (!m || !can(m)) id = 'dash';
+  if (!m || !can(m)) {
+    const first = MENU.find(can);
+    if (!first) { $('#title').textContent = 'Monitoring 5R'; $('#view').innerHTML = emptyBox('Belum ada menu 5R yang diizinkan untuk akun Anda. Hubungi Super Admin.'); return; }
+    id = first.id;
+  }
   S.view = id;
   $$('[data-v]').forEach(a => a.classList.toggle('active', a.dataset.v === id));
   $('#title').textContent = MENU.find(x => x.id === id).t;
@@ -761,7 +768,7 @@ VIEWS.input = function () {
     '<div class="field"><label for="iPic">PIC perbaikan</label><select class="inp" id="iPic"><option value="">— Pilih area dulu —</option></select><span class="hint" id="iPicHint">Otomatis terisi PIC area, bisa diganti.</span></div>' +
     '<label class="chk" style="margin-bottom:12px"><input type="checkbox" id="iBer"><span>Tandai sebagai temuan berulang<br><span class="small muted">Sistem juga mendeteksi otomatis dari lokasi + kategori.</span></span></label>' +
     '<div class="note" id="iEst" style="margin-bottom:12px">Pilih area, kategori, dan tingkat untuk melihat dampak poin.</div>' +
-    '<button class="btn primary block" id="iSubmit">' + ic('plus') + 'Simpan temuan</button></div></div>';
+    (canEdit('input') ? '<button class="btn primary block" id="iSubmit">' + ic('plus') + 'Simpan temuan</button>' : '<div class="note warn">Akses Anda untuk Input Temuan hanya lihat saja.</div>') + '</div></div>';
 
   const opt = u => '<option value="' + esc(u.nik) + '">' + esc(u.nama) + '</option>';
   const setPic = () => {
@@ -801,7 +808,7 @@ VIEWS.input = function () {
   bindPhoto('iFoto', () => { const a = B.areas.find(x => x.id === F.areaId); return stampText(a ? a.nama : 'Area belum dipilih'); }, d => { F.foto = d; });
   setPic();
 
-  $('#iSubmit').addEventListener('click', async () => {
+  if ($('#iSubmit')) $('#iSubmit').addEventListener('click', async () => {
     const payload = { areaId: F.areaId, lokasi: $('#iLok').value.trim(), kategoriR: F.r, tingkat: F.tingkat, deskripsi: $('#iDesk').value.trim(), foto: F.foto, picNik: $('#iPic').value, berulang: $('#iBer').checked };
     const miss = [];
     if (!payload.areaId) miss.push('area'); if (!payload.kategoriR) miss.push('kategori 5R'); if (!payload.tingkat) miss.push('tingkat');
@@ -957,7 +964,7 @@ function renderDetail(t) {
     '</div>';
 
   // Aksi PIC
-  if ((isPic || role === 'Admin') && (t.status === 'Open' || t.status === 'Revisi') && role !== 'Viewer') {
+  if ((isPic || role === 'Admin') && (t.status === 'Open' || t.status === 'Revisi') && canEdit('tugas')) {
     h += '<div class="card" style="margin-top:12px;background:var(--surface-2)"><h3>Kirim perbaikan</h3>' +
       (t.status === 'Revisi' ? '<div class="note warn" style="margin-bottom:10px">Ditolak: ' + esc(t.catatanVerifikasi) + '</div>' : '') +
       '<div class="field">' + photoPicker('pFoto', 'Ambil foto sesudah perbaikan') + '</div>' +
@@ -969,20 +976,20 @@ function renderDetail(t) {
   if (t.status === 'Keberatan') {
     h += '<div class="card" style="margin-top:12px;background:var(--surface-2)"><h3>Keberatan PIC</h3>' +
       '<div class="note" style="margin-bottom:10px">' + esc(t.catatanKeberatan) + '<div class="small" style="margin-top:4px">Diajukan ' + fDate(t.tglKeberatan) + ' · batas waktu dihentikan selama ditinjau</div></div>' +
-      ((role === 'Admin' || role === 'Auditor') ? (isPic ? '<div class="note warn">Keberatan Anda sendiri harus diputuskan auditor lain.</div>' :
+      (canEdit('verif') ? (isPic ? '<div class="note warn">Keberatan Anda sendiri harus diputuskan auditor lain.</div>' :
         '<div class="field"><label for="kCat">Catatan keputusan (wajib bila ditolak)</label><textarea class="inp" id="kCat"></textarea></div>' +
         '<div class="grid g2"><button class="btn" id="kNo">Tolak, lanjut perbaikan</button><button class="btn danger" id="kYes">Terima, batalkan temuan</button></div>' +
         '<p class="small muted" style="margin:8px 0 0">Diterima: temuan batal dan semua poinnya dikembalikan. Ditolak: kembali ke PIC, batas waktu diperpanjang sebesar lama peninjauan.</p>') : '<div class="small muted">Menunggu keputusan auditor.</div>') + '</div>';
   }
   // Aksi Auditor
-  if ((role === 'Admin' || role === 'Auditor') && t.status === 'Menunggu Verifikasi') {
+  if (canEdit('verif') && t.status === 'Menunggu Verifikasi') {
     h += '<div class="card" style="margin-top:12px;background:var(--surface-2)"><h3>Verifikasi perbaikan</h3>' +
       (isPic ? '<div class="note warn">Anda PIC temuan ini, jadi verifikasi harus dilakukan auditor lain.</div>' :
         '<div class="field"><label for="vCat">Catatan (wajib bila ditolak)</label><textarea class="inp" id="vCat"></textarea></div>' +
         '<div class="grid g2"><button class="btn danger" id="vNo">Tolak, perbaiki lagi</button><button class="btn ok" id="vYes">Setujui &amp; tutup</button></div>') + '</div>';
   }
   h += '<div class="grid g2" style="margin-top:12px"><button class="btn" id="dWa">' + ic('wa') + 'Bagikan ke WA</button>' +
-    (role === 'Admin' && t.status !== 'Batal' ? '<button class="btn danger" id="dCancel">Batalkan temuan</button>' : '') + '</div>';
+    (canEdit('admin') && t.status !== 'Batal' ? '<button class="btn danger" id="dCancel">Batalkan temuan</button>' : '') + '</div>';
   $('#sheet').innerHTML = '<div class="sheet-h"><h2>' + esc(t.id) + '</h2><button class="icon-btn" onclick="closeModal()" aria-label="Tutup">' + ic('x') + '</button></div>' + h;
 
   $('#dWa').onclick = () => shareWA(waTemuan(t));
@@ -1085,14 +1092,15 @@ VIEWS.audit = function () {
       });
       h += '<div class="note" id="aSum" style="margin:12px 0"></div><div class="field"><label for="aCat">Catatan audit</label><textarea class="inp" id="aCat"></textarea></div>' +
         '<div class="small muted" style="margin-bottom:10px">Ada kondisi yang perlu diperbaiki? Buat juga lewat <a href="#" onclick="go(\'input\');return false">Input Temuan</a> supaya ada PIC dan batas waktunya.</div>' +
-        '<button class="btn primary block" id="aSave">Simpan audit</button>';
+        (canEdit('audit') ? '<button class="btn primary block" id="aSave">Simpan audit</button>' : '<div class="note warn">Akses Anda untuk Audit 5R hanya lihat saja.</div>');
       $('#aItems').innerHTML = items.length ? h : emptyBox('Checklist area ini kosong. Tambahkan di Master Data → Checklist audit.');
       $$('#aItems .seg').forEach(sg => sg.addEventListener('click', ev => {
         const b = ev.target.closest('button'); if (!b) return;
         $$('button', sg).forEach(x => x.classList.remove('on')); b.classList.add('on');
         items[+sg.dataset.i].skor = +b.dataset.s; summary();
       }));
-      if (items.length) { summary(); $('#aSave').onclick = async () => {
+      if (items.length) summary();
+      if (items.length && $('#aSave')) { $('#aSave').onclick = async () => {
         if (items.some(i => !i.skor)) return toast('Beri skor untuk semua item.', true);
         const b = $('#aSave'); b.disabled = true; b.textContent = 'Menyimpan…';
         try { const r = await call('apiSaveAudit', S.token, { areaId: id, items: items, catatan: $('#aCat').value.trim() }); toast('Audit tersimpan · ' + num(r.total) + '%'); $('#aArea').value = ''; $('#aItems').innerHTML = ''; hist(); }
@@ -1184,7 +1192,8 @@ VIEWS.admin = async function () {
       h = '<div class="card"><div class="grid g2">' + D.config.map((c, i) => '<div class="field"><label for="cf' + i + '">' + esc(c.key) + '</label><input class="inp tnum" id="cf' + i + '" data-k="' + esc(c.key) + '" type="number" step="0.1" min="0" value="' + esc(c.value) + '"><span class="hint">' + esc(c.ket) + '</span></div>').join('') + '</div>' +
         '<button class="btn primary" id="cfSave">Simpan aturan</button></div>';
     }
-    MB.innerHTML = h;
+    MB.innerHTML = (canEdit('admin') ? '' : '<div class="note warn" style="margin-bottom:12px">Akses Anda untuk Master Data hanya lihat saja.</div>') + h;
+    if (!canEdit('admin')) { $$('button, input, select, textarea', MB).forEach(x => { if (x.id !== 'uQ' && x.id !== 'ckArea') x.disabled = true; }); }
     if (tab === 'user') {
       $('#uImp').onclick = importForm;
       $$('[data-u]').forEach(b => b.onclick = () => userForm(D.users[+b.dataset.u]));

@@ -568,7 +568,7 @@
     function refresh() { loadMaster().then(() => { updateShiftChip(); updateMtChip(); go(S.page); }).catch(fail); }
     function updateMtChip() {
         let c = $('#mtChip');
-        if (!(isSuper() && S.master && S.master.maintenance)) { if (c) c.remove(); return; }
+        if (!(isSuper() && S.master && (S.master.maintenance || S.master.maintenance5r))) { if (c) c.remove(); return; }
         if (!c) {
             c = document.createElement('button');
             c.id = 'mtChip'; c.type = 'button'; c.className = 'chip warn'; c.style.cursor = 'pointer'; c.style.border = '0';
@@ -576,7 +576,7 @@
             c.onclick = () => go('maintenance');
             $('.top-actions').insertBefore(c, $('#shiftNow'));
         }
-        c.innerHTML = '<span class="material-symbols-outlined">construction</span>Maintenance aktif';
+        c.innerHTML = '<span class="material-symbols-outlined">construction</span>Maintenance ' + (S.master.maintenance && S.master.maintenance5r ? 'HRIS & 5R' : S.master.maintenance ? 'HRIS' : '5R') + ' aktif';
     }
 
     /* =========================== FOTO PROFIL & OPERATOR =========================== */
@@ -3692,87 +3692,133 @@
 
     /* =========================== INIT =========================== */
     /* =========================== CONTROL AKSES (KHUSUS SUPER ADMIN) =========================== */
+    // Satu halaman untuk dua aplikasi: tab HRIS dan Monitoring 5R (datanya disimpan terpisah)
     const AK_ROLES = [['ADMIN', 'Admin'], ['SUPERVISOR', 'Supervisor'], ['LEADER', 'Leader / PIC'], ['VIEWER', 'Viewer']];
-    let AK = null;
-    function akMenus() { return PAGES.filter(p => !p.superOnly); }
-    // Menu yang memang hanya untuk dilihat (tidak ada data yang diedit) — pilihan Edit tidak ditampilkan
-    const AK_VIEW_ONLY = ['dashboard', 'rekap', 'data_absen'];
+    const AK_5R_ICON = { dash: 'dashboard', input: 'add_a_photo', tugas: 'task_alt', daftar: 'list_alt', verif: 'verified_user', audit: 'fact_check', poin: 'emoji_events', kpi: 'monitoring', admin: 'settings', qr: 'qr_code_2' };
+    let AK = null, AKD = null, AKAPP = 'hris';
+    // Konfigurasi per aplikasi
+    function akCfg() {
+        if (AKAPP === '5r') {
+            const R = AKD.r5;
+            return {
+                roles: R.roles.map(r => [r, r]),
+                menus: R.menus,
+                viewOnly: R.menus.filter(m => m.viewOnly).map(m => m.id),
+                viewer: 'Viewer',
+                def: r => R.menus.filter(m => m.roles.indexOf(r) >= 0).map(m => m.id),
+                icon: id => '<span class="material-symbols-outlined">' + (AK_5R_ICON[id] || 'circle') + '</span>',
+                users: R.users,
+                roleLabel: r => r,
+                saveAction: 'access5rSave',
+                config: R.config,
+                title: 'Monitoring 5R'
+            };
+        }
+        return {
+            roles: AK_ROLES,
+            menus: PAGES.filter(p => !p.superOnly),
+            // Menu yang memang hanya untuk dilihat (tidak ada data yang diedit) — pilihan Edit tidak ditampilkan
+            viewOnly: ['dashboard', 'rekap', 'data_absen'],
+            viewer: 'VIEWER',
+            def: r => PAGES.filter(p => !p.superOnly && p.roles.indexOf(r) >= 0).map(p => p.id),
+            icon: id => ICONS[id] || '',
+            users: AKD.users || [],
+            roleLabel: r => r === 'LEADER' ? 'Leader / PIC' : r,
+            saveAction: 'accessSave',
+            config: AKD.config,
+            title: 'HRIS'
+        };
+    }
     // Level akses menu: '' = tidak ada, 'R' = lihat saja, 'E' = bisa edit
     // Role Viewer memang tidak pernah bisa mengedit — pilihannya hanya Tidak ada / Lihat saja
-    function akLevel(list, ro, id, r) { return list.indexOf(id) < 0 ? '' : (ro.indexOf(id) >= 0 || AK_VIEW_ONLY.includes(id) || r === 'VIEWER' ? 'R' : 'E'); }
+    function akLevel(list, ro, id, r) { const C = akCfg(); return list.indexOf(id) < 0 ? '' : (ro.indexOf(id) >= 0 || C.viewOnly.includes(id) || r === C.viewer ? 'R' : 'E'); }
     function akSetLevel(list, ro, id, lv) {
+        const C = akCfg();
         const i = list.indexOf(id), j = ro.indexOf(id);
         if (lv === '') { if (i >= 0) list.splice(i, 1); if (j >= 0) ro.splice(j, 1); return; }
         if (i < 0) list.push(id);
-        if (lv === 'R' && j < 0 && !AK_VIEW_ONLY.includes(id)) ro.push(id);
+        if (lv === 'R' && j < 0 && !C.viewOnly.includes(id)) ro.push(id);
         if (lv === 'E' && j >= 0) ro.splice(j, 1);
     }
     function akSelect(attrs, lv, id, label, r) {
-        const opts = [['', 'Tidak ada'], ['R', 'Lihat saja']].concat(AK_VIEW_ONLY.includes(id) || r === 'VIEWER' ? [] : [['E', 'Bisa edit']]);
+        const C = akCfg();
+        const opts = [['', 'Tidak ada'], ['R', 'Lihat saja']].concat(C.viewOnly.includes(id) || r === C.viewer ? [] : [['E', 'Bisa edit']]);
         return '<select class="ak-lv lv-' + (lv || 'N') + '" ' + attrs + ' aria-label="' + esc(label) + '">' +
             opts.map(o => '<option value="' + o[0] + '"' + (o[0] === lv ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>';
     }
-    function akDefault(r) { return akMenus().filter(p => p.roles.indexOf(r) >= 0).map(p => p.id); }
 
-    async function renderAkses() {
-        $('#pageSub').textContent = 'Atur menu yang dapat diakses tiap role atau user';
-        $('#view').innerHTML = '<div id="akBody"><div class="empty">Memuat…</div></div>';
-        const d = await call('accessGet', {});
-        const ro = d.config.ro || {};
-        AK = { roles: {}, users: Object.assign({}, d.config.users || {}), userList: d.users || [], sel: '',
-            roRoles: {}, roUsers: {} };
-        AK_ROLES.forEach(r => {
-            AK.roles[r[0]] = (d.config.roles && d.config.roles[r[0]]) ? d.config.roles[r[0]].slice() : akDefault(r[0]);
+    function akLoad() {
+        const C = akCfg();
+        const cfg = C.config || {};
+        const ro = cfg.ro || {};
+        AK = { roles: {}, users: JSON.parse(JSON.stringify(cfg.users || {})), userList: C.users, sel: '', roRoles: {}, roUsers: {} };
+        C.roles.forEach(r => {
+            AK.roles[r[0]] = (cfg.roles && cfg.roles[r[0]]) ? cfg.roles[r[0]].slice() : C.def(r[0]);
             AK.roRoles[r[0]] = ((ro.roles || {})[r[0]] || []).slice();
         });
         Object.keys(AK.users).forEach(u => { AK.roUsers[u] = ((ro.users || {})[u] || []).slice(); });
+    }
+
+    async function renderAkses() {
+        $('#pageSub').textContent = 'Atur menu yang dapat diakses tiap role atau user — HRIS & Monitoring 5R';
+        $('#view').innerHTML = '<div id="akBody"><div class="empty">Memuat…</div></div>';
+        AKD = await call('accessGet', {});
+        akLoad();
         drawAkses();
     }
 
     function akMenuLabel(p) {
-        return '<span style="display:inline-flex;align-items:center;gap:8px"><span style="color:var(--text-3);display:inline-flex">' + (ICONS[p.id] || '') + '</span>' + esc(p.label) + '</span>';
+        return '<span style="display:inline-flex;align-items:center;gap:8px"><span style="color:var(--text-3);display:inline-flex">' + akCfg().icon(p.id) + '</span>' + esc(p.label) + '</span>';
     }
 
     function drawAkses() {
-        const menus = akMenus();
+        const C = akCfg();
+        const menus = C.menus;
         const roleOf = u => (AK.userList.find(x => x.username === u) || {}).role || '';
-        let h = '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined">group</span>Akses per role</h2>' +
-            '<span class="small muted">Pilih untuk tiap menu: <b>Tidak ada</b> (menu disembunyikan), <b>Lihat saja</b> (bisa dibuka, tidak bisa mengedit), atau <b>Bisa edit</b></span></div>' +
+        let h = '<div class="ak-apps seg" role="tablist" aria-label="Aplikasi" style="margin-bottom:14px">' +
+            [['hris', 'HRIS', 'badge'], ['5r', 'Monitoring 5R', 'cleaning_services']].map(a =>
+                '<button type="button" role="tab" class="btn sm' + (AKAPP === a[0] ? ' primary' : '') + '" aria-selected="' + (AKAPP === a[0]) + '" data-akapp="' + a[0] + '"><span class="material-symbols-outlined">' + a[2] + '</span> ' + a[1] + '</button>').join(' ') + '</div>';
+        h += '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined">group</span>Akses per role · ' + esc(C.title) + '</h2>' +
+            '<span class="small muted">Pilih untuk tiap menu: <b>Tidak ada</b> (menu disembunyikan), <b>Lihat saja</b> (bisa dibuka, tidak bisa mengedit), atau <b>Bisa edit</b>' +
+            (AKAPP === '5r' ? '. Role 5R bawaan mengikuti role HRIS: Admin → Admin, Supervisor → Auditor, Leader / PIC → PIC, Viewer → Viewer.' : '') + '</span></div>' +
             '<div class="table-wrap" style="max-height:none"><table class="tbl ak-tbl"><thead><tr><th>Menu</th>' +
-            AK_ROLES.map(r => '<th style="text-align:center">' + r[1] + '</th>').join('') + '</tr></thead><tbody>' +
-            menus.map(p => '<tr><td>' + akMenuLabel(p) + '</td>' + AK_ROLES.map(r =>
+            C.roles.map(r => '<th style="text-align:center">' + r[1] + '</th>').join('') + '</tr></thead><tbody>' +
+            menus.map(p => '<tr><td>' + akMenuLabel(p) + '</td>' + C.roles.map(r =>
                 '<td style="text-align:center">' + akSelect('data-akr="' + r[0] + '" data-m="' + p.id + '"', akLevel(AK.roles[r[0]], AK.roRoles[r[0]], p.id, r[0]), p.id, p.label + ' untuk ' + r[1], r[0]) + '</td>').join('') + '</tr>').join('') +
             '</tbody></table></div>' +
             '<div class="row" style="margin-top:12px"><button class="btn sm ghost" id="akReset"><span class="material-symbols-outlined">restart_alt</span> Kembalikan ke bawaan</button></div></div>';
 
         const custom = Object.keys(AK.users);
-        h += '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined">person</span>Akses khusus per user</h2>' +
+        h += '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined">person</span>Akses khusus per user · ' + esc(C.title) + '</h2>' +
             '<span class="small muted">Bila diatur, menggantikan akses role untuk user tersebut</span></div>' +
             (custom.length ? '<div class="row" style="gap:6px;margin-bottom:12px">' + custom.map(u => '<span class="chip pri">' + esc(u) + ' · ' + AK.users[u].length + ' menu' + ((AK.roUsers[u] || []).length ? ' (' + AK.roUsers[u].length + ' lihat saja)' : '') + '</span>').join('') + '</div>' : '') +
             '<label class="field" style="max-width:420px"><span>Pilih user</span><select id="akUser"><option value="">— Pilih user —</option>' +
-            AK.userList.map(u => '<option value="' + esc(u.username) + '"' + (AK.sel === u.username ? ' selected' : '') + '>' + esc(u.nama + ' (' + u.username + ') · ' + (u.role === 'LEADER' ? 'Leader / PIC' : u.role)) + (AK.users[u.username] ? ' · khusus' : '') + '</option>').join('') +
+            AK.userList.map(u => '<option value="' + esc(u.username) + '"' + (AK.sel === u.username ? ' selected' : '') + '>' + esc(u.nama + ' (' + u.username + ') · ' + C.roleLabel(u.role)) + (AK.users[u.username] ? ' · khusus' : '') + '</option>').join('') +
             '</select></label><div id="akUserBox"></div></div>';
 
         h += '<div class="savebar"><span>Perubahan berlaku saat user memuat ulang halaman.</span><span class="spacer"></span>' +
-            '<button class="btn sm primary" id="akSave"><span class="material-symbols-outlined">check_circle</span> Simpan Control Akses</button></div>';
+            '<button class="btn sm primary" id="akSave"><span class="material-symbols-outlined">check_circle</span> Simpan Control Akses ' + esc(C.title) + '</button></div>';
 
         $('#akBody').innerHTML = h;
+        $$('[data-akapp]').forEach(b => b.onclick = () => { if (AKAPP === b.dataset.akapp) return; AKAPP = b.dataset.akapp; akLoad(); drawAkses(); });
         $$('[data-akr]').forEach(sel => sel.onchange = () => {
             akSetLevel(AK.roles[sel.dataset.akr], AK.roRoles[sel.dataset.akr], sel.dataset.m, sel.value);
             sel.className = 'ak-lv lv-' + (sel.value || 'N');
         });
-        $('#akReset').onclick = () => { AK_ROLES.forEach(r => { AK.roles[r[0]] = akDefault(r[0]); AK.roRoles[r[0]] = []; }); drawAkses(); };
+        $('#akReset').onclick = () => { C.roles.forEach(r => { AK.roles[r[0]] = C.def(r[0]); AK.roRoles[r[0]] = []; }); drawAkses(); };
         $('#akUser').onchange = e => { AK.sel = e.target.value; drawAkUser(roleOf); };
         $('#akSave').onclick = async () => {
             try {
-                await call('accessSave', { roles: AK.roles, users: AK.users, ro: { roles: AK.roRoles, users: AK.roUsers } });
-                toast('Control akses disimpan.', 'ok');
+                const saved = await call(C.saveAction, { roles: AK.roles, users: AK.users, ro: { roles: AK.roRoles, users: AK.roUsers } });
+                if (AKAPP === '5r') AKD.r5.config = saved; else AKD.config = saved;
+                toast('Control akses ' + C.title + ' disimpan.', 'ok');
             } catch (e) { fail(e); }
         };
         drawAkUser(roleOf);
     }
 
     function drawAkUser(roleOf) {
+        const C = akCfg();
         const box = $('#akUserBox');
         const u = AK.sel;
         if (!u) { box.innerHTML = ''; return; }
@@ -3781,9 +3827,9 @@
         const ro = has ? (AK.roUsers[u] = AK.roUsers[u] || []) : (AK.roRoles[roleOf(u)] || []);
         box.innerHTML = '<label class="check"><input type="checkbox" id="akUse"' + (has ? ' checked' : '') + '> Gunakan akses khusus untuk user ini</label>' +
             '<div class="ak-user-grid" style="margin-top:10px' + (has ? '' : ';opacity:.55;pointer-events:none') + '">' +
-            akMenus().map(p => '<label class="ak-user-item"><span>' + akMenuLabel(p) + '</span>' +
+            C.menus.map(p => '<label class="ak-user-item"><span>' + akMenuLabel(p) + '</span>' +
                 akSelect('data-aku="' + p.id + '"' + (has ? '' : ' disabled'), akLevel(list, ro, p.id, roleOf(u)), p.id, p.label, roleOf(u)) + '</label>').join('') + '</div>' +
-            (has ? '' : '<p class="small muted" style="margin:8px 0 0">Saat ini mengikuti akses role ' + esc(roleOf(u)) + '.</p>');
+            (has ? '' : '<p class="small muted" style="margin:8px 0 0">Saat ini mengikuti akses role ' + esc(C.roleLabel(roleOf(u))) + '.</p>');
         $('#akUse').onchange = e => {
             if (e.target.checked) { AK.users[u] = (AK.roles[roleOf(u)] || []).slice(); AK.roUsers[u] = (AK.roRoles[roleOf(u)] || []).slice(); }
             else { delete AK.users[u]; delete AK.roUsers[u]; }
@@ -3880,20 +3926,23 @@
     }
 
     function drawMaintenance(d) {
-        const on = !!d.aktif;
         const key = String(d.key || '');
         const url = location.origin + location.pathname.replace(/[^/]*$/, '') + 'maintenance/' + key.charAt(0).toUpperCase() + key.slice(1);
+        // Satu kartu, saklar terpisah per aplikasi
+        const mtRow = (app, label, ico, on, ket) => '<div class="mt-app" style="display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line)">' +
+            '<span class="material-symbols-outlined" style="color:var(--text-3)">' + ico + '</span>' +
+            '<div style="flex:1;min-width:0"><b>' + label + '</b> <span class="chip xs ' + (on ? 'warn' : 'ok') + '">' + (on ? 'Maintenance' : 'Normal') + '</span>' +
+            '<div class="small muted">' + ket + '</div></div>' +
+            '<button class="btn sm ' + (on ? 'primary' : 'danger') + '" data-mt="' + app + '" data-on="' + (on ? 1 : 0) + '"><span class="material-symbols-outlined">' + (on ? 'play_circle' : 'construction') + '</span> ' + (on ? 'Nonaktifkan' : 'Aktifkan') + '</button></div>';
         $('#mtBody').innerHTML = '<div class="card">' +
             '<div class="card-head"><h2><span class="material-symbols-outlined">construction</span>Mode maintenance</h2>' +
-            '<span class="chip ' + (on ? 'warn' : 'ok') + '">' + (on ? 'Aktif' : 'Nonaktif') + '</span></div>' +
-            '<p class="muted" style="margin-top:0">' + (on
-                ? 'Maintenance sedang aktif. Hanya super admin yang dapat masuk; user lain otomatis keluar dan melihat halaman maintenance.'
-                : 'Sistem berjalan normal. Saat diaktifkan, semua user selain super admin akan dikeluarkan dan tidak bisa login sampai maintenance dimatikan.') + '</p>' +
-            '<label class="field"><span>Alamat login saat maintenance</span><div class="row" style="flex-wrap:nowrap">' +
+            '<span class="chip ' + (d.aktif || d.aktif5r ? 'warn' : 'ok') + '">' + (d.aktif && d.aktif5r ? 'Semua maintenance' : d.aktif ? 'HRIS maintenance' : d.aktif5r ? '5R maintenance' : 'Semua normal') + '</span></div>' +
+            '<p class="muted" style="margin-top:0">Atur per aplikasi. Saat aktif, semua user selain super admin dikeluarkan dari aplikasi tersebut dan tidak bisa masuk; aplikasi lain tetap bisa dipakai. Bila keduanya aktif, halaman login menampilkan layar maintenance.</p>' +
+            mtRow('hris', 'HRIS', 'badge', !!d.aktif, 'Request OS, jadwal, absensi, rekap MPP') +
+            mtRow('5r', 'Monitoring 5R', 'cleaning_services', !!d.aktif5r, 'Temuan, verifikasi, audit, KPI PIC') +
+            '<label class="field" style="margin-top:8px"><span>Alamat login saat maintenance</span><div class="row" style="flex-wrap:nowrap">' +
             '<input readonly id="mtUrl" value="' + esc(url) + '"><button type="button" class="btn sm" id="mtCopy"><span class="material-symbols-outlined">content_copy</span> Salin</button></div>' +
-            '<small>Buka alamat ini untuk menampilkan form login ketika maintenance aktif.</small></label>' +
-            '<button class="btn ' + (on ? 'primary' : 'danger') + '" id="mtToggle"><span class="material-symbols-outlined">' + (on ? 'play_circle' : 'construction') + '</span> ' +
-            (on ? 'Nonaktifkan maintenance' : 'Aktifkan maintenance') + '</button></div>' +
+            '<small>Buka alamat ini untuk menampilkan form login ketika maintenance aktif.</small></label></div>' +
             mtAutoApproveCard(!!d.autoApprove) +
             '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined">database</span>Database</h2>' +
             '<button type="button" class="btn sm ghost" id="dbReload"><span class="material-symbols-outlined">refresh</span> Muat ulang</button></div>' +
@@ -3913,16 +3962,17 @@
             } catch (e) { fail(e); }
         };
         $('#mtCopy').onclick = async () => toast(await copyText(url) ? 'Alamat disalin.' : 'Gagal menyalin.', 'ok');
-        $('#mtToggle').onclick = async () => {
-            if (!on && !await confirmBox('Aktifkan maintenance?', 'Semua user selain super admin akan langsung dikeluarkan dan tidak bisa login.\nSimpan alamat login maintenance terlebih dahulu.', 'Aktifkan', 'danger')) return;
+        $$('[data-mt]').forEach(b => b.onclick = async () => {
+            const app = b.dataset.mt, on = b.dataset.on === '1', label = app === '5r' ? 'Monitoring 5R' : 'HRIS';
+            if (!on && !await confirmBox('Aktifkan maintenance ' + label + '?', 'Semua user selain super admin akan langsung dikeluarkan dari ' + label + ' dan tidak bisa masuk.\nSimpan alamat login maintenance terlebih dahulu.', 'Aktifkan', 'danger')) return;
             try {
-                const r = await call('setMaintenance', { aktif: !on });
-                S.master.maintenance = r.aktif;
+                const r = await call('setMaintenance', { app: app, aktif: !on });
+                S.master.maintenance = r.aktif; S.master.maintenance5r = r.aktif5r;
                 updateMtChip();
-                toast(r.aktif ? 'Maintenance diaktifkan.' : 'Maintenance dinonaktifkan. Sistem kembali normal.', 'ok');
+                toast('Maintenance ' + label + (!on ? ' diaktifkan.' : ' dinonaktifkan.'), 'ok');
                 drawMaintenance(r);
             } catch (e) { fail(e); }
-        };
+        });
     }
 
     const RENDER = {

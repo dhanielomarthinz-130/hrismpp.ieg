@@ -50,8 +50,14 @@ function require_super(array $user): void {
     }
 }
 
-function maintenance_on(): bool {
-    return (string)db_val("SELECT value FROM settings WHERE key_name = 'maintenance'", [], '0') === '1';
+/** Maintenance per aplikasi: 'hris' (bawaan) atau '5r' (Monitoring 5R). Super admin selalu bisa masuk. */
+function maintenance_on(string $app = 'hris'): bool {
+    $key = $app === '5r' ? 'maintenance_5r' : 'maintenance';
+    return (string)db_val("SELECT value FROM settings WHERE key_name = ?", [$key], '0') === '1';
+}
+
+function app_label(string $app): string {
+    return $app === '5r' ? 'Monitoring 5R' : 'HRIS';
 }
 
 // ---------------------------------------------------------------- Control Akses Menu
@@ -169,7 +175,8 @@ function get_audit(array $currentUser = []): array {
     return array_slice($rows, 0, 100);
 }
 
-function login(string $username, string $password): array {
+function login(string $username, string $password, string $app = 'hris'): array {
+    $app = $app === '5r' ? '5r' : 'hris';
     $username = trim(strtolower($username));
     $password = (string)$password;
     if ($username === '' || $password === '') {
@@ -198,8 +205,8 @@ function login(string $username, string $password): array {
     login_clear_($username);
 
     // Saat maintenance aktif, hanya super admin yang boleh masuk (dicek setelah password benar)
-    if (maintenance_on() && strtoupper((string)$row['role']) !== ROLE_SUPER) {
-        throw new RuntimeException('Sistem sedang dalam maintenance. Silakan coba lagi nanti.');
+    if (maintenance_on($app) && strtoupper((string)$row['role']) !== ROLE_SUPER) {
+        throw new RuntimeException(app_label($app) . ' sedang dalam maintenance. Silakan coba lagi nanti.');
     }
 
     // Bersihkan sesi kedaluwarsa
@@ -274,7 +281,7 @@ function login_clear_(string $username): void {
     db_query("DELETE FROM login_attempts WHERE kunci = ?", ['u:' . $username]);
 }
 
-function auth_check(?string $token): array {
+function auth_check(?string $token, string $app = 'hris'): array {
     if (!$token) {
         throw new AuthException('Sesi berakhir, silakan login ulang.');
     }
@@ -290,8 +297,8 @@ function auth_check(?string $token): array {
     }
 
     // Maintenance aktif: sesi selain super admin langsung diakhiri
-    if (maintenance_on() && strtoupper((string)$sess['role']) !== ROLE_SUPER) {
-        throw new AuthException('Sistem sedang dalam maintenance. Silakan coba lagi nanti.');
+    if (maintenance_on($app) && strtoupper((string)$sess['role']) !== ROLE_SUPER) {
+        throw new AuthException(app_label($app) . ' sedang dalam maintenance. Silakan coba lagi nanti.');
     }
 
     // Perpanjang masa sesi (sliding expiration)

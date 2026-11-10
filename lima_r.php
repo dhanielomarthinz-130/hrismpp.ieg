@@ -17,6 +17,19 @@ const R5_LIST    = ['Ringkas', 'Rapi', 'Resik', 'Rawat', 'Rajin'];
 const R5_TINGKAT = ['Minor', 'Mayor', 'Kritis'];
 const R5_ROLES   = ['Admin', 'Auditor', 'PIC', 'Viewer'];
 const R5_OPEN = 'Open', R5_WAIT = 'Menunggu Verifikasi', R5_REVISI = 'Revisi', R5_CLOSED = 'Closed', R5_BATAL = 'Batal', R5_KEBERATAN = 'Keberatan';
+/** Menu 5R: id => [label, role bawaan, hanya-lihat]. Diatur super admin di HRIS → Control Akses → Monitoring 5R. */
+const R5_MENUS = [
+    'dash'   => ['Dashboard', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
+    'input'  => ['Input Temuan', ['Admin', 'Auditor', 'PIC'], false],
+    'tugas'  => ['Tugas Saya (perbaikan & keberatan)', ['Admin', 'Auditor', 'PIC'], false],
+    'daftar' => ['Daftar Temuan', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
+    'verif'  => ['Verifikasi & Keberatan', ['Admin', 'Auditor'], false],
+    'audit'  => ['Audit 5R', ['Admin', 'Auditor'], false],
+    'poin'   => ['Papan Poin', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
+    'kpi'    => ['KPI PIC', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
+    'admin'  => ['Master Data (+ batalkan temuan)', ['Admin'], false],
+    'qr'     => ['QR Area', ['Admin'], true],
+];
 const R5_FOTO_DIM = 1280;   // foto temuan disimpan WebP (ringan), sisi terpanjang maks 1280px
 
 const R5_DEFAULT_CONFIG = [
@@ -261,18 +274,81 @@ function r5_timmap(?array $areas = null): array {
     return $m;
 }
 
-/** Token = token sesi HRIS (dari login HRIS). */
-function r5_auth($token, ?array $roles = null): array {
+/* ---------------------------------------------------------------- Control akses 5R */
+function r5_access_config(): array {
+    $raw = json_decode((string)db_val("SELECT value FROM settings WHERE key_name = 'menu_access_5r'", [], ''), true);
+    $ids = array_keys(R5_MENUS);
+    $clean = fn($l) => array_values(array_intersect($ids, is_array($l) ? $l : []));
+    $out = ['roles' => [], 'users' => [], 'ro' => ['roles' => [], 'users' => []]];
+    foreach ((array)($raw['roles'] ?? []) as $r => $l) if (in_array($r, R5_ROLES, true)) $out['roles'][$r] = $clean($l);
+    foreach ((array)($raw['users'] ?? []) as $u => $l) $out['users'][mb_strtolower((string)$u)] = $clean($l);
+    foreach ((array)($raw['ro']['roles'] ?? []) as $r => $l) if (in_array($r, R5_ROLES, true)) $out['ro']['roles'][$r] = $clean($l);
+    foreach ((array)($raw['ro']['users'] ?? []) as $u => $l) $out['ro']['users'][mb_strtolower((string)$u)] = $clean($l);
+    return $out;
+}
+
+function r5_default_menus(string $role): array {
+    return array_keys(array_filter(R5_MENUS, fn($m) => in_array($role, $m[1], true)));
+}
+
+/** Menu yang boleh dibuka & yang hanya lihat untuk user 5R ini. */
+function r5_access_for(array $u): array {
+    if (!empty($u['super'])) return ['menus' => array_keys(R5_MENUS), 'ro' => []];
+    $cfg = r5_access_config();
+    $k = mb_strtolower($u['nik']);
+    if (array_key_exists($k, $cfg['users'])) { $menus = $cfg['users'][$k]; $ro = $cfg['ro']['users'][$k] ?? []; }
+    elseif (array_key_exists($u['role'], $cfg['roles'])) { $menus = $cfg['roles'][$u['role']]; $ro = $cfg['ro']['roles'][$u['role']] ?? []; }
+    else { $menus = r5_default_menus($u['role']); $ro = []; }
+    // Menu hanya-lihat & role Viewer tidak pernah bisa mengedit
+    foreach ($menus as $m) if ((R5_MENUS[$m][2] || $u['role'] === 'Viewer') && !in_array($m, $ro, true)) $ro[] = $m;
+    return ['menus' => array_values($menus), 'ro' => array_values(array_intersect($ro, $menus))];
+}
+
+function r5_need(array $u, string $menu, bool $edit): void {
+    $a = r5_access_for($u);
+    $label = R5_MENUS[$menu][0] ?? $menu;
+    if (!in_array($menu, $a['menus'], true)) throw new RuntimeException('Menu ' . $label . ' tidak tersedia untuk akun Anda. Hubungi Super Admin.');
+    if ($edit && in_array($menu, $a['ro'], true)) throw new RuntimeException('Akses Anda untuk menu ' . $label . ' hanya lihat saja (tidak bisa edit).');
+}
+
+/** Data untuk halaman Control Akses (HRIS, super admin). */
+function r5_access_meta(): array {
+    $menus = [];
+    foreach (R5_MENUS as $id => $m) $menus[] = ['id' => $id, 'label' => $m[0], 'roles' => $m[1], 'viewOnly' => $m[2]];
+    return ['config' => r5_access_config(), 'menus' => $menus, 'roles' => R5_ROLES,
+            'users' => array_map(fn($u) => ['username' => $u['nik'], 'nama' => $u['nama'], 'role' => $u['role']], r5_users_all())];
+}
+
+function r5_access_save(array $p, array $hrisUser): array {
+    require_super($hrisUser);
+    $ids = array_keys(R5_MENUS);
+    $known = array_map(fn($u) => mb_strtolower($u['nik']), r5_users_all());
+    $cfg = ['roles' => [], 'users' => [], 'ro' => ['roles' => [], 'users' => []]];
+    foreach ((array)($p['roles'] ?? []) as $r => $l) if (in_array($r, R5_ROLES, true)) $cfg['roles'][$r] = array_values(array_intersect($ids, (array)$l));
+    foreach ((array)($p['users'] ?? []) as $u => $l) {
+        $u = mb_strtolower(trim((string)$u));
+        if (in_array($u, $known, true)) $cfg['users'][$u] = array_values(array_intersect($ids, (array)$l));
+    }
+    foreach ((array)($p['ro']['roles'] ?? []) as $r => $l) if (isset($cfg['roles'][$r])) $cfg['ro']['roles'][$r] = array_values(array_intersect($cfg['roles'][$r], (array)$l));
+    foreach ((array)($p['ro']['users'] ?? []) as $u => $l) { $u = mb_strtolower((string)$u); if (isset($cfg['users'][$u])) $cfg['ro']['users'][$u] = array_values(array_intersect($cfg['users'][$u], (array)$l)); }
+    if (db_val("SELECT COUNT(*) FROM settings WHERE key_name = 'menu_access_5r'")) db_update('settings', ['value' => json_encode($cfg)], 'key_name = ?', ['menu_access_5r']);
+    else db_insert('settings', ['key_name' => 'menu_access_5r', 'value' => json_encode($cfg), 'ket' => 'Control akses Monitoring 5R']);
+    audit_log($hrisUser['username'], 'CONTROL_AKSES_5R', count($cfg['roles']) . ' role, ' . count($cfg['users']) . ' user khusus');
+    return $cfg;
+}
+
+/** Token = token sesi HRIS (dari login HRIS). $menu: menu 5R yang dibutuhkan; $edit: perlu akses edit. */
+function r5_auth($token, ?string $menu = null, bool $edit = false): array {
     try {
-        $hu = auth_check((string)$token);
+        $hu = auth_check((string)$token, '5r');
     } catch (AuthException $e) {
-        throw new RuntimeException('SESI_HABIS');
+        throw new RuntimeException(stripos($e->getMessage(), 'maintenance') !== false ? 'MAINTENANCE' : 'SESI_HABIS');
     }
     if (!empty($hu['mustChange'])) throw new RuntimeException('GANTI_PASSWORD');
     $u = r5_find_user($hu['username']);
     if (!$u) throw new RuntimeException('SESI_HABIS');
     if ($u['aktif'] === 'N') throw new RuntimeException('Akun Anda tidak aktif di Monitoring 5R. Hubungi Admin 5R.');
-    if ($roles && !in_array($u['role'], $roles, true)) throw new RuntimeException('Menu ini tidak tersedia untuk role ' . $u['role'] . '.');
+    if ($menu !== null) r5_need($u, $menu, $edit);
     return $u;
 }
 
@@ -323,6 +399,7 @@ function apiBootstrap($token): array {
             'potongRevisi' => r5_num('POTONG_REVISI', 1), 'slaVerif' => r5_num('SLA_VERIFIKASI_JAM', 24),
             'kpiTarget' => r5_num('KPI_TARGET', 85),
         ],
+        'access' => r5_access_for($u),
         'bulanIni' => r5_bulan(r5_now()),
         'version'  => R5_VERSION,
     ];
@@ -403,7 +480,7 @@ function r5_log_poin(string $jenis, string $refId, string $nama, float $poin, st
 }
 
 function apiCreateTemuan($token, $d): array {
-    $u = r5_auth($token, ['Admin', 'Auditor', 'PIC']);
+    $u = r5_auth($token, 'input', true);
     $d = is_array($d) ? $d : [];
     $area = r5_find_area($d['areaId'] ?? '');
     if (!$area) throw new RuntimeException('Area tidak ditemukan.');
@@ -487,7 +564,7 @@ function apiGetTemuan($token, $id): array {
 }
 
 function apiSubmitPerbaikan($token, $id, $catatan, $foto): array {
-    $u = r5_auth($token, ['Admin', 'Auditor', 'PIC']);
+    $u = r5_auth($token, 'tugas', true);
     if (empty($foto)) throw new RuntimeException('Foto sesudah perbaikan wajib diunggah.');
     $t0 = r5_find_temuan($id);
     if (!$t0) throw new RuntimeException('Temuan tidak ditemukan.');
@@ -524,7 +601,7 @@ function r5_poin_pic(array $t): array {
 }
 
 function apiVerifikasi($token, $id, $setuju, $catatan): array {
-    $u = r5_auth($token, ['Admin', 'Auditor']);
+    $u = r5_auth($token, 'verif', true);
     return db_transaction(function () use ($u, $id, $setuju, $catatan) {
         $t = r5_find_temuan($id);
         if (!$t) throw new RuntimeException('Temuan tidak ditemukan.');
@@ -578,7 +655,7 @@ function r5_batal(array $t, array $u, string $catatan): void {
 }
 
 function apiBatalkanTemuan($token, $id, $alasan): array {
-    $u = r5_auth($token, ['Admin']);
+    $u = r5_auth($token, 'admin', true);
     if (r5_str($alasan) === '') throw new RuntimeException('Alasan pembatalan wajib diisi.');
     return db_transaction(function () use ($u, $id, $alasan) {
         $t = r5_find_temuan($id);
@@ -596,7 +673,7 @@ function apiBatalkanTemuan($token, $id, $alasan): array {
  *                                                  batas waktu diperpanjang sebesar lama peninjauan
  * ===================================================================== */
 function apiKeberatan($token, $id, $alasan): array {
-    $u = r5_auth($token, ['Admin', 'Auditor', 'PIC']);
+    $u = r5_auth($token, 'tugas', true);
     if (r5_str($alasan) === '') throw new RuntimeException('Tulis alasan keberatan.');
     return db_transaction(function () use ($u, $id, $alasan) {
         $t = r5_find_temuan($id);
@@ -610,7 +687,7 @@ function apiKeberatan($token, $id, $alasan): array {
 }
 
 function apiPutusKeberatan($token, $id, $terima, $catatan): array {
-    $u = r5_auth($token, ['Admin', 'Auditor']);
+    $u = r5_auth($token, 'verif', true);
     return db_transaction(function () use ($u, $id, $terima, $catatan) {
         $t = r5_find_temuan($id);
         if (!$t) throw new RuntimeException('Temuan tidak ditemukan.');
@@ -803,7 +880,7 @@ function r5_kpi_rows(string $bulan, ?string $onlyNik = null): array {
 }
 
 function apiKpiPic($token, $bulan): array {
-    r5_auth($token);
+    r5_auth($token, 'kpi');
     $bulan = r5_valid_bulan($bulan);
     return ['bulan' => $bulan, 'rows' => r5_kpi_rows($bulan), 'target' => r5_num('KPI_TARGET', 85),
             'bobot' => ['tepat' => r5_num('KPI_BOBOT_TEPAT', 40), 'ftr' => r5_num('KPI_BOBOT_FTR', 25),
@@ -816,7 +893,7 @@ function r5_valid_bulan($b): string {
 }
 
 function apiDashboard($token, $bulan): array {
-    r5_auth($token);
+    r5_auth($token, 'dash');
     $bulan = r5_valid_bulan($bulan);
     $areas = db_all("SELECT * FROM r5_area");
     $tm = r5_timmap($areas);
@@ -872,7 +949,7 @@ function apiDashboard($token, $bulan): array {
 }
 
 function apiLeaderboard($token, $bulan): array {
-    r5_auth($token);
+    r5_auth($token, 'poin');
     $bulan = r5_valid_bulan($bulan);
     $areas = db_all("SELECT * FROM r5_area");
     $tm = r5_timmap($areas);
@@ -908,12 +985,12 @@ function r5_checklist_rows(string $areaId, bool $onlyActive = true): array {
 }
 
 function apiChecklist($token, $areaId): array {
-    r5_auth($token, ['Admin', 'Auditor']);
+    r5_auth($token, 'audit');
     return r5_checklist_rows(r5_str($areaId));
 }
 
 function apiSaveAudit($token, $d): array {
-    $u = r5_auth($token, ['Admin', 'Auditor']);
+    $u = r5_auth($token, 'audit', true);
     $d = is_array($d) ? $d : [];
     $area = r5_find_area($d['areaId'] ?? '');
     if (!$area) throw new RuntimeException('Area tidak ditemukan.');
@@ -945,7 +1022,7 @@ function apiSaveAudit($token, $d): array {
 }
 
 function apiListAudit($token, $bulan): array {
-    r5_auth($token);
+    r5_auth($token, 'audit');
     $bulan = r5_valid_bulan($bulan);
     $out = [];
     foreach (db_all("SELECT * FROM r5_audit ORDER BY tanggal DESC") as $a) {
@@ -962,7 +1039,7 @@ function apiListAudit($token, $bulan): array {
  *  ADMIN
  * ===================================================================== */
 function apiAdminData($token): array {
-    r5_auth($token, ['Admin']);
+    r5_auth($token, 'admin');
     $tm = r5_timmap();
     $chk = [];
     foreach (db_all("SELECT area_id, kategori_r, item FROM r5_checklist WHERE aktif <> 'N' ORDER BY id") as $c) {
@@ -990,7 +1067,7 @@ function r5_set_profile(array $u, string $role, string $areaId, bool $aktif): vo
 
 /** Ubah role / tim / status 5R user HRIS. Akun baru & password dikelola di HRIS → Pengaturan → Pengguna. */
 function apiSaveUser($token, $d): array {
-    $me = r5_auth($token, ['Admin']);
+    $me = r5_auth($token, 'admin', true);
     $d = is_array($d) ? $d : [];
     $u = r5_find_user($d['nik'] ?? '');
     if (!$u) throw new RuntimeException('User tidak ditemukan di HRIS. Tambahkan akun di HRIS → Pengaturan → Pengguna.');
@@ -1007,7 +1084,7 @@ function apiSaveUser($token, $d): array {
 }
 
 function apiSaveArea($token, $d): bool {
-    r5_auth($token, ['Admin']);
+    r5_auth($token, 'admin', true);
     $d = is_array($d) ? $d : [];
     $a = r5_find_area($d['id'] ?? '');
     $picNik = r5_str($d['picNik'] ?? '');
@@ -1036,7 +1113,7 @@ function apiSaveArea($token, $d): bool {
 
 /** Ganti seluruh item checklist audit satu area. */
 function apiSaveChecklist($token, $areaId, $items): array {
-    r5_auth($token, ['Admin']);
+    r5_auth($token, 'admin', true);
     $area = r5_find_area($areaId);
     if (!$area) throw new RuntimeException('Area tidak ditemukan.');
     $clean = [];
@@ -1060,7 +1137,7 @@ function apiSaveChecklist($token, $areaId, $items): array {
  * Tiap baris: Username HRIS, Kode area / nama area / nama tim, Role 5R (opsional, kosong = ikut role HRIS).
  */
 function apiImportUsers($token, $rows): array {
-    r5_auth($token, ['Admin']);
+    r5_auth($token, 'admin', true);
     $areas = db_all("SELECT * FROM r5_area");
     $tm = r5_timmap($areas);
     $findAreaId = function ($v) use ($areas, $tm) {
@@ -1096,7 +1173,7 @@ function apiImportUsers($token, $rows): array {
 }
 
 function apiSaveConfig($token, $list): bool {
-    r5_auth($token, ['Admin']);
+    r5_auth($token, 'admin', true);
     $keys = array_column(db_all("SELECT key_name FROM r5_config"), 'key_name');
     db_transaction(function () use ($list, $keys) {
         foreach ((array)$list as $c) {

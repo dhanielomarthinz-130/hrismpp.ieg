@@ -22,6 +22,7 @@ require_once __DIR__ . '/mingguan.php';
 require_once __DIR__ . '/wa.php';
 require_once __DIR__ . '/export.php';
 require_once __DIR__ . '/dbadmin.php';
+require_once __DIR__ . '/lima_r.php';
 
 // Tangkap input JSON
 $rawInput = file_get_contents('php://input');
@@ -52,7 +53,7 @@ if (!$token) {
 
 try {
     if ($action === 'login') {
-        $data = login((string)($payload['username'] ?? ''), (string)($payload['password'] ?? ''));
+        $data = login((string)($payload['username'] ?? ''), (string)($payload['password'] ?? ''), (string)($payload['app'] ?? 'hris'));
         echo json_encode(['ok' => true, 'data' => $data]);
         exit;
     }
@@ -142,7 +143,7 @@ try {
         // Maintenance (khusus super admin)
         'maintenance'     => function () use ($user) {
             require_super($user);
-            return ['aktif' => maintenance_on(), 'key' => MAINTENANCE_KEY, 'autoApprove' => auto_approve_on()];
+            return ['aktif' => maintenance_on(), 'aktif5r' => maintenance_on('5r'), 'key' => MAINTENANCE_KEY, 'autoApprove' => auto_approve_on()];
         },
         'setAutoApprove'  => function () use ($payload, $user) {
             require_super($user);
@@ -153,15 +154,18 @@ try {
         },
         'accessGet'       => function () use ($user) {
             require_super($user);
-            return ['config' => menu_access_config(), 'users' => list_users()];
+            r5_init();
+            return ['config' => menu_access_config(), 'users' => list_users(), 'r5' => r5_access_meta()];
         },
         'accessSave'      => fn() => menu_access_save($payload, $user),
+        'access5rSave'    => function () use ($payload, $user) { r5_init(); return r5_access_save($payload, $user); },
         'setMaintenance'  => function () use ($payload, $user) {
             require_super($user);
             $on = !empty($payload['aktif']);
-            set_settings(['maintenance' => $on ? '1' : '0']);
-            audit_log($user['username'], 'MAINTENANCE', $on ? 'Aktif' : 'Nonaktif');
-            return ['aktif' => $on, 'key' => MAINTENANCE_KEY, 'autoApprove' => auto_approve_on()];
+            $app = ($payload['app'] ?? 'hris') === '5r' ? '5r' : 'hris';
+            set_settings([$app === '5r' ? 'maintenance_5r' : 'maintenance' => $on ? '1' : '0']);
+            audit_log($user['username'], 'MAINTENANCE', app_label($app) . ' ' . ($on ? 'Aktif' : 'Nonaktif'));
+            return ['aktif' => maintenance_on(), 'aktif5r' => maintenance_on('5r'), 'key' => MAINTENANCE_KEY, 'autoApprove' => auto_approve_on()];
         },
 
         // Order MPP (WhatsApp & Approval Supervisor)
