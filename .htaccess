@@ -2,7 +2,7 @@ DirectoryIndex index.php
 Options -Indexes
 
 # Lindungi file sensitif
-<FilesMatch "^(config\.local(\.example)?\.php|database\.sql|README\.md|\.gitignore|index5R\.html|Code\.gs5R)$">
+<FilesMatch "^(config\.local(\.example)?\.php|database\.sql|README\.md|\.gitignore|App5R\.html)$">
     Require all denied
 </FilesMatch>
 
