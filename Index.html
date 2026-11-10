@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200">
     <title>HRIS Inventory PT.Inovasi Eka Gemilang</title>
     <!-- INCLUDE_STYLES -->
+<script>try{if(localStorage.getItem('side_mini')==='1')document.documentElement.classList.add('side-mini')}catch(e){}</script>
 </head>
 
 <body>
@@ -78,6 +79,9 @@
                     <div id="sideAppName">HRIS Inventory</div>
                     <small>PT. Inovasi Eka Gemilang</small>
                 </div>
+                <button type="button" class="side-toggle" id="sideToggle" aria-label="Kecilkan sidebar" title="Kecilkan sidebar">
+                    <span class="material-symbols-outlined">left_panel_close</span>
+                </button>
             </div>
             <nav id="sideNav" class="side-nav"></nav>
             <div class="side-foot">
@@ -93,11 +97,11 @@
                     <span class="material-symbols-outlined">cleaning_services</span>
                     <span>Monitoring 5R</span>
                 </a>
-                <button class="side-link" id="btnPw">
+                <button class="side-link" id="btnPw" title="Ganti password">
                     <span class="material-symbols-outlined">lock_reset</span>
                     <span>Ganti password</span>
                 </button>
-                <button class="side-link" id="btnLogout">
+                <button class="side-link" id="btnLogout" title="Keluar">
                     <span class="material-symbols-outlined">logout</span>
                     <span>Keluar</span>
                 </button>

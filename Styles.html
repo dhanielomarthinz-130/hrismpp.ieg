@@ -925,6 +925,36 @@
         border-bottom: 1px solid var(--side-line);
     }
 
+    .side-toggle {
+        display: none;
+        place-items: center;
+        flex: none;
+        width: 28px;
+        height: 28px;
+        margin-left: auto;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--side-muted);
+        cursor: pointer;
+    }
+
+    .side-toggle .material-symbols-outlined {
+        font-size: 20px;
+    }
+
+    .side-toggle:focus-visible {
+        outline: 2px solid #A5B4FC;
+        outline-offset: 1px;
+    }
+
+    @media (hover: hover) {
+        .side-toggle:hover {
+            background: var(--side-hover);
+            color: #FFFFFF;
+        }
+    }
+
     .side-title {
         min-width: 0;
         color: #FFFFFF;
@@ -1384,6 +1414,70 @@
 
         .main {
             margin-left: 248px;
+        }
+
+        /* Sidebar mini: hanya ikon (tombol di samping logo) */
+        .side-toggle {
+            display: grid;
+        }
+
+        .sidebar,
+        .main {
+            transition: width .22s var(--ease-out), margin-left .22s var(--ease-out), transform .24s var(--ease-out);
+        }
+
+        .side-mini .sidebar {
+            width: 72px;
+        }
+
+        .side-mini .main {
+            margin-left: 72px;
+        }
+
+        .side-mini .side-brand {
+            flex-direction: column;
+            gap: 8px;
+            padding: 14px 8px 12px;
+        }
+
+        .side-mini .side-toggle {
+            margin-left: 0;
+        }
+
+        .side-mini .side-title,
+        .side-mini .side-nav .lbl,
+        .side-mini .side-user .user-meta,
+        .side-mini .side-user-ico,
+        .side-mini .side-link > span:not(.material-symbols-outlined),
+        .side-mini .side-credit {
+            display: none;
+        }
+
+        .side-mini .side-sec {
+            font-size: 0;
+            padding: 0;
+            margin: 8px 6px;
+            border-top: 1px solid var(--side-line);
+        }
+
+        .side-mini .side-nav {
+            padding: 10px 8px;
+        }
+
+        .side-mini .side-nav a {
+            justify-content: center;
+            padding: 0;
+        }
+
+        .side-mini .side-nav a.active::before {
+            left: -8px;
+        }
+
+        .side-mini .side-user,
+        .side-mini .side-link {
+            justify-content: center;
+            padding-left: 0;
+            padding-right: 0;
         }
 
         .only-mobile {

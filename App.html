@@ -291,7 +291,7 @@
         $('#sideNav').innerHTML = allowedPages().map(p => {
             let h = '';
             if (p.sec && p.sec !== sec) { sec = p.sec; h += '<div class="side-sec">' + esc(p.sec) + '</div>'; }
-            return h + '<a data-page="' + p.id + '"><span class="ico">' + (ICONS[p.id] || '') + '</span>' + esc(p.label) + '</a>';
+            return h + '<a data-page="' + p.id + '" title="' + esc(p.label) + '"><span class="ico">' + (ICONS[p.id] || '') + '</span><span class="lbl">' + esc(p.label) + '</span></a>';
         }).join('');
         $('#bottomNav').innerHTML = allowedPages().filter(p => p.bottom).slice(0, 4).map(p =>
             '<a data-page="' + p.id + '"><span class="ico">' + (ICONS[p.id] || '') + '</span>' + esc(p.short || p.label) + '</a>').join('') +
@@ -3955,6 +3955,19 @@
         }
     };
     $('#btnMenu').onclick = () => openSide(true);
+    // Sidebar mini (desktop): hanya ikon, pilihan diingat & dipakai juga di Monitoring 5R
+    function setSideMini(on) {
+        document.documentElement.classList.toggle('side-mini', on);
+        try { localStorage.setItem('side_mini', on ? '1' : '0'); } catch (e) { }
+        const b = $('#sideToggle');
+        if (!b) return;
+        b.title = on ? 'Lebarkan sidebar' : 'Kecilkan sidebar';
+        b.setAttribute('aria-label', b.title);
+        b.setAttribute('aria-expanded', String(!on));
+        $('.material-symbols-outlined', b).textContent = on ? 'left_panel_open' : 'left_panel_close';
+    }
+    setSideMini(document.documentElement.classList.contains('side-mini'));
+    $('#sideToggle').onclick = () => setSideMini(!document.documentElement.classList.contains('side-mini'));
     $('#scrim').onclick = () => openSide(false);
     $('#btnLogout').onclick = () => doLogout(false);
     $('#btnPw').onclick = () => changePasswordModal(false);
