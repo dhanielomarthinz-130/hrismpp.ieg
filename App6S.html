@@ -229,6 +229,18 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .titem:hover{border-color:var(--primary)}
 .titem.late{box-shadow:inset 3px 0 0 var(--err),var(--shadow)}
 .thumb{width:68px;height:68px;border-radius:10px;background:var(--surface-2);flex:none;object-fit:cover}
+/* Datatable verifikasi */
+.dt th.sort{cursor:pointer;user-select:none}
+.dt th.sort::after{content:" ↕";opacity:.35;font-weight:400}
+.dt th.sort.asc::after{content:" ↑";opacity:1}.dt th.sort.desc::after{content:" ↓";opacity:1}
+.dt td{vertical-align:middle}
+.dt .ph2{display:flex;gap:4px}
+.dt .ph2 img,.dt .ph2 div{width:44px;height:44px;border-radius:8px;object-fit:cover;background:var(--surface-2)}
+.dt .cell-main{font-weight:700;color:var(--text);white-space:nowrap}
+.dt .cell-sub{font-size:11.5px;color:var(--muted);max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dt tr.own td{background:var(--surface-2)}
+.dt-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;font-size:12.5px;color:var(--muted);flex-wrap:wrap}
+.dt-foot .pg{display:flex;gap:4px}
 .titem .b{flex:1;min-width:0}
 .titem .id{font-size:11.5px;color:var(--muted);font-weight:700}
 .titem .d{font-weight:600;margin:2px 0 6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
@@ -961,7 +973,6 @@ async function renderList(scope, opt) {
     loading(LB);
     try {
       let rows = await call('apiListTemuan', S.token, f);
-      if (scope === 'verifikasi') rows = rows.filter(t => t.picNik.toLowerCase() !== S.user.nik.toLowerCase());
       const msg = scope === 'tersedia' ? 'Tidak ada temuan yang menunggu diambil.' : scope === 'mine' ? (modeBebas() ? 'Belum ada temuan yang Anda proses. Ambil dari tab Tersedia.' : 'Tidak ada tugas perbaikan. Mantap!') : scope === 'verifikasi' ? 'Tidak ada perbaikan atau keberatan yang perlu diputuskan.' : 'Tidak ada temuan untuk filter ini.';
       LB.innerHTML = '<div class="small muted" style="margin-bottom:8px">' + rows.length + ' temuan</div>' + (rows.length ? '<div class="tlist">' + rows.map(tItem).join('') + '</div>' : emptyBox(msg));
     } catch (e) { LB.innerHTML = emptyBox(e.message); }
@@ -1053,7 +1064,74 @@ VIEWS.kpi = async function () {
     $('#kQ').oninput = e => { const q = e.target.value.toLowerCase(); $$('#kTbl tr[data-q]').forEach(r => r.hidden = r.dataset.q.indexOf(q) < 0); };
   } catch (e) { KB.innerHTML = emptyBox(e.message); }
 };
-VIEWS.verif = opt => renderList('verifikasi', opt);
+/* ---------- Verifikasi & keberatan: datatable ---------- */
+VIEWS.verif = async function () {
+  const v = $('#view'), me = S.user.nik.toLowerCase(), sla = S.boot.config.slaVerif * 36e5;
+  const st = S.vf || (S.vf = { q: '', status: '', area: '', sort: 'kirim', dir: 1, page: 1, per: 20 });
+  v.innerHTML = '<div class="toolbar">' +
+    '<input class="inp grow" id="vfQ" placeholder="Cari ID, area, lokasi, PIC, catatan" value="' + esc(st.q) + '">' +
+    '<select class="inp" id="vfSt" style="max-width:210px"><option value="">Semua (perbaikan &amp; keberatan)</option><option value="Menunggu Verifikasi">Menunggu verifikasi</option><option value="Keberatan">Keberatan</option></select>' +
+    '<select class="inp" id="vfArea" style="max-width:220px"><option value="">Semua area</option>' + S.boot.areas.map(a => '<option value="' + esc(a.id) + '">' + esc(a.nama) + '</option>').join('') + '</select>' +
+    '<button class="icon-btn" id="vfRe" title="Muat ulang" aria-label="Muat ulang">' + ic('refresh') + '</button></div><div id="vfBody"></div>';
+  $('#vfSt').value = st.status; $('#vfArea').value = st.area;
+  const VB = $('#vfBody');
+  let rows = [];
+  const waktu = t => t.status === 'Keberatan' ? t.tglKeberatan : t.tglPerbaikan;
+  const key = {
+    id: t => t.id, area: t => (t.area + ' ' + t.lokasi).toLowerCase(), pic: t => (t.pic || '').toLowerCase(),
+    kirim: t => waktu(t) || 0, status: t => t.status, tingkat: t => ({ Kritis: 0, Mayor: 1, Minor: 2 }[t.tingkat] ?? 3)
+  };
+  const draw = () => {
+    const q = st.q.toLowerCase();
+    let list = rows.filter(t => (!st.status || t.status === st.status) && (!st.area || t.areaId === st.area) &&
+      (!q || [t.id, t.area, t.lokasi, t.pic, t.deskripsi, t.catatanPerbaikan, t.catatanKeberatan].join(' ').toLowerCase().indexOf(q) >= 0));
+    list.sort((a, b) => { const x = key[st.sort](a), y = key[st.sort](b); return (x > y ? 1 : x < y ? -1 : 0) * st.dir || a.id.localeCompare(b.id); });
+    const n = list.length, pages = Math.max(1, Math.ceil(n / st.per));
+    st.page = Math.min(st.page, pages);
+    const view = list.slice((st.page - 1) * st.per, st.page * st.per);
+    const lewat = rows.filter(t => t.status === 'Menunggu Verifikasi' && Date.now() - t.tglPerbaikan > sla).length;
+    const th = (k, l, cls) => '<th class="sort' + (cls ? ' ' + cls : '') + (st.sort === k ? (st.dir > 0 ? ' asc' : ' desc') : '') + '" data-k="' + k + '">' + l + '</th>';
+    VB.innerHTML =
+      '<div class="small muted" style="margin-bottom:8px">' + rows.filter(t => t.status === 'Menunggu Verifikasi').length + ' menunggu verifikasi · ' + rows.filter(t => t.status === 'Keberatan').length + ' keberatan' +
+      (lewat ? ' · <b style="color:var(--err-t)">' + lewat + ' lewat SLA ' + S.boot.config.slaVerif + ' jam</b>' : '') + '</div>' +
+      (n ? '<div class="tbl-wrap"><table class="tbl dt" style="min-width:980px"><thead><tr>' + th('id', 'ID') + '<th>Foto</th>' + th('area', 'Area &amp; temuan') + th('tingkat', 'Kategori') + th('pic', 'Diproses oleh') + th('kirim', 'Dikirim') + th('status', 'Status') + '<th></th></tr></thead><tbody>' +
+        view.map(t => {
+          const own = (t.picNik || '').toLowerCase() === me, w = waktu(t), tunggu = Date.now() - (w || Date.now());
+          const telat = t.status === 'Menunggu Verifikasi' && tunggu > sla;
+          return '<tr class="' + (own ? 'own' : '') + '"><td class="cell-main">' + esc(t.id) + '</td>' +
+            '<td><div class="ph2">' + imgTag(t.fotoBefore, '', 120) + imgTag(t.fotoAfter, '', 120) + '</div></td>' +
+            '<td><div class="cell-main">' + esc(t.area) + (t.lokasi ? ' · ' + esc(t.lokasi) : '') + '</div><div class="cell-sub" title="' + esc(t.deskripsi) + '">' + esc(t.deskripsi) + '</div>' +
+              '<div class="cell-sub" title="' + esc(t.status === 'Keberatan' ? t.catatanKeberatan : t.catatanPerbaikan) + '">' + (t.status === 'Keberatan' ? 'Keberatan: ' + esc(t.catatanKeberatan) : t.catatanPerbaikan ? 'Perbaikan: ' + esc(t.catatanPerbaikan) : '') + '</div></td>' +
+            '<td>' + rChip(t.r) + ' ' + tingkatChip(t.tingkat) + (t.revisi ? '<div class="cell-sub">revisi ke-' + (t.revisi + 1) + '</div>' : '') + '</td>' +
+            '<td>' + esc(t.pic || '-') + (own ? '<div><span class="chip c-warn">Perbaikan Anda</span></div>' : '') + '</td>' +
+            '<td style="white-space:nowrap">' + fDate(w) + '<div class="cell-sub" style="' + (telat ? 'color:var(--err-t);font-weight:700' : '') + '">menunggu ' + durasi(tunggu) + (telat ? ' · lewat SLA' : '') + '</div></td>' +
+            '<td>' + statusChip(t) + (t.terlambat ? '<div class="cell-sub" style="color:var(--err-t)">dikirim lewat target</div>' : '') + '</td>' +
+            '<td>' + (own ? '<button class="btn sm" data-open="' + esc(t.id) + '" title="Anda yang memproses — harus diverifikasi auditor lain">Lihat</button>'
+              : '<button class="btn sm primary" data-open="' + esc(t.id) + '">' + (t.status === 'Keberatan' ? 'Putuskan' : 'Periksa') + '</button>') + '</td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<div class="dt-foot"><span>Menampilkan ' + ((st.page - 1) * st.per + 1) + '–' + Math.min(n, st.page * st.per) + ' dari ' + n + '</span>' +
+        '<span class="pg"><select class="inp" id="vfPer" style="width:auto;min-height:32px">' + [10, 20, 50, 100].map(x => '<option' + (x === st.per ? ' selected' : '') + '>' + x + '</option>').join('') + '</select>' +
+        '<button class="btn sm" id="vfPrev"' + (st.page <= 1 ? ' disabled' : '') + '>‹</button><span style="align-self:center">' + st.page + ' / ' + pages + '</span><button class="btn sm" id="vfNext"' + (st.page >= pages ? ' disabled' : '') + '>›</button></span></div>' +
+        (rows.some(t => (t.picNik || '').toLowerCase() === me) ? '<p class="small muted" style="margin:8px 0 0">Baris bertanda <b>Perbaikan Anda</b> dikerjakan oleh akun Anda sendiri, jadi harus diverifikasi auditor lain.</p>' : '')
+      : emptyBox(rows.length ? 'Tidak ada data untuk filter ini.' : 'Tidak ada perbaikan atau keberatan yang perlu diputuskan.'));
+    $$('th.sort', VB).forEach(h => h.onclick = () => { const k = h.dataset.k; if (st.sort === k) st.dir = -st.dir; else { st.sort = k; st.dir = k === 'kirim' ? 1 : 1; } draw(); });
+    $$('[data-open]', VB).forEach(b => b.onclick = () => openDetail(b.dataset.open));
+    if ($('#vfPer')) $('#vfPer').onchange = e => { st.per = +e.target.value; st.page = 1; draw(); };
+    if ($('#vfPrev')) $('#vfPrev').onclick = () => { st.page--; draw(); };
+    if ($('#vfNext')) $('#vfNext').onclick = () => { st.page++; draw(); };
+  };
+  const load = async () => {
+    loading(VB);
+    try { rows = await call('apiListTemuan', S.token, { scope: 'verifikasi' }); draw(); }
+    catch (e) { VB.innerHTML = emptyBox(e.message); }
+  };
+  let to;
+  $('#vfQ').addEventListener('input', e => { clearTimeout(to); to = setTimeout(() => { st.q = e.target.value; st.page = 1; draw(); }, 200); });
+  $('#vfSt').onchange = e => { st.status = e.target.value; st.page = 1; draw(); };
+  $('#vfArea').onchange = e => { st.area = e.target.value; st.page = 1; draw(); };
+  $('#vfRe').onclick = load;
+  load();
+};
 
 /* ---------- Detail temuan ---------- */
 async function openDetail(id) {
