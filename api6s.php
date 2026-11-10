@@ -1,6 +1,6 @@
 <?php
 /**
- * api5r.php : Endpoint JSON Monitoring 5R.
+ * api6s.php : Endpoint JSON Monitoring 6S.
  * Body: {"fn": "apiDashboard", "args": [token, ...]} -> {"ok": true, "data": ...} | {"ok": false, "error": "..."}
  * token = token sesi HRIS (login di /login memakai username + password HRIS).
  */
@@ -28,6 +28,6 @@ try {
     echo json_encode(['ok' => true, 'data' => $data]);
 } catch (Throwable $e) {
     $safe = ($e instanceof InvalidArgumentException || $e instanceof RuntimeException) && !($e instanceof PDOException);
-    if (!$safe) error_log('[5R API] ' . $fn . ': ' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+    if (!$safe) error_log('[6S API] ' . $fn . ': ' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
     echo json_encode(['ok' => false, 'error' => $safe ? $e->getMessage() : 'Terjadi kesalahan pada server. Silakan coba lagi atau hubungi Admin.']);
 }

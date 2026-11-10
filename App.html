@@ -576,7 +576,7 @@
             c.onclick = () => go('maintenance');
             $('.top-actions').insertBefore(c, $('#shiftNow'));
         }
-        c.innerHTML = '<span class="material-symbols-outlined">construction</span>Maintenance ' + (S.master.maintenance && S.master.maintenance5r ? 'HRIS & 5R' : S.master.maintenance ? 'HRIS' : '5R') + ' aktif';
+        c.innerHTML = '<span class="material-symbols-outlined">construction</span>Maintenance ' + (S.master.maintenance && S.master.maintenance5r ? 'HRIS & 6S' : S.master.maintenance ? 'HRIS' : '6S') + ' aktif';
     }
 
     /* =========================== FOTO PROFIL & OPERATOR =========================== */
@@ -3692,9 +3692,9 @@
 
     /* =========================== INIT =========================== */
     /* =========================== CONTROL AKSES (KHUSUS SUPER ADMIN) =========================== */
-    // Satu halaman untuk dua aplikasi: tab HRIS dan Monitoring 5R (datanya disimpan terpisah)
+    // Satu halaman untuk dua aplikasi: tab HRIS dan Monitoring 6S (datanya disimpan terpisah)
     const AK_ROLES = [['ADMIN', 'Admin'], ['SUPERVISOR', 'Supervisor'], ['LEADER', 'Leader / PIC'], ['VIEWER', 'Viewer']];
-    const AK_5R_ICON = { dash: 'dashboard', input: 'add_a_photo', tugas: 'task_alt', daftar: 'list_alt', verif: 'verified_user', audit: 'fact_check', poin: 'emoji_events', kpi: 'monitoring', admin: 'settings', qr: 'qr_code_2' };
+    const AK_6S_ICON = { dash: 'dashboard', input: 'add_a_photo', tugas: 'task_alt', daftar: 'list_alt', verif: 'verified_user', audit: 'fact_check', poin: 'emoji_events', kpi: 'monitoring', admin: 'settings', qr: 'qr_code_2' };
     let AK = null, AKD = null, AKAPP = 'hris';
     // Konfigurasi per aplikasi
     function akCfg() {
@@ -3706,12 +3706,12 @@
                 viewOnly: R.menus.filter(m => m.viewOnly).map(m => m.id),
                 viewer: 'Viewer',
                 def: r => R.menus.filter(m => m.roles.indexOf(r) >= 0).map(m => m.id),
-                icon: id => '<span class="material-symbols-outlined">' + (AK_5R_ICON[id] || 'circle') + '</span>',
+                icon: id => '<span class="material-symbols-outlined">' + (AK_6S_ICON[id] || 'circle') + '</span>',
                 users: R.users,
                 roleLabel: r => r,
                 saveAction: 'access5rSave',
                 config: R.config,
-                title: 'Monitoring 5R'
+                title: 'Monitoring 6S'
             };
         }
         return {
@@ -3760,7 +3760,7 @@
     }
 
     async function renderAkses() {
-        $('#pageSub').textContent = 'Atur menu yang dapat diakses tiap role atau user — HRIS & Monitoring 5R';
+        $('#pageSub').textContent = 'Atur menu yang dapat diakses tiap role atau user — HRIS & Monitoring 6S';
         $('#view').innerHTML = '<div id="akBody"><div class="empty">Memuat…</div></div>';
         AKD = await call('accessGet', {});
         akLoad();
@@ -3776,11 +3776,11 @@
         const menus = C.menus;
         const roleOf = u => (AK.userList.find(x => x.username === u) || {}).role || '';
         let h = '<div class="ak-apps seg" role="tablist" aria-label="Aplikasi" style="margin-bottom:14px">' +
-            [['hris', 'HRIS', 'badge'], ['5r', 'Monitoring 5R', 'cleaning_services']].map(a =>
+            [['hris', 'HRIS', 'badge'], ['5r', 'Monitoring 6S', 'cleaning_services']].map(a =>
                 '<button type="button" role="tab" class="btn sm' + (AKAPP === a[0] ? ' primary' : '') + '" aria-selected="' + (AKAPP === a[0]) + '" data-akapp="' + a[0] + '"><span class="material-symbols-outlined">' + a[2] + '</span> ' + a[1] + '</button>').join(' ') + '</div>';
         h += '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined">group</span>Akses per role · ' + esc(C.title) + '</h2>' +
             '<span class="small muted">Pilih untuk tiap menu: <b>Tidak ada</b> (menu disembunyikan), <b>Lihat saja</b> (bisa dibuka, tidak bisa mengedit), atau <b>Bisa edit</b>' +
-            (AKAPP === '5r' ? '. Role 5R bawaan mengikuti role HRIS: Admin → Admin, Supervisor → Auditor, Leader / PIC → PIC, Viewer → Viewer.' : '') + '</span></div>' +
+            (AKAPP === '5r' ? '. Role 6S bawaan mengikuti role HRIS: Admin → Admin, Supervisor → Auditor, Leader / PIC → PIC, Viewer → Viewer.' : '') + '</span></div>' +
             '<div class="table-wrap" style="max-height:none"><table class="tbl ak-tbl"><thead><tr><th>Menu</th>' +
             C.roles.map(r => '<th style="text-align:center">' + r[1] + '</th>').join('') + '</tr></thead><tbody>' +
             menus.map(p => '<tr><td>' + akMenuLabel(p) + '</td>' + C.roles.map(r =>
@@ -3936,10 +3936,10 @@
             '<button class="btn sm ' + (on ? 'primary' : 'danger') + '" data-mt="' + app + '" data-on="' + (on ? 1 : 0) + '"><span class="material-symbols-outlined">' + (on ? 'play_circle' : 'construction') + '</span> ' + (on ? 'Nonaktifkan' : 'Aktifkan') + '</button></div>';
         $('#mtBody').innerHTML = '<div class="card">' +
             '<div class="card-head"><h2><span class="material-symbols-outlined">construction</span>Mode maintenance</h2>' +
-            '<span class="chip ' + (d.aktif || d.aktif5r ? 'warn' : 'ok') + '">' + (d.aktif && d.aktif5r ? 'Semua maintenance' : d.aktif ? 'HRIS maintenance' : d.aktif5r ? '5R maintenance' : 'Semua normal') + '</span></div>' +
+            '<span class="chip ' + (d.aktif || d.aktif5r ? 'warn' : 'ok') + '">' + (d.aktif && d.aktif5r ? 'Semua maintenance' : d.aktif ? 'HRIS maintenance' : d.aktif5r ? '6S maintenance' : 'Semua normal') + '</span></div>' +
             '<p class="muted" style="margin-top:0">Atur per aplikasi. Saat aktif, semua user selain super admin dikeluarkan dari aplikasi tersebut dan tidak bisa masuk; aplikasi lain tetap bisa dipakai. Bila keduanya aktif, halaman login menampilkan layar maintenance.</p>' +
             mtRow('hris', 'HRIS', 'badge', !!d.aktif, 'Request OS, jadwal, absensi, rekap MPP') +
-            mtRow('5r', 'Monitoring 5R', 'cleaning_services', !!d.aktif5r, 'Temuan, verifikasi, audit, KPI PIC') +
+            mtRow('5r', 'Monitoring 6S', 'cleaning_services', !!d.aktif5r, 'Temuan, verifikasi, audit, KPI PIC') +
             '<label class="field" style="margin-top:8px"><span>Alamat login saat maintenance</span><div class="row" style="flex-wrap:nowrap">' +
             '<input readonly id="mtUrl" value="' + esc(url) + '"><button type="button" class="btn sm" id="mtCopy"><span class="material-symbols-outlined">content_copy</span> Salin</button></div>' +
             '<small>Buka alamat ini untuk menampilkan form login ketika maintenance aktif.</small></label></div>' +
@@ -3963,7 +3963,7 @@
         };
         $('#mtCopy').onclick = async () => toast(await copyText(url) ? 'Alamat disalin.' : 'Gagal menyalin.', 'ok');
         $$('[data-mt]').forEach(b => b.onclick = async () => {
-            const app = b.dataset.mt, on = b.dataset.on === '1', label = app === '5r' ? 'Monitoring 5R' : 'HRIS';
+            const app = b.dataset.mt, on = b.dataset.on === '1', label = app === '5r' ? 'Monitoring 6S' : 'HRIS';
             if (!on && !await confirmBox('Aktifkan maintenance ' + label + '?', 'Semua user selain super admin akan langsung dikeluarkan dari ' + label + ' dan tidak bisa masuk.\nSimpan alamat login maintenance terlebih dahulu.', 'Aktifkan', 'danger')) return;
             try {
                 const r = await call('setMaintenance', { app: app, aktif: !on });
@@ -4005,7 +4005,7 @@
         }
     };
     $('#btnMenu').onclick = () => openSide(true);
-    // Sidebar mini (desktop): hanya ikon, pilihan diingat & dipakai juga di Monitoring 5R
+    // Sidebar mini (desktop): hanya ikon, pilihan diingat & dipakai juga di Monitoring 6S
     function setSideMini(on) {
         document.documentElement.classList.toggle('side-mini', on);
         try { localStorage.setItem('side_mini', on ? '1' : '0'); } catch (e) { }

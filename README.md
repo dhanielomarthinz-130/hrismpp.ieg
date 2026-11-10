@@ -38,13 +38,15 @@ Sistem **Man Power Planning (MPP), Jadwal Kerja Mingguan, Absensi Shift, dan Int
 
 *(Catatan: Anda dapat mengubah password atau menambah akun baru melalui menu **Pengaturan → Pengguna**).*
 
-### Monitoring 5R
+### Monitoring 6S
 
-Satu akun untuk dua aplikasi: di halaman login (`/login`) pilih **HRIS** atau **Monitoring 5R**, lalu masuk dengan **username + password HRIS** yang sama. Dari sidebar HRIS ada tautan **Monitoring 5R**, dan dari 5R ada menu **Buka HRIS** — tanpa login ulang.
+6S = 5R (Ringkas, Rapi, Resik, Rawat, Rajin) + **Aman** (K3 / Safety). Alamat lama `/5r` (termasuk QR yang sudah dicetak) otomatis dialihkan ke `/6s`.
 
-Role 5R bawaan mengikuti role HRIS: Admin → Admin, Supervisor → Auditor, Leader → PIC, Viewer → Viewer. Admin 5R bisa mengubah role, tim/area, dan status aktif 5R per user.
+Satu akun untuk dua aplikasi: di halaman login (`/login`) pilih **HRIS** atau **Monitoring 6S**, lalu masuk dengan **username + password HRIS** yang sama. Dari sidebar HRIS ada tautan **Monitoring 6S**, dan dari 6S ada menu **Buka HRIS** — tanpa login ulang.
 
-Tim/role pengguna, area & PIC, checklist audit, dan aturan poin diatur di **Monitoring 5R → Master Data**; akun baru & password tetap di **HRIS → Pengaturan → Pengguna**. Tabel 5R (`r5_*`) dibuat otomatis di database yang sama saat 5R pertama kali dibuka.
+Role 6S bawaan mengikuti role HRIS: Admin → Admin, Supervisor → Auditor, Leader → PIC, Viewer → Viewer. Admin 6S bisa mengubah role, tim/area, dan status aktif 6S per user.
+
+Tim/role pengguna, area & PIC, checklist audit, dan aturan poin diatur di **Monitoring 6S → Master Data**; akun baru & password tetap di **HRIS → Pengaturan → Pengguna**. Tabel 6S (nama lama `r5_*` dipertahankan) dibuat otomatis di database yang sama saat 6S pertama kali dibuka.
 
 ---
 
@@ -83,7 +85,7 @@ Bila ingin menghubungkan ke database MySQL:
 - **`absensi.php`** : Modul absensi harian per shift, BKO, lembur, dan operator pengganti.
 - **`mingguan.php`** : Modul jadwal mingguan 7 hari (Senin–Minggu), kuas jadwal, validasi jam kerja & istirahat, salin minggu, dan kunci jadwal.
 - **`wa.php`** : Modul Order MPP WhatsApp dengan format mention `@nomor` otomatis untuk tag akun WhatsApp dan pratinjau bubble chat.
-- **`5r.php`**, **`api5r.php`**, **`lima_r.php`**, **`index5R.html`** : Monitoring 5R (halaman `/5r`, endpoint JSON, logika temuan/verifikasi/poin/audit, dan antarmuka).
+- **`6s.php`**, **`api6s.php`**, **`lima_r.php`**, **`App6S.html`** : Monitoring 6S (halaman `/6s`, endpoint JSON, logika temuan/verifikasi/poin/audit, dan antarmuka).
 - **`install.php`** : Halaman informasi status koneksi database dan tombol reset data bawaan.
 - **`database.sql`** : Skema dan data awal database untuk MySQL / phpMyAdmin.
 - **`App.html`**, **`Styles.html`**, **`Index.html`** : Antarmuka frontend responsif, modern, dan kompatibel ganda (Google Apps Script & PHP).

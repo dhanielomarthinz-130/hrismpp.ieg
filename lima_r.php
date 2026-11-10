@@ -1,10 +1,10 @@
 <?php
 /**
- * lima_r.php : Backend Monitoring 5R (port dari Code.gs Apps Script ke PHP + database HRIS).
+ * lima_r.php : Backend Monitoring 6S (port dari Code.gs Apps Script ke PHP + database HRIS).
  *
  * Data disimpan di tabel r5_* pada database yang sama dengan HRIS (SQLite / MySQL).
- * Login memakai akun & sesi HRIS (username + password). Role 5R (Admin / Auditor / PIC / Viewer)
- * otomatis dari role HRIS, dan bisa diubah per user di Master Data 5R.
+ * Login memakai akun & sesi HRIS (username + password). Role 6S (Admin / Auditor / PIC / Viewer)
+ * otomatis dari role HRIS, dan bisa diubah per user di Master Data 6S.
  * Foto temuan disimpan lewat foto_save() ke uploads/foto (nama file acak).
  */
 require_once __DIR__ . '/config.php';
@@ -12,19 +12,20 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/foto.php';
 
-const R5_VERSION = '2.1';
-const R5_LIST    = ['Ringkas', 'Rapi', 'Resik', 'Rawat', 'Rajin'];
+const R5_VERSION = '3.0';
+// 6S = 6S + Aman (K3 / Safety)
+const R5_LIST    = ['Ringkas', 'Rapi', 'Resik', 'Rawat', 'Rajin', 'Aman'];
 const R5_TINGKAT = ['Minor', 'Mayor', 'Kritis'];
 const R5_ROLES   = ['Admin', 'Auditor', 'PIC', 'Viewer'];
 const R5_OPEN = 'Open', R5_WAIT = 'Menunggu Verifikasi', R5_REVISI = 'Revisi', R5_CLOSED = 'Closed', R5_BATAL = 'Batal', R5_KEBERATAN = 'Keberatan';
-/** Menu 5R: id => [label, role bawaan, hanya-lihat]. Diatur super admin di HRIS → Control Akses → Monitoring 5R. */
+/** Menu 6S: id => [label, role bawaan, hanya-lihat]. Diatur super admin di HRIS → Control Akses → Monitoring 6S. */
 const R5_MENUS = [
     'dash'   => ['Dashboard', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
     'input'  => ['Input Temuan', ['Admin', 'Auditor', 'PIC'], false],
     'tugas'  => ['Tugas Saya (perbaikan & keberatan)', ['Admin', 'Auditor', 'PIC'], false],
     'daftar' => ['Daftar Temuan', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
     'verif'  => ['Verifikasi & Keberatan', ['Admin', 'Auditor'], false],
-    'audit'  => ['Audit 5R', ['Admin', 'Auditor'], false],
+    'audit'  => ['Audit 6S', ['Admin', 'Auditor'], false],
     'poin'   => ['Papan Poin', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
     'kpi'    => ['KPI PIC', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
     'admin'  => ['Master Data (+ batalkan temuan)', ['Admin'], false],
@@ -69,6 +70,21 @@ const R5_CHECK_UMUM = [
     ['Resik', 'Lantai/permukaan bersih dari debu, sampah, dan sisa lakban'],
     ['Rawat', 'Standar visual (marka, label, foto kondisi ideal) terpasang dan terbaca'],
     ['Rajin', 'Checklist kebersihan harian terisi lengkap'],
+    ['Aman', 'Jalur evakuasi, APAR, dan kotak P3K bebas hambatan, terlihat, dan mudah dijangkau'],
+    ['Aman', 'Pekerja memakai APD sesuai area (sepatu safety, sarung tangan, rompi bila perlu)'],
+];
+
+/** Item checklist Aman (K3) khusus per area bawaan. */
+const R6_CHECK_AMAN = [
+    'A01' => [['Aman', 'Tumpukan palet stabil, tidak miring, dan tidak melebihi batas tinggi']],
+    'A02' => [['Aman', 'Barang berat disimpan di level rak bawah']],
+    'A03' => [['Aman', 'Cutter disimpan dengan mata pisau tertutup setelah dipakai']],
+    'A04' => [['Aman', 'Paket retur tidak menutupi jalur jalan dan pintu darurat']],
+    'A05' => [['Aman', 'Rak sample stabil dan tidak kelebihan beban']],
+    'A06' => [['Aman', 'Kabel tidak melintang di jalur kaki dan cutter tertutup setelah dipakai']],
+    'A07' => [['Aman', 'Kabel charger/lampu rekam tidak melintang dan stopkontak tidak bertumpuk']],
+    'A08' => [['Aman', 'Rak gimmick stabil, barang di level atas tidak berisiko jatuh']],
+    'A09' => [['Aman', 'Pelindung mesin terpasang dan tombol darurat berfungsi']],
 ];
 
 const R5_CHECK_KHUSUS = [
@@ -139,10 +155,15 @@ function r5_init(): void {
     $pdo->exec("CREATE TABLE IF NOT EXISTS r5_audit (
         audit_id VARCHAR(40) PRIMARY KEY, tanggal $big NOT NULL, area_id VARCHAR(12) NOT NULL, nama_area VARCHAR(120) NULL,
         auditor_nik VARCHAR(40) NULL, auditor_nama VARCHAR(120) NULL, ringkas DOUBLE NULL, rapi DOUBLE NULL,
-        resik DOUBLE NULL, rawat DOUBLE NULL, rajin DOUBLE NULL, total_persen DOUBLE NOT NULL DEFAULT 0, catatan TEXT NULL)");
+        resik DOUBLE NULL, rawat DOUBLE NULL, rajin DOUBLE NULL, aman DOUBLE NULL, total_persen DOUBLE NOT NULL DEFAULT 0, catatan TEXT NULL)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS r5_audit_detail (
         id $autoInc, audit_id VARCHAR(40) NOT NULL, kategori_r VARCHAR(20) NOT NULL, item VARCHAR(255) NULL,
         skor INT NOT NULL DEFAULT 0, catatan TEXT NULL)");
+    // Kolom tambahan v3.0 (6S): skor audit kategori Aman
+    $acols = $isSqlite
+        ? array_column($pdo->query("PRAGMA table_info(r5_audit)")->fetchAll(), 'name')
+        : array_column($pdo->query("SHOW COLUMNS FROM r5_audit")->fetchAll(), 'Field');
+    if (!in_array('aman', $acols, true)) $pdo->exec("ALTER TABLE r5_audit ADD COLUMN aman DOUBLE NULL");
 
     // Config bawaan (yang belum ada saja)
     $have = array_column(db_all("SELECT key_name FROM r5_config"), 'key_name');
@@ -168,12 +189,27 @@ function r5_init(): void {
             }
             if (!(int)db_val("SELECT COUNT(*) FROM r5_checklist")) {
                 foreach (R5_AREAS_SEED as $a) {
-                    foreach (array_merge(R5_CHECK_UMUM, R5_CHECK_KHUSUS[$a[0]] ?? []) as $c) {
+                    foreach (array_merge(R5_CHECK_UMUM, R5_CHECK_KHUSUS[$a[0]] ?? [], R6_CHECK_AMAN[$a[0]] ?? []) as $c) {
                         db_insert('r5_checklist', ['area_id' => $a[0], 'kategori_r' => $c[0], 'item' => $c[1], 'aktif' => 'Y']);
                     }
                 }
             }
             db_insert('settings', ['key_name' => 'migr_r5_seed', 'value' => '1', 'ket' => 'Data awal Monitoring 5R']);
+        });
+    }
+
+    // 6S -> 6S: area yang belum punya checklist Aman mendapat item Aman umum (+ khusus area bawaan)
+    if (!(int)db_val("SELECT COUNT(*) FROM settings WHERE key_name = 'migr_r6s_aman'")) {
+        db_transaction(function () {
+            $umum = array_values(array_filter(R5_CHECK_UMUM, fn($c) => $c[0] === 'Aman'));
+            foreach (db_all("SELECT area_id FROM r5_area") as $a) {
+                $id = $a['area_id'];
+                if ((int)db_val("SELECT COUNT(*) FROM r5_checklist WHERE area_id = ? AND kategori_r = 'Aman'", [$id])) continue;
+                foreach (array_merge($umum, R6_CHECK_AMAN[$id] ?? []) as $c) {
+                    db_insert('r5_checklist', ['area_id' => $id, 'kategori_r' => $c[0], 'item' => $c[1], 'aktif' => 'Y']);
+                }
+            }
+            db_insert('settings', ['key_name' => 'migr_r6s_aman', 'value' => '1', 'ket' => 'Monitoring 5R menjadi 6S (kategori Aman)']);
         });
     }
 }
@@ -209,13 +245,13 @@ function r5_num(string $k, float $d): float {
 }
 
 /* =====================================================================
- *  AUTH — memakai akun & sesi HRIS (satu login untuk HRIS dan 5R)
+ *  AUTH — memakai akun & sesi HRIS (satu login untuk HRIS dan 6S)
  *
- *  Tabel r5_users hanya menyimpan pengaturan 5R per user HRIS (nik = username HRIS):
- *  role 5R khusus (kosong = ikut role HRIS), tim/area utama, dan aktif di 5R.
+ *  Tabel r5_users hanya menyimpan pengaturan 6S per user HRIS (nik = username HRIS):
+ *  role 6S khusus (kosong = ikut role HRIS), tim/area utama, dan aktif di 6S.
  * ===================================================================== */
 
-/** Role HRIS -> role 5R bawaan. */
+/** Role HRIS -> role 6S bawaan. */
 function r5_role_map(string $hrisRole): string {
     $r = strtoupper($hrisRole);
     if ($r === 'ADMIN' || $r === ROLE_SUPER) return 'Admin';
@@ -231,7 +267,7 @@ function r5_merge_user(array $h, ?array $p): array {
     $aktif = ((int)$h['aktif'] === 1 && (!$p || $p['aktif'] !== 'N'));
     $employer = strtoupper(r5_str($h['employer'] ?? ''));
     return [
-        // PIC 5R = Leader / PIC IEG dari HRIS (user yang tertaut ke operator RKA tidak bisa jadi PIC)
+        // PIC 6S = Leader / PIC IEG dari HRIS (user yang tertaut ke operator RKA tidak bisa jadi PIC)
         'pic'       => $aktif && $role === 'PIC' && ($employer === '' || $employer === 'IEG'),
         'employer'  => $employer,
         'bagian'    => r5_str($h['bagian'] ?? ''),
@@ -246,7 +282,7 @@ function r5_merge_user(array $h, ?array $p): array {
     ];
 }
 
-/** Semua user HRIS (tanpa super admin) beserta pengaturan 5R-nya. */
+/** Semua user HRIS (tanpa super admin) beserta pengaturan 6S-nya. */
 function r5_users_all(): array {
     $prof = [];
     foreach (db_all("SELECT * FROM r5_users") as $p) $prof[mb_strtolower($p['nik'])] = $p;
@@ -274,7 +310,7 @@ function r5_timmap(?array $areas = null): array {
     return $m;
 }
 
-/* ---------------------------------------------------------------- Control akses 5R */
+/* ---------------------------------------------------------------- Control akses 6S */
 function r5_access_config(): array {
     $raw = json_decode((string)db_val("SELECT value FROM settings WHERE key_name = 'menu_access_5r'", [], ''), true);
     $ids = array_keys(R5_MENUS);
@@ -291,7 +327,7 @@ function r5_default_menus(string $role): array {
     return array_keys(array_filter(R5_MENUS, fn($m) => in_array($role, $m[1], true)));
 }
 
-/** Menu yang boleh dibuka & yang hanya lihat untuk user 5R ini. */
+/** Menu yang boleh dibuka & yang hanya lihat untuk user 6S ini. */
 function r5_access_for(array $u): array {
     if (!empty($u['super'])) return ['menus' => array_keys(R5_MENUS), 'ro' => []];
     $cfg = r5_access_config();
@@ -332,12 +368,12 @@ function r5_access_save(array $p, array $hrisUser): array {
     foreach ((array)($p['ro']['roles'] ?? []) as $r => $l) if (isset($cfg['roles'][$r])) $cfg['ro']['roles'][$r] = array_values(array_intersect($cfg['roles'][$r], (array)$l));
     foreach ((array)($p['ro']['users'] ?? []) as $u => $l) { $u = mb_strtolower((string)$u); if (isset($cfg['users'][$u])) $cfg['ro']['users'][$u] = array_values(array_intersect($cfg['users'][$u], (array)$l)); }
     if (db_val("SELECT COUNT(*) FROM settings WHERE key_name = 'menu_access_5r'")) db_update('settings', ['value' => json_encode($cfg)], 'key_name = ?', ['menu_access_5r']);
-    else db_insert('settings', ['key_name' => 'menu_access_5r', 'value' => json_encode($cfg), 'ket' => 'Control akses Monitoring 5R']);
-    audit_log($hrisUser['username'], 'CONTROL_AKSES_5R', count($cfg['roles']) . ' role, ' . count($cfg['users']) . ' user khusus');
+    else db_insert('settings', ['key_name' => 'menu_access_5r', 'value' => json_encode($cfg), 'ket' => 'Control akses Monitoring 6S']);
+    audit_log($hrisUser['username'], 'CONTROL_AKSES_6S', count($cfg['roles']) . ' role, ' . count($cfg['users']) . ' user khusus');
     return $cfg;
 }
 
-/** Token = token sesi HRIS (dari login HRIS). $menu: menu 5R yang dibutuhkan; $edit: perlu akses edit. */
+/** Token = token sesi HRIS (dari login HRIS). $menu: menu 6S yang dibutuhkan; $edit: perlu akses edit. */
 function r5_auth($token, ?string $menu = null, bool $edit = false): array {
     try {
         $hu = auth_check((string)$token, '5r');
@@ -347,7 +383,7 @@ function r5_auth($token, ?string $menu = null, bool $edit = false): array {
     if (!empty($hu['mustChange'])) throw new RuntimeException('GANTI_PASSWORD');
     $u = r5_find_user($hu['username']);
     if (!$u) throw new RuntimeException('SESI_HABIS');
-    if ($u['aktif'] === 'N') throw new RuntimeException('Akun Anda tidak aktif di Monitoring 5R. Hubungi Admin 5R.');
+    if ($u['aktif'] === 'N') throw new RuntimeException('Akun Anda tidak aktif di Monitoring 6S. Hubungi Admin 6S.');
     if ($menu !== null) r5_need($u, $menu, $edit);
     return $u;
 }
@@ -486,7 +522,7 @@ function apiCreateTemuan($token, $d): array {
     if (!$area) throw new RuntimeException('Area tidak ditemukan.');
     $kat = (string)($d['kategoriR'] ?? '');
     $ting = (string)($d['tingkat'] ?? '');
-    if (!in_array($kat, R5_LIST, true)) throw new RuntimeException('Pilih kategori R.');
+    if (!in_array($kat, R5_LIST, true)) throw new RuntimeException('Pilih kategori 6S.');
     if (!in_array($ting, R5_TINGKAT, true)) throw new RuntimeException('Pilih tingkat temuan.');
     if (r5_str($d['deskripsi'] ?? '') === '') throw new RuntimeException('Deskripsi temuan wajib diisi.');
     if (empty($d['foto'])) throw new RuntimeException('Foto sebelum (bukti temuan) wajib diunggah.');
@@ -822,7 +858,7 @@ function r5_kpi_rows(string $bulan, ?string $onlyNik = null): array {
           'selesai' => r5_num('KPI_BOBOT_SELESAI', 25), 'overdue' => r5_num('KPI_BOBOT_OVERDUE', 10)];
     $poinPic = [];
     foreach (r5_leader_pic($bulan, db_all("SELECT * FROM r5_poin WHERE jenis = 'PIC' AND bulan = ?", [$bulan]), $all) as $p) $poinPic[mb_strtolower($p['nik'])] = $p['poin'];
-    // Tim PIC: tim utama di 5R, atau tim area tempat ia menjadi PIC area
+    // Tim PIC: tim utama di 6S, atau tim area tempat ia menjadi PIC area
     $timPic = [];
     foreach (db_all("SELECT area_id, pic_nik FROM r5_area WHERE aktif <> 'N'") as $a) {
         $k = mb_strtolower(r5_str($a['pic_nik']));
@@ -1055,7 +1091,7 @@ function apiAdminData($token): array {
     ];
 }
 
-/** Simpan pengaturan 5R untuk satu user HRIS. Role '' = ikut role HRIS. */
+/** Simpan pengaturan 6S untuk satu user HRIS. Role '' = ikut role HRIS. */
 function r5_set_profile(array $u, string $role, string $areaId, bool $aktif): void {
     $row = ['nama' => $u['nama'], 'role' => $role, 'area_id' => $areaId, 'aktif' => $aktif ? 'Y' : 'N'];
     if (db_val("SELECT COUNT(*) FROM r5_users WHERE LOWER(nik) = ?", [mb_strtolower($u['nik'])])) {
@@ -1065,7 +1101,7 @@ function r5_set_profile(array $u, string $role, string $areaId, bool $aktif): vo
     }
 }
 
-/** Ubah role / tim / status 5R user HRIS. Akun baru & password dikelola di HRIS → Pengaturan → Pengguna. */
+/** Ubah role / tim / status 6S user HRIS. Akun baru & password dikelola di HRIS → Pengaturan → Pengguna. */
 function apiSaveUser($token, $d): array {
     $me = r5_auth($token, 'admin', true);
     $d = is_array($d) ? $d : [];
@@ -1104,7 +1140,7 @@ function apiSaveArea($token, $d): bool {
         db_transaction(function () use ($id, $nama, $picNik, $d) {
             db_insert('r5_area', ['area_id' => $id, 'nama' => $nama, 'pic_nik' => $picNik, 'aktif' => 'Y',
                 'tim' => r5_str($d['tim'] ?? '') !== '' ? r5_str($d['tim']) : $nama]);
-            // Area baru langsung punya checklist umum 5R
+            // Area baru langsung punya checklist umum 6S
             foreach (R5_CHECK_UMUM as $c) db_insert('r5_checklist', ['area_id' => $id, 'kategori_r' => $c[0], 'item' => $c[1], 'aktif' => 'Y']);
         });
     }
@@ -1133,8 +1169,8 @@ function apiSaveChecklist($token, $areaId, $items): array {
 }
 
 /**
- * Atur tim/role 5R banyak user sekaligus (tempel dari Excel).
- * Tiap baris: Username HRIS, Kode area / nama area / nama tim, Role 5R (opsional, kosong = ikut role HRIS).
+ * Atur tim/role 6S banyak user sekaligus (tempel dari Excel).
+ * Tiap baris: Username HRIS, Kode area / nama area / nama tim, Role 6S (opsional, kosong = ikut role HRIS).
  */
 function apiImportUsers($token, $rows): array {
     r5_auth($token, 'admin', true);
@@ -1187,7 +1223,7 @@ function apiSaveConfig($token, $list): bool {
     return true;
 }
 
-/** Daftar fungsi yang boleh dipanggil dari frontend (api5r.php). */
+/** Daftar fungsi yang boleh dipanggil dari frontend (api6s.php). */
 const R5_API = [
     'apiBootstrap', 'apiFoto', 'apiCreateTemuan', 'apiListTemuan', 'apiGetTemuan',
     'apiSubmitPerbaikan', 'apiVerifikasi', 'apiBatalkanTemuan', 'apiDashboard', 'apiLeaderboard', 'apiChecklist',

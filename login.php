@@ -31,13 +31,13 @@ if (isset($_GET['mt'])) {
     exit;
 }
 
-// Maintenance per aplikasi (HRIS / Monitoring 5R). Layar maintenance penuh hanya bila keduanya aktif.
+// Maintenance per aplikasi (HRIS / Monitoring 6S). Layar maintenance penuh hanya bila keduanya aktif.
 $mtHris          = (string)get_setting('maintenance', '0') === '1';
 $mt5r            = (string)get_setting('maintenance_5r', '0') === '1';
 $maintenance     = $mtHris || $mt5r;
 $mtBypass        = hash_equals($mtToken, (string)($_COOKIE['hris_mt'] ?? ''));
 $showMaintenance = $mtHris && $mt5r && !$mtBypass;
-$mtLabel         = $mtHris && $mt5r ? 'HRIS & Monitoring 5R' : ($mtHris ? 'HRIS' : 'Monitoring 5R');
+$mtLabel         = $mtHris && $mt5r ? 'HRIS & Monitoring 6S' : ($mtHris ? 'HRIS' : 'Monitoring 6S');
 $mtBlocked       = ['hris' => $mtHris && !$mtBypass, '5r' => $mt5r && !$mtBypass];
 
 ob_start();
@@ -355,7 +355,7 @@ ob_start();
             margin-top: 6px;
         }
 
-        /* Pilihan aplikasi: HRIS / Monitoring 5R */
+        /* Pilihan aplikasi: HRIS / Monitoring 6S */
         .app-switch {
             position: relative;
             display: grid;
@@ -475,7 +475,7 @@ ob_start();
                 </div>
                 <div class="auth-swap hidden" id="brand5r">
                 <h2>Area kerja rapi, temuan tertutup tepat waktu.</h2>
-                <p>Lapor temuan 5R dengan foto, PIC memperbaiki, auditor memverifikasi — skor tim dihitung otomatis.</p>
+                <p>Lapor temuan 6S (6S + Aman/K3) dengan foto, PIC memperbaiki, auditor memverifikasi — skor tim dihitung otomatis.</p>
                 <ul class="auth-feats">
                     <li>
                         <span class="material-symbols-outlined">photo_camera</span>
@@ -483,7 +483,7 @@ ob_start();
                     </li>
                     <li>
                         <span class="material-symbols-outlined">fact_check</span>
-                        <span>Verifikasi &amp; audit checklist 5R</span>
+                        <span>Verifikasi &amp; audit checklist 6S</span>
                     </li>
                     <li>
                         <span class="material-symbols-outlined">emoji_events</span>
@@ -520,11 +520,11 @@ ob_start();
 <?php if ($maintenance && $mtBypass): ?>
                     <div class="mt-banner"><span class="material-symbols-outlined">construction</span>Maintenance <?= $mtLabel ?> aktif — hanya super admin yang dapat masuk.</div>
 <?php elseif ($maintenance): ?>
-                    <div class="mt-banner"><span class="material-symbols-outlined">construction</span><?= $mtLabel ?> sedang maintenance — sementara hanya <?= $mtHris ? 'Monitoring 5R' : 'HRIS' ?> yang bisa digunakan.</div>
+                    <div class="mt-banner"><span class="material-symbols-outlined">construction</span><?= $mtLabel ?> sedang maintenance — sementara hanya <?= $mtHris ? 'Monitoring 6S' : 'HRIS' ?> yang bisa digunakan.</div>
 <?php endif; ?>
                     <div class="app-switch" id="appSwitch" role="radiogroup" aria-label="Pilih aplikasi" data-app="hris">
                         <button type="button" role="radio" aria-checked="true" data-app="hris"><span class="material-symbols-outlined" aria-hidden="true">badge</span>HRIS</button>
-                        <button type="button" role="radio" aria-checked="false" data-app="5r"><span class="material-symbols-outlined" aria-hidden="true">cleaning_services</span>Monitoring 5R</button>
+                        <button type="button" role="radio" aria-checked="false" data-app="5r"><span class="material-symbols-outlined" aria-hidden="true">cleaning_services</span>Monitoring 6S</button>
                     </div>
                     <div class="auth-swap" id="formHead">
                         <h1 id="lgTitle">Masuk ke HRIS</h1>
@@ -615,13 +615,13 @@ ob_start();
             const userInput = document.getElementById('lgUser');
             const baseDir = location.pathname.replace(/\/(login(\.php)?|index\.php|Index\.html)\/?$/i, '').replace(/\/+$/, '');
 
-            // Pilihan aplikasi: HRIS atau Monitoring 5R (satu form login)
+            // Pilihan aplikasi: HRIS atau Monitoring 6S (satu form login)
             const params = new URLSearchParams(location.search);
             const APPS = {
                 hris: { title: 'Masuk ke HRIS', lead: 'Gunakan akun Admin, Supervisor, atau Leader/PIC.', user: 'Username', userPh: 'Masukkan username', ico: 'person', pass: 'Password', passPh: 'Masukkan password', mode: 'text' },
-                '5r': { title: 'Masuk ke Monitoring 5R', lead: 'Gunakan akun HRIS yang sama — satu akun untuk HRIS dan 5R.', user: 'Username', userPh: 'Masukkan username', ico: 'person', pass: 'Password', passPh: 'Masukkan password', mode: 'text' }
+                '5r': { title: 'Masuk ke Monitoring 6S', lead: 'Gunakan akun HRIS yang sama — satu akun untuk HRIS dan 6S.', user: 'Username', userPh: 'Masukkan username', ico: 'person', pass: 'Password', passPh: 'Masukkan password', mode: 'text' }
             };
-            let app = params.get('app') === '5r' ? '5r' : (params.get('app') === 'hris' ? 'hris' : null);
+            let app = ['5r', '6s'].includes(params.get('app')) ? '5r' : (params.get('app') === 'hris' ? 'hris' : null);
             if (!app) { try { app = localStorage.getItem('login_app'); } catch (e) { } }
             if (app !== '5r') app = 'hris';
             // Aplikasi yang sedang maintenance tidak bisa dipilih
@@ -649,7 +649,7 @@ ob_start();
                     passInput.setAttribute('inputmode', c.mode);
                     document.getElementById('brandHris').classList.toggle('hidden', a !== 'hris');
                     document.getElementById('brand5r').classList.toggle('hidden', a !== '5r');
-                    document.title = (a === '5r' ? 'Masuk · Monitoring 5R' : 'Masuk · HRIS Inventory') + ' PT. Inovasi Eka Gemilang';
+                    document.title = (a === '5r' ? 'Masuk · Monitoring 6S' : 'Masuk · HRIS Inventory') + ' PT. Inovasi Eka Gemilang';
                 };
                 if (animate) fade([document.getElementById('formHead'), document.getElementById('brandHris'), document.getElementById('brand5r')], apply);
                 else apply();
@@ -674,7 +674,7 @@ ob_start();
             });
             setApp(app, false);
 
-            // Pesan dari aplikasi (mis. sesi 5R berakhir)
+            // Pesan dari aplikasi (mis. sesi 6S berakhir)
             const msg = params.get('msg');
             if (msg) {
                 errBox.textContent = msg.slice(0, 160);
@@ -709,7 +709,7 @@ ob_start();
                     // Password awal wajib diganti dulu di HRIS.
                     if (app === '5r' && !r.data.mustChange) {
                         const area = (params.get('area') || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 12);
-                        window.location.href = (baseDir || '') + '/5r' + (area ? '?area=' + encodeURIComponent(area) : '');
+                        window.location.href = (baseDir || '') + '/6s' + (area ? '?area=' + encodeURIComponent(area) : '');
                     } else {
                         window.location.href = (baseDir || '') + '/';
                     }

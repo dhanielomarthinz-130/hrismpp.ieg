@@ -50,14 +50,14 @@ function require_super(array $user): void {
     }
 }
 
-/** Maintenance per aplikasi: 'hris' (bawaan) atau '5r' (Monitoring 5R). Super admin selalu bisa masuk. */
+/** Maintenance per aplikasi: 'hris' (bawaan) atau '5r' (Monitoring 6S). Super admin selalu bisa masuk. */
 function maintenance_on(string $app = 'hris'): bool {
     $key = $app === '5r' ? 'maintenance_5r' : 'maintenance';
     return (string)db_val("SELECT value FROM settings WHERE key_name = ?", [$key], '0') === '1';
 }
 
 function app_label(string $app): string {
-    return $app === '5r' ? 'Monitoring 5R' : 'HRIS';
+    return $app === '5r' ? 'Monitoring 6S' : 'HRIS';
 }
 
 // ---------------------------------------------------------------- Control Akses Menu

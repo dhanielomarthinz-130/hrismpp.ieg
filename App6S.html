@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
-<title>Monitoring 5R · PT. Inovasi Eka Gemilang</title>
+<title>Monitoring 6S · PT. Inovasi Eka Gemilang</title>
 <style>
 /* ===== Design OCS v3.0 — Morning (light) / Evening (dark) ===== */
 :root, [data-theme="morning"]{
@@ -297,7 +297,7 @@ table.tbl{border-collapse:collapse;width:100%;min-width:520px}
   <aside class="side" id="side" aria-label="Menu utama">
     <div class="side-brand">
       <div class="logo-mark" aria-hidden="true"><img src="assets/image/logo-IEG.png" alt=""></div>
-      <div class="side-title"><div>Monitoring 5R</div><small>PT. Inovasi Eka Gemilang</small></div>
+      <div class="side-title"><div>Monitoring 6S</div><small>PT. Inovasi Eka Gemilang</small></div>
       <button type="button" class="side-toggle" id="sideToggle" aria-label="Kecilkan sidebar" title="Kecilkan sidebar" onclick="setSideMini(!document.documentElement.classList.contains('side-mini'))"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/><path id="sideToggleArrow" d="M16 10l-2 2 2 2"/></svg></button>
     </div>
     <nav class="nav" id="nav"></nav>
@@ -325,7 +325,7 @@ table.tbl{border-collapse:collapse;width:100%;min-width:520px}
 
 <script>
 /* =====================================================================
- *  MONITORING 5R IEG — Frontend
+ *  MONITORING 6S IEG — Frontend
  * ===================================================================== */
 const AREA_PARAM = <?!= JSON.stringify(areaParam) ?>;
 const APP_URL = <?!= JSON.stringify(appUrl) ?>;
@@ -371,14 +371,14 @@ const MENU = [
   { id: 'tugas', t: 'Tugas Saya', i: 'task', roles: ['Admin', 'Auditor', 'PIC'], badge: 'tugas' },
   { id: 'daftar', t: 'Daftar Temuan', i: 'list' },
   { id: 'verif', t: 'Verifikasi', i: 'shield', roles: ['Admin', 'Auditor'], badge: 'verif' },
-  { id: 'audit', t: 'Audit 5R', i: 'clip', roles: ['Admin', 'Auditor'] },
+  { id: 'audit', t: 'Audit 6S', i: 'clip', roles: ['Admin', 'Auditor'] },
   { id: 'poin', t: 'Papan Poin', i: 'trophy' },
   { id: 'kpi', t: 'KPI PIC', i: 'chart' },
   { id: 'admin', t: 'Master Data', i: 'gear', roles: ['Admin'], sec: 'Pengaturan' },
   { id: 'qr', t: 'QR Area', i: 'qr', roles: ['Admin'] }
 ];
 const BNAV = ['dash', 'input', 'tugas', 'poin'];
-// Akses menu diatur super admin di HRIS → Control Akses → Monitoring 5R
+// Akses menu diatur super admin di HRIS → Control Akses → Monitoring 6S
 const can = (m) => !!(S.boot && S.boot.access && S.boot.access.menus.indexOf(m.id) >= 0);
 const canDo = (id) => { const m = MENU.find(x => x.id === id); return m && can(m); };
 const canEdit = (id) => canDo(id) && S.boot.access.ro.indexOf(id) < 0;
@@ -451,13 +451,13 @@ function emptyBox(msg) { return '<div class="empty">' + ic('inbox') + esc(msg) +
 async function call(fn, ...args) {
   let res;
   try {
-    const r = await fetch('api5r.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fn, args }), credentials: 'same-origin' });
+    const r = await fetch('api6s.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fn, args }), credentials: 'same-origin' });
     res = await r.json();
   } catch (e) { throw new Error('Tidak dapat terhubung ke server. Periksa koneksi lalu coba lagi.'); }
   if (!res) throw new Error('Tidak ada respon dari server.');
   if (res.ok) return res.data;
   if (res.error === 'SESI_HABIS') { logout(true); throw new Error('Sesi berakhir, silakan masuk lagi.'); }
-  if (res.error === 'MAINTENANCE') { store.del('hris_token'); showLogin('Monitoring 5R sedang maintenance. Silakan coba lagi nanti.'); throw new Error('Monitoring 5R sedang maintenance.'); }
+  if (res.error === 'MAINTENANCE') { store.del('hris_token'); showLogin('Monitoring 6S sedang maintenance. Silakan coba lagi nanti.'); throw new Error('Monitoring 6S sedang maintenance.'); }
   if (res.error === 'GANTI_PASSWORD') { location.replace(HOME_URL); throw new Error('Ganti password awal di HRIS terlebih dahulu.'); }
   throw new Error(res.error);
 }
@@ -487,7 +487,7 @@ async function init() {
   showLogin();
 }
 function showLogin(msg) {
-  const q = new URLSearchParams({ app: '5r' });
+  const q = new URLSearchParams({ app: '6s' });
   if (msg) q.set('msg', msg);
   if (AREA_PARAM) q.set('area', AREA_PARAM);
   location.replace(LOGIN_URL + '?' + q.toString());
@@ -553,7 +553,7 @@ function go(id, opt) {
   const m = MENU.find(x => x.id === id);
   if (!m || !can(m)) {
     const first = MENU.find(can);
-    if (!first) { $('#title').textContent = 'Monitoring 5R'; $('#view').innerHTML = emptyBox('Belum ada menu 5R yang diizinkan untuk akun Anda. Hubungi Super Admin.'); return; }
+    if (!first) { $('#title').textContent = 'Monitoring 6S'; $('#view').innerHTML = emptyBox('Belum ada menu 6S yang diizinkan untuk akun Anda. Hubungi Super Admin.'); return; }
     id = first.id;
   }
   S.view = id;
@@ -637,7 +637,7 @@ function bindPhoto(id, getStamp, onDone) {
 /* ---------- WhatsApp (bagikan manual) ---------- */
 function waTemuan(t) {
   return [
-    '*TEMUAN 5R* – ' + t.id,
+    '*TEMUAN 6S* – ' + t.id,
     'Area : ' + t.area + (t.lokasi ? ' (' + t.lokasi + ')' : ''),
     'Tim penanggung jawab : ' + (t.tim || t.area),
     'Kategori : ' + t.r + ' · ' + t.tingkat + (t.berulang ? ' · BERULANG' : ''),
@@ -668,7 +668,7 @@ async function rekapWA() {
     if (!rows.length) return toast('Tidak ada temuan aktif.');
     const g = {};
     rows.forEach(t => { (g[t.pic] = g[t.pic] || []).push(t); });
-    let s = '*REKAP TEMUAN 5R AKTIF*\n' + fDate(Date.now()) + ' WIB\nTotal: ' + rows.length + ' temuan\n';
+    let s = '*REKAP TEMUAN 6S AKTIF*\n' + fDate(Date.now()) + ' WIB\nTotal: ' + rows.length + ' temuan\n';
     Object.keys(g).sort().forEach(p => {
       s += '\n@' + p + ' (' + g[p].length + ')\n';
       g[p].sort((a, b) => a.deadline - b.deadline).forEach(t => {
@@ -729,7 +729,7 @@ VIEWS.dash = async function () {
         tip: 'Tim ' + a.tim + ' (' + a.areas.join(', ') + '): skor ' + a.skor })), mxSkor, true) +
       '<button class="btn block" style="margin-top:12px" onclick="go(\'poin\')">' + ic('trophy') + 'Peringkat tim</button></div>';
     h += '<div class="grid">';
-    h += '<div class="card"><h3>Temuan per kategori 5R<span class="sub">' + fBulan(d.bulan) + '</span></h3>' +
+    h += '<div class="card"><h3>Temuan per kategori 6S<span class="sub">' + fBulan(d.bulan) + '</span></h3>' +
       barList(S.boot.rList.map(r => ({ l: r, v: d.byR[r] || 0 }))) +
       '<div class="small muted" style="margin-top:10px">Tingkat: ' + S.boot.tingkat.map(x => x + ' <b>' + (d.byTingkat[x] || 0) + '</b>').join(' · ') + '</div></div>';
     h += '<div class="card"><h3>Temuan baru per minggu<span class="sub">8 minggu terakhir</span></h3>' +
@@ -759,7 +759,7 @@ VIEWS.input = function () {
     '<div class="field"><label for="iArea">Area</label><select class="inp" id="iArea"><option value="">— Pilih area —</option>' +
     B.areas.map(a => '<option value="' + esc(a.id) + '"' + (a.id === F.areaId ? ' selected' : '') + '>' + esc(a.nama) + '</option>').join('') + '</select></div>' +
     '<div class="field"><label for="iLok">Lokasi detail</label><input class="inp" id="iLok" placeholder="contoh: Rak A-03, Meja 2, Mesin 1"><span class="hint">Lokasi yang sama + kategori sama dalam ' + B.config.hariBerulang + ' hari dihitung temuan berulang.</span></div>' +
-    '<div class="field"><label>Kategori 5R</label><div class="seg" id="iR">' + B.rList.map(r => '<button type="button" data-v="' + r + '">' + r + '</button>').join('') + '</div></div>' +
+    '<div class="field"><label>Kategori 6S</label><div class="seg" id="iR">' + B.rList.map(r => '<button type="button" data-v="' + r + '">' + r + '</button>').join('') + '</div></div>' +
     '<div class="field"><label>Tingkat</label><div class="seg" id="iT">' + B.tingkat.map(x => '<button type="button" data-v="' + x + '">' + x + ' · ' + B.config.deadline[x] + ' jam</button>').join('') + '</div></div>' +
     '<div class="field"><label for="iDesk">Deskripsi temuan</label><textarea class="inp" id="iDesk" placeholder="Jelaskan kondisi yang ditemukan"></textarea></div>' +
     '</div><div class="card">' +
@@ -811,7 +811,7 @@ VIEWS.input = function () {
   if ($('#iSubmit')) $('#iSubmit').addEventListener('click', async () => {
     const payload = { areaId: F.areaId, lokasi: $('#iLok').value.trim(), kategoriR: F.r, tingkat: F.tingkat, deskripsi: $('#iDesk').value.trim(), foto: F.foto, picNik: $('#iPic').value, berulang: $('#iBer').checked };
     const miss = [];
-    if (!payload.areaId) miss.push('area'); if (!payload.kategoriR) miss.push('kategori 5R'); if (!payload.tingkat) miss.push('tingkat');
+    if (!payload.areaId) miss.push('area'); if (!payload.kategoriR) miss.push('kategori 6S'); if (!payload.tingkat) miss.push('tingkat');
     if (!payload.deskripsi) miss.push('deskripsi'); if (!payload.foto) miss.push('foto'); if (!payload.picNik) miss.push('PIC');
     if (miss.length) return toast('Lengkapi: ' + miss.join(', '), true);
     const btn = $('#iSubmit'); btn.disabled = true; btn.textContent = 'Menyimpan…';
@@ -1055,12 +1055,12 @@ function afterChange() {
 }
 
 /* =====================================================================
- *  VIEW: AUDIT 5R
+ *  VIEW: AUDIT 6S
  * ===================================================================== */
 VIEWS.audit = function () {
   const B = S.boot;
   const v = $('#view');
-  v.innerHTML = '<div class="grid g2"><div class="card"><h3>Audit checklist 5R</h3>' +
+  v.innerHTML = '<div class="grid g2"><div class="card"><h3>Audit checklist 6S</h3>' +
     '<div class="field"><label for="aArea">Area yang diaudit</label><select class="inp" id="aArea"><option value="">— Pilih area —</option>' +
     B.areas.map(a => '<option value="' + esc(a.id) + '">' + esc(a.nama) + '</option>').join('') + '</select>' +
     '<span class="hint">Skor 1 = sangat buruk, 3 = cukup, 5 = sesuai standar.</span></div><div id="aItems"></div></div>' +
@@ -1092,7 +1092,7 @@ VIEWS.audit = function () {
       });
       h += '<div class="note" id="aSum" style="margin:12px 0"></div><div class="field"><label for="aCat">Catatan audit</label><textarea class="inp" id="aCat"></textarea></div>' +
         '<div class="small muted" style="margin-bottom:10px">Ada kondisi yang perlu diperbaiki? Buat juga lewat <a href="#" onclick="go(\'input\');return false">Input Temuan</a> supaya ada PIC dan batas waktunya.</div>' +
-        (canEdit('audit') ? '<button class="btn primary block" id="aSave">Simpan audit</button>' : '<div class="note warn">Akses Anda untuk Audit 5R hanya lihat saja.</div>');
+        (canEdit('audit') ? '<button class="btn primary block" id="aSave">Simpan audit</button>' : '<div class="note warn">Akses Anda untuk Audit 6S hanya lihat saja.</div>');
       $('#aItems').innerHTML = items.length ? h : emptyBox('Checklist area ini kosong. Tambahkan di Master Data → Checklist audit.');
       $$('#aItems .seg').forEach(sg => sg.addEventListener('click', ev => {
         const b = ev.target.closest('button'); if (!b) return;
@@ -1168,10 +1168,10 @@ VIEWS.admin = async function () {
     let h = '';
     if (tab === 'user') {
       h = '<div class="toolbar"><input class="inp grow" id="uQ" placeholder="Cari nama / username / tim"><button class="btn" id="uImp">' + ic('list') + 'Atur tim dari Excel</button><a class="btn primary" href="' + esc(HOME_URL) + 'pengaturan">' + ic('plus') + 'Tambah akun di HRIS</a></div>' +
-        '<div class="tbl-wrap"><table class="tbl" id="uTbl"><tr><th>Username</th><th>Nama</th><th>Role 5R</th><th>PIC</th><th>Tim</th><th>Area utama</th><th>Status</th><th></th></tr>' +
+        '<div class="tbl-wrap"><table class="tbl" id="uTbl"><tr><th>Username</th><th>Nama</th><th>Role 6S</th><th>PIC</th><th>Tim</th><th>Area utama</th><th>Status</th><th></th></tr>' +
         D.users.map((u, i) => '<tr data-q="' + esc((u.nik + ' ' + u.nama + ' ' + (u.tim || '')).toLowerCase()) + '"><td>' + esc(u.nik) + '</td><td>' + esc(u.nama) + '</td><td>' + esc(u.role) + (u.custom ? '' : ' <span class="small muted">(ikut HRIS)</span>') + '</td><td>' + (u.pic ? '<span class="chip c-pri">PIC</span>' : (u.role === 'PIC' && u.employer && u.employer !== 'IEG' ? '<span class="small muted">' + esc(u.employer) + '</span>' : '-')) + '</td><td>' + esc(u.tim || '-') + '</td><td>' + esc(areaName(u.areaId)) + '</td><td>' + (u.aktif ? '<span class="chip c-ok">Aktif</span>' : '<span class="chip c-neu">Nonaktif</span>') + '</td><td><button class="btn sm" data-u="' + i + '">Ubah</button></td></tr>').join('') + '</table></div>' +
-        '<p class="small muted"><b>PIC perbaikan hanya Leader / PIC IEG</b> (role Leader / PIC di HRIS, atau role 5R PIC); user yang tertaut ke operator RKA tidak bisa menjadi PIC. KPI dihitung per PIC. Semua pengguna dengan role PIC, Auditor, atau Admin bisa membuat temuan di area tim mana pun. Tim pengguna menentukan apakah laporannya dihitung lapor mandiri atau temuan dari tim lain.</p>' +
-        '<p class="small muted">Akun &amp; password memakai akun HRIS. Role 5R bawaan mengikuti role HRIS: Admin → Admin, Supervisor → Auditor, Leader → PIC, Viewer → Viewer.</p>';
+        '<p class="small muted"><b>PIC perbaikan hanya Leader / PIC IEG</b> (role Leader / PIC di HRIS, atau role 6S PIC); user yang tertaut ke operator RKA tidak bisa menjadi PIC. KPI dihitung per PIC. Semua pengguna dengan role PIC, Auditor, atau Admin bisa membuat temuan di area tim mana pun. Tim pengguna menentukan apakah laporannya dihitung lapor mandiri atau temuan dari tim lain.</p>' +
+        '<p class="small muted">Akun &amp; password memakai akun HRIS. Role 6S bawaan mengikuti role HRIS: Admin → Admin, Supervisor → Auditor, Leader → PIC, Viewer → Viewer.</p>';
     } else if (tab === 'area') {
       const timList = Array.from(new Set(D.areas.map(a => a.tim))).sort();
       h = '<datalist id="dlTim">' + timList.map(t => '<option value="' + esc(t) + '">').join('') + '</datalist>' +
@@ -1179,7 +1179,7 @@ VIEWS.admin = async function () {
         D.areas.map((a, i) => '<tr><td>' + esc(a.id) + '</td><td><input class="inp" data-an="' + i + '" value="' + esc(a.nama) + '"></td><td><input class="inp" list="dlTim" data-at="' + i + '" value="' + esc(a.tim) + '"></td><td><select class="inp" data-ap="' + i + '"><option value="">— belum ada —</option>' +
           D.users.filter(u => u.pic).map(u => '<option value="' + esc(u.nik) + '"' + (u.nik === a.picNik ? ' selected' : '') + '>' + esc(u.nama) + '</option>').join('') + '</select></td><td><input type="checkbox" data-aa="' + i + '"' + (a.aktif ? ' checked' : '') + ' style="width:20px;height:20px;accent-color:var(--primary)"></td><td><button class="btn sm" data-as="' + i + '">Simpan</button></td></tr>').join('') + '</table></div>' +
         '<div class="toolbar" style="margin-top:12px"><input class="inp" id="naId" placeholder="Kode (A10)" style="max-width:120px"><input class="inp grow" id="naNama" placeholder="Nama area baru"><button class="btn" id="naAdd">' + ic('plus') + 'Tambah area</button></div>' +
-        '<p class="small muted">Satu tim boleh memegang beberapa area: tulis nama tim yang sama (mis. "Retur" untuk Gudang Retur Ekspedisi dan Meja Kerja Retur). Skor dihitung per tim. Area baru otomatis mendapat checklist umum 5R; ubah itemnya di tab <b>Checklist audit</b>.</p>';
+        '<p class="small muted">Satu tim boleh memegang beberapa area: tulis nama tim yang sama (mis. "Retur" untuk Gudang Retur Ekspedisi dan Meja Kerja Retur). Skor dihitung per tim. Area baru otomatis mendapat checklist umum 6S; ubah itemnya di tab <b>Checklist audit</b>.</p>';
     } else if (tab === 'cek') {
       const aid = S.cekArea && D.areas.some(a => a.id === S.cekArea) ? S.cekArea : (D.areas[0] ? D.areas[0].id : '');
       S.cekArea = aid;
@@ -1229,12 +1229,12 @@ VIEWS.admin = async function () {
   };
   const userForm = (u) => {
     const ikut = 'Ikuti role HRIS (' + (HRIS_ROLE[u.hrisRole] || u.hrisRole) + ')';
-    openModal('Atur pengguna 5R',
+    openModal('Atur pengguna 6S',
       '<div class="grid g2"><div class="field"><label>Username</label><input class="inp" value="' + esc(u.nik) + '" disabled></div>' +
       '<div class="field"><label>Nama</label><input class="inp" value="' + esc(u.nama) + '" disabled></div></div>' +
-      '<div class="grid g2"><div class="field"><label for="fRole">Role 5R</label><select class="inp" id="fRole"><option value="">' + esc(ikut) + '</option>' + S.boot.roles.map(r => '<option' + (u.custom && u.role === r ? ' selected' : '') + '>' + r + '</option>').join('') + '</select></div>' +
+      '<div class="grid g2"><div class="field"><label for="fRole">Role 6S</label><select class="inp" id="fRole"><option value="">' + esc(ikut) + '</option>' + S.boot.roles.map(r => '<option' + (u.custom && u.role === r ? ' selected' : '') + '>' + r + '</option>').join('') + '</select></div>' +
       '<div class="field"><label for="fArea">Tim / area utama</label><select class="inp" id="fArea"><option value="">— tidak ada —</option>' + D.areas.map(a => '<option value="' + esc(a.id) + '"' + (u.areaId === a.id ? ' selected' : '') + '>' + esc(a.tim === a.nama ? a.nama : a.tim + ' — ' + a.nama) + '</option>').join('') + '</select></div></div>' +
-      '<label class="chk" style="margin-bottom:14px"><input type="checkbox" id="fAktif"' + (u.aktif ? ' checked' : '') + '><span>Aktif di Monitoring 5R</span></label>' +
+      '<label class="chk" style="margin-bottom:14px"><input type="checkbox" id="fAktif"' + (u.aktif ? ' checked' : '') + '><span>Aktif di Monitoring 6S</span></label>' +
       '<p class="small muted">Admin: semua menu · Auditor: input temuan, verifikasi, audit · PIC: input temuan di area mana pun &amp; kirim perbaikan · Viewer: lihat saja. Nama &amp; password diubah di HRIS.</p>' +
       '<button class="btn primary block" id="fSave">Simpan</button>');
     $('#fSave').onclick = async () => {
@@ -1246,7 +1246,7 @@ VIEWS.admin = async function () {
   };
   const importForm = () => {
     openModal('Atur tim pengguna',
-      '<p class="small muted" style="margin-top:0">Salin dari Excel lalu tempel di bawah. Satu baris satu orang, kolom: <b>Username HRIS</b> · <b>Kode/nama area atau tim</b> · <b>Role 5R</b> (boleh kosong = ikut role HRIS). Akun harus sudah ada di HRIS.</p>' +
+      '<p class="small muted" style="margin-top:0">Salin dari Excel lalu tempel di bawah. Satu baris satu orang, kolom: <b>Username HRIS</b> · <b>Kode/nama area atau tim</b> · <b>Role 6S</b> (boleh kosong = ikut role HRIS). Akun harus sudah ada di HRIS.</p>' +
       '<textarea class="inp" id="impTxt" style="min-height:200px;font-family:ui-monospace,monospace;font-size:12.5px" placeholder="budi	Gudang Besar	PIC&#10;sari	A06	Auditor"></textarea>' +
       '<div class="small muted" id="impInfo" style="margin:8px 0 12px">0 baris</div><button class="btn primary block" id="impGo">Import</button>');
     const parse = () => $('#impTxt').value.split(/\r?\n/).map(l => l.split(/\t|;|,/).map(x => x.trim())).filter(r => r.join('') !== '');
@@ -1276,7 +1276,7 @@ VIEWS.qr = function () {
   v.innerHTML = '<div class="toolbar no-print"><span class="grow small muted">Tempel QR di setiap area. Saat dipindai dengan PDT/HP, form temuan langsung terisi area tersebut.</span><button class="btn primary" onclick="window.print()">' + ic('print') + 'Cetak</button></div>' +
     '<div class="qr-grid">' + S.boot.areas.map(a => {
       const url = APP_URL + '?area=' + encodeURIComponent(a.id);
-      return '<div class="card qr-card"><img alt="QR ' + esc(a.nama) + '" src="https://quickchart.io/qr?size=360&margin=1&text=' + encodeURIComponent(url) + '"><b>' + esc(a.nama) + '</b><div class="small muted">' + esc(a.id) + ' · Scan untuk lapor temuan 5R</div></div>';
+      return '<div class="card qr-card"><img alt="QR ' + esc(a.nama) + '" src="https://quickchart.io/qr?size=360&margin=1&text=' + encodeURIComponent(url) + '"><b>' + esc(a.nama) + '</b><div class="small muted">' + esc(a.id) + ' · Scan untuk lapor temuan 6S</div></div>';
     }).join('') + '</div>';
 };
 
