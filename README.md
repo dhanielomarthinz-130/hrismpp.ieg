@@ -40,13 +40,11 @@ Sistem **Man Power Planning (MPP), Jadwal Kerja Mingguan, Absensi Shift, dan Int
 
 ### Monitoring 5R
 
-Halaman login (`/login`) punya pilihan **HRIS** atau **Monitoring 5R**. Akun 5R terpisah dari akun HRIS: masuk dengan **NIK + PIN**.
+Satu akun untuk dua aplikasi: di halaman login (`/login`) pilih **HRIS** atau **Monitoring 5R**, lalu masuk dengan **username + password HRIS** yang sama. Dari sidebar HRIS ada tautan **Monitoring 5R**, dan dari 5R ada menu **Buka HRIS** — tanpa login ulang.
 
-| Role 5R | NIK | PIN | Keterangan |
-| :--- | :--- | :--- | :--- |
-| **Admin** | `admin` | `123456` | Segera ganti PIN setelah login pertama (menu **Ganti PIN**) |
+Role 5R bawaan mengikuti role HRIS: Admin → Admin, Supervisor → Auditor, Leader → PIC, Viewer → Viewer. Admin 5R bisa mengubah role, tim/area, dan status aktif 5R per user.
 
-Pengguna, area & PIC, checklist audit, dan aturan poin diatur di **Monitoring 5R → Master Data**. Tabel 5R (`r5_*`) dibuat otomatis di database yang sama saat 5R pertama kali dibuka.
+Tim/role pengguna, area & PIC, checklist audit, dan aturan poin diatur di **Monitoring 5R → Master Data**; akun baru & password tetap di **HRIS → Pengaturan → Pengguna**. Tabel 5R (`r5_*`) dibuat otomatis di database yang sama saat 5R pertama kali dibuka.
 
 ---
 

@@ -612,7 +612,7 @@ ob_start();
             const params = new URLSearchParams(location.search);
             const APPS = {
                 hris: { title: 'Masuk ke HRIS', lead: 'Gunakan akun Admin, Supervisor, atau Leader/PIC.', user: 'Username', userPh: 'Masukkan username', ico: 'person', pass: 'Password', passPh: 'Masukkan password', mode: 'text' },
-                '5r': { title: 'Masuk ke Monitoring 5R', lead: 'Gunakan NIK dan PIN akun 5R Anda.', user: 'NIK', userPh: 'Masukkan NIK', ico: 'badge', pass: 'PIN', passPh: 'Masukkan PIN', mode: 'numeric' }
+                '5r': { title: 'Masuk ke Monitoring 5R', lead: 'Gunakan akun HRIS yang sama — satu akun untuk HRIS dan 5R.', user: 'Username', userPh: 'Masukkan username', ico: 'person', pass: 'Password', passPh: 'Masukkan password', mode: 'text' }
             };
             let app = params.get('app') === '5r' ? '5r' : (params.get('app') === 'hris' ? 'hris' : null);
             if (!app) { try { app = localStorage.getItem('login_app'); } catch (e) { } }
@@ -666,21 +666,6 @@ ob_start();
                 errBox.classList.add('info');
             }
 
-            async function login5r() {
-                const res = await fetch('api5r.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ fn: 'apiLogin', args: [userInput.value.trim(), passInput.value] })
-                });
-                const r = await res.json();
-                if (!r || !r.ok) throw new Error(r && r.error ? r.error : 'Gagal masuk ke Monitoring 5R');
-                try {
-                    localStorage.setItem('5r_token', r.data.token);
-                    if (r.data.defaultPin) localStorage.setItem('5r_defpin', '1'); else localStorage.removeItem('5r_defpin');
-                } catch (e) { throw new Error('Browser memblokir penyimpanan lokal. Aktifkan cookie/penyimpanan situs lalu coba lagi.'); }
-                const area = (params.get('area') || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 12);
-                window.location.href = (baseDir || '') + '/5r' + (area ? '?area=' + encodeURIComponent(area) : '');
-            }
 
             form.addEventListener('submit', async function (ev) {
                 ev.preventDefault();
@@ -690,7 +675,6 @@ ob_start();
                 submitText.textContent = 'Memverifikasi…';
 
                 try {
-                    if (app === '5r') { await login5r(); return; }
                     const res = await fetch('api.php?action=login', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -704,9 +688,16 @@ ob_start();
                         throw new Error(r && r.error ? r.error : 'Gagal masuk ke sistem');
                     }
                     localStorage.setItem('hris_token', r.data.token);
-                    window.location.href = (baseDir || '') + '/';
+                    // Satu akun untuk dua aplikasi: pilihan menentukan tujuan setelah masuk.
+                    // Password awal wajib diganti dulu di HRIS.
+                    if (app === '5r' && !r.data.mustChange) {
+                        const area = (params.get('area') || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 12);
+                        window.location.href = (baseDir || '') + '/5r' + (area ? '?area=' + encodeURIComponent(area) : '');
+                    } else {
+                        window.location.href = (baseDir || '') + '/';
+                    }
                 } catch (err) {
-                    errBox.textContent = err.message || (app === '5r' ? 'NIK atau PIN salah.' : 'Username atau password salah.');
+                    errBox.textContent = err.message || 'Username atau password salah.';
                     errBox.classList.remove('hidden');
                     submitBtn.disabled = false;
                     submitText.textContent = 'Masuk';

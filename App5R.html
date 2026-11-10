@@ -287,6 +287,8 @@ table.tbl{border-collapse:collapse;width:100%;min-width:520px}
 const AREA_PARAM = <?!= JSON.stringify(areaParam) ?>;
 const APP_URL = <?!= JSON.stringify(appUrl) ?>;
 const LOGIN_URL = <?!= JSON.stringify(loginUrl) ?>;
+const HRIS_ROLE = { ADMIN: 'Admin', SUPERVISOR: 'Supervisor', LEADER: 'Leader', VIEWER: 'Viewer' };
+const HOME_URL = LOGIN_URL.replace(/login$/, '');
 
 const S = { token: null, user: null, boot: null, view: 'dash', bulan: null, badge: { tugas: 0, verif: 0 } };
 const $ = (s, el) => (el || document).querySelector(s);
@@ -304,6 +306,7 @@ const I = {
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   qr: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L20 3M16 7l3 3"/>',
+  home: '<path d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   cam: '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>',
   wa: '<path d="M21 12a9 9 0 0 1-13.4 7.9L3 21l1.2-4.4A9 9 0 1 1 21 12z"/><path d="M9 9.5c0 3 2.5 5.5 5.5 5.5l1.2-1.4-1.9-.9-.8.8a4 4 0 0 1-2-2l.8-.8-.9-1.9z"/>',
@@ -328,7 +331,7 @@ const MENU = [
   { id: 'poin', t: 'Papan Poin', i: 'trophy' },
   { id: 'admin', t: 'Master Data', i: 'gear', roles: ['Admin'], sec: 'Pengaturan' },
   { id: 'qr', t: 'QR Area', i: 'qr', roles: ['Admin'] },
-  { id: 'pin', t: 'Ganti PIN', i: 'key' }
+  { id: 'hris', t: 'Buka HRIS', i: 'home' }
 ];
 const BNAV = ['dash', 'input', 'tugas', 'poin'];
 const can = (m) => !m.roles || m.roles.indexOf(S.user.role) >= 0;
@@ -407,6 +410,7 @@ async function call(fn, ...args) {
   if (!res) throw new Error('Tidak ada respon dari server.');
   if (res.ok) return res.data;
   if (res.error === 'SESI_HABIS') { logout(true); throw new Error('Sesi berakhir, silakan masuk lagi.'); }
+  if (res.error === 'GANTI_PASSWORD') { location.replace(HOME_URL); throw new Error('Ganti password awal di HRIS terlebih dahulu.'); }
   throw new Error(res.error);
 }
 
@@ -424,14 +428,13 @@ function toggleTheme() { applyTheme(document.documentElement.getAttribute('data-
 /* ---------- Login ---------- */
 async function init() {
   applyTheme(store.get('hris_theme') || (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'evening' : 'morning'));
-  const t = store.get('5r_token');
+  const t = store.get('hris_token');
   if (t) {
     S.token = t;
     try {
       await boot();
-      if (store.get('5r_defpin')) { store.del('5r_defpin'); toast('Anda masih memakai PIN bawaan. Silakan ganti PIN.'); go('pin'); }
       return;
-    } catch (e) { if (S.token) { store.del('5r_token'); S.token = null; } else return; }
+    } catch (e) { if (!S.token) return; toast(e.message, true); return; }
   }
   showLogin();
 }
@@ -441,8 +444,13 @@ function showLogin(msg) {
   if (AREA_PARAM) q.set('area', AREA_PARAM);
   location.replace(LOGIN_URL + '?' + q.toString());
 }
-function logout(expired) {
-  S.token = null; S.user = null; store.del('5r_token');
+async function logout(expired) {
+  const t = S.token;
+  S.token = null; S.user = null;
+  if (!expired && t) {
+    try { await fetch('api.php?action=logout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Token': t }, body: '{}' }); } catch (e) { }
+  }
+  store.del('hris_token');
   showLogin(expired ? 'Sesi berakhir, silakan masuk lagi.' : '');
 }
 async function boot() {
@@ -994,10 +1002,11 @@ VIEWS.admin = async function () {
   const draw = () => {
     let h = '';
     if (tab === 'user') {
-      h = '<div class="toolbar"><input class="inp grow" id="uQ" placeholder="Cari nama / NIK / tim"><button class="btn" id="uImp">' + ic('list') + 'Import dari Excel</button><button class="btn primary" id="uAdd">' + ic('plus') + 'Tambah pengguna</button></div>' +
-        '<div class="tbl-wrap"><table class="tbl" id="uTbl"><tr><th>NIK</th><th>Nama</th><th>Role</th><th>Tim</th><th>Area utama</th><th>Status</th><th></th></tr>' +
-        D.users.map((u, i) => '<tr data-q="' + esc((u.nik + ' ' + u.nama + ' ' + (u.tim || '')).toLowerCase()) + '"><td>' + esc(u.nik) + '</td><td>' + esc(u.nama) + '</td><td>' + esc(u.role) + '</td><td>' + esc(u.tim || '-') + '</td><td>' + esc(areaName(u.areaId)) + '</td><td>' + (u.aktif ? '<span class="chip c-ok">Aktif</span>' : '<span class="chip c-neu">Nonaktif</span>') + '</td><td><button class="btn sm" data-u="' + i + '">Ubah</button></td></tr>').join('') + '</table></div>' +
-        '<p class="small muted">Semua pengguna dengan role PIC, Auditor, atau Admin bisa membuat temuan di area tim mana pun. Tim pengguna menentukan apakah laporannya dihitung lapor mandiri atau temuan dari tim lain.</p>';
+      h = '<div class="toolbar"><input class="inp grow" id="uQ" placeholder="Cari nama / username / tim"><button class="btn" id="uImp">' + ic('list') + 'Atur tim dari Excel</button><a class="btn primary" href="' + esc(HOME_URL) + 'pengaturan">' + ic('plus') + 'Tambah akun di HRIS</a></div>' +
+        '<div class="tbl-wrap"><table class="tbl" id="uTbl"><tr><th>Username</th><th>Nama</th><th>Role 5R</th><th>Tim</th><th>Area utama</th><th>Status</th><th></th></tr>' +
+        D.users.map((u, i) => '<tr data-q="' + esc((u.nik + ' ' + u.nama + ' ' + (u.tim || '')).toLowerCase()) + '"><td>' + esc(u.nik) + '</td><td>' + esc(u.nama) + '</td><td>' + esc(u.role) + (u.custom ? '' : ' <span class="small muted">(ikut HRIS)</span>') + '</td><td>' + esc(u.tim || '-') + '</td><td>' + esc(areaName(u.areaId)) + '</td><td>' + (u.aktif ? '<span class="chip c-ok">Aktif</span>' : '<span class="chip c-neu">Nonaktif</span>') + '</td><td><button class="btn sm" data-u="' + i + '">Ubah</button></td></tr>').join('') + '</table></div>' +
+        '<p class="small muted">Semua pengguna dengan role PIC, Auditor, atau Admin bisa membuat temuan di area tim mana pun. Tim pengguna menentukan apakah laporannya dihitung lapor mandiri atau temuan dari tim lain.</p>' +
+        '<p class="small muted">Akun &amp; password memakai akun HRIS. Role 5R bawaan mengikuti role HRIS: Admin → Admin, Supervisor → Auditor, Leader → PIC, Viewer → Viewer.</p>';
     } else if (tab === 'area') {
       const timList = Array.from(new Set(D.areas.map(a => a.tim))).sort();
       h = '<datalist id="dlTim">' + timList.map(t => '<option value="' + esc(t) + '">').join('') + '</datalist>' +
@@ -1020,7 +1029,6 @@ VIEWS.admin = async function () {
     }
     MB.innerHTML = h;
     if (tab === 'user') {
-      $('#uAdd').onclick = () => userForm(null);
       $('#uImp').onclick = importForm;
       $$('[data-u]').forEach(b => b.onclick = () => userForm(D.users[+b.dataset.u]));
       $('#uQ').oninput = e => { const q = e.target.value.toLowerCase(); $$('#uTbl tr[data-q]').forEach(r => r.hidden = r.dataset.q.indexOf(q) < 0); };
@@ -1054,36 +1062,36 @@ VIEWS.admin = async function () {
     }
   };
   const userForm = (u) => {
-    openModal(u ? 'Ubah pengguna' : 'Tambah pengguna',
-      '<div class="field"><label for="fNik">NIK</label><input class="inp" id="fNik" value="' + esc(u ? u.nik : '') + '"' + (u ? ' disabled' : '') + '></div>' +
-      '<div class="field"><label for="fNama">Nama</label><input class="inp" id="fNama" value="' + esc(u ? u.nama : '') + '"></div>' +
-      '<div class="grid g2"><div class="field"><label for="fRole">Role</label><select class="inp" id="fRole">' + S.boot.roles.map(r => '<option' + (u && u.role === r ? ' selected' : (!u && r === 'PIC' ? ' selected' : '')) + '>' + r + '</option>').join('') + '</select></div>' +
-      '<div class="field"><label for="fArea">Tim / area utama</label><select class="inp" id="fArea"><option value="">— tidak ada —</option>' + D.areas.map(a => '<option value="' + esc(a.id) + '"' + (u && u.areaId === a.id ? ' selected' : '') + '>' + esc(a.tim === a.nama ? a.nama : a.tim + ' — ' + a.nama) + '</option>').join('') + '</select></div></div>' +
-      '<div class="field"><label for="fPin">' + (u ? 'Reset PIN (kosongkan bila tidak diubah)' : 'PIN awal (kosong = 123456)') + '</label><input class="inp" id="fPin" inputmode="numeric" maxlength="8"></div>' +
-      '<label class="chk" style="margin-bottom:14px"><input type="checkbox" id="fAktif"' + (!u || u.aktif ? ' checked' : '') + '><span>Aktif</span></label>' +
-      '<p class="small muted">Admin: semua menu · Auditor: input temuan, verifikasi, audit · PIC: input temuan di area mana pun & kirim perbaikan · Viewer: lihat saja.</p>' +
+    const ikut = 'Ikuti role HRIS (' + (HRIS_ROLE[u.hrisRole] || u.hrisRole) + ')';
+    openModal('Atur pengguna 5R',
+      '<div class="grid g2"><div class="field"><label>Username</label><input class="inp" value="' + esc(u.nik) + '" disabled></div>' +
+      '<div class="field"><label>Nama</label><input class="inp" value="' + esc(u.nama) + '" disabled></div></div>' +
+      '<div class="grid g2"><div class="field"><label for="fRole">Role 5R</label><select class="inp" id="fRole"><option value="">' + esc(ikut) + '</option>' + S.boot.roles.map(r => '<option' + (u.custom && u.role === r ? ' selected' : '') + '>' + r + '</option>').join('') + '</select></div>' +
+      '<div class="field"><label for="fArea">Tim / area utama</label><select class="inp" id="fArea"><option value="">— tidak ada —</option>' + D.areas.map(a => '<option value="' + esc(a.id) + '"' + (u.areaId === a.id ? ' selected' : '') + '>' + esc(a.tim === a.nama ? a.nama : a.tim + ' — ' + a.nama) + '</option>').join('') + '</select></div></div>' +
+      '<label class="chk" style="margin-bottom:14px"><input type="checkbox" id="fAktif"' + (u.aktif ? ' checked' : '') + '><span>Aktif di Monitoring 5R</span></label>' +
+      '<p class="small muted">Admin: semua menu · Auditor: input temuan, verifikasi, audit · PIC: input temuan di area mana pun &amp; kirim perbaikan · Viewer: lihat saja. Nama &amp; password diubah di HRIS.</p>' +
       '<button class="btn primary block" id="fSave">Simpan</button>');
     $('#fSave').onclick = async () => {
       try {
-        await call('apiSaveUser', S.token, { nik: $('#fNik').value.trim(), nama: $('#fNama').value.trim(), role: $('#fRole').value, areaId: $('#fArea').value, pin: $('#fPin').value.trim(), aktif: $('#fAktif').checked });
+        await call('apiSaveUser', S.token, { nik: u.nik, role: $('#fRole').value, areaId: $('#fArea').value, aktif: $('#fAktif').checked });
         closeModal(); toast('Pengguna disimpan'); S.boot = await call('apiBootstrap', S.token); load();
       } catch (e) { toast(e.message, true); }
     };
   };
   const importForm = () => {
-    openModal('Import pengguna',
-      '<p class="small muted" style="margin-top:0">Salin dari Excel lalu tempel di bawah. Satu baris satu orang, kolom: <b>NIK</b> · <b>Nama</b> · <b>Kode/nama area atau tim</b> · <b>Role</b> (boleh kosong = PIC). NIK yang sudah ada akan diperbarui. PIN awal pengguna baru: 123456.</p>' +
-      '<textarea class="inp" id="impTxt" style="min-height:200px;font-family:ui-monospace,monospace;font-size:12.5px" placeholder="00123	Budi Santoso	Gudang Besar	PIC&#10;00456	Sari Wulandari	A06	Auditor"></textarea>' +
+    openModal('Atur tim pengguna',
+      '<p class="small muted" style="margin-top:0">Salin dari Excel lalu tempel di bawah. Satu baris satu orang, kolom: <b>Username HRIS</b> · <b>Kode/nama area atau tim</b> · <b>Role 5R</b> (boleh kosong = ikut role HRIS). Akun harus sudah ada di HRIS.</p>' +
+      '<textarea class="inp" id="impTxt" style="min-height:200px;font-family:ui-monospace,monospace;font-size:12.5px" placeholder="budi	Gudang Besar	PIC&#10;sari	A06	Auditor"></textarea>' +
       '<div class="small muted" id="impInfo" style="margin:8px 0 12px">0 baris</div><button class="btn primary block" id="impGo">Import</button>');
     const parse = () => $('#impTxt').value.split(/\r?\n/).map(l => l.split(/\t|;|,/).map(x => x.trim())).filter(r => r.join('') !== '');
     $('#impTxt').oninput = () => { $('#impInfo').textContent = parse().length + ' baris siap diimport'; };
     $('#impGo').onclick = async () => {
       const rows = parse(); if (!rows.length) return toast('Belum ada data.', true);
-      if (/^nik$/i.test(rows[0][0])) rows.shift();
+      if (/^(nik|username|user)$/i.test(rows[0][0])) rows.shift();
       const b = $('#impGo'); b.disabled = true; b.textContent = 'Mengimport…';
       try {
         const r = await call('apiImportUsers', S.token, rows);
-        $('#impInfo').innerHTML = '<b>' + r.baru + '</b> pengguna baru, <b>' + r.diubah + '</b> diperbarui' + (r.gagal.length ? '<br><span style="color:var(--err-t)">' + r.gagal.map(esc).join('<br>') + '</span>' : '');
+        $('#impInfo').innerHTML = '<b>' + r.diubah + '</b> pengguna diperbarui' + (r.gagal.length ? '<br><span style="color:var(--err-t)">' + r.gagal.map(esc).join('<br>') + '</span>' : '');
         S.boot = await call('apiBootstrap', S.token); load();
         toast('Import selesai');
       } catch (e) { toast(e.message, true); }
@@ -1106,21 +1114,8 @@ VIEWS.qr = function () {
     }).join('') + '</div>';
 };
 
-/* =====================================================================
- *  VIEW: GANTI PIN
- * ===================================================================== */
-VIEWS.pin = function () {
-  $('#view').innerHTML = '<div class="card" style="max-width:420px"><h3>Ganti PIN</h3>' +
-    '<div class="field"><label for="pOld">PIN lama</label><input class="inp" id="pOld" type="password" inputmode="numeric"></div>' +
-    '<div class="field"><label for="pNew">PIN baru (4–8 angka)</label><input class="inp" id="pNew" type="password" inputmode="numeric" maxlength="8"></div>' +
-    '<div class="field"><label for="pNew2">Ulangi PIN baru</label><input class="inp" id="pNew2" type="password" inputmode="numeric" maxlength="8"></div>' +
-    '<button class="btn primary block" id="pSave">Simpan PIN</button></div>';
-  $('#pSave').onclick = async () => {
-    if ($('#pNew').value !== $('#pNew2').value) return toast('PIN baru tidak sama.', true);
-    try { await call('apiGantiPin', S.token, $('#pOld').value, $('#pNew').value); toast('PIN berhasil diganti'); go('dash'); }
-    catch (e) { toast(e.message, true); }
-  };
-};
+/* Kembali ke HRIS (sesi yang sama, tanpa login ulang) */
+VIEWS.hris = function () { location.href = HOME_URL; };
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
 init();

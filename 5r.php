@@ -1,7 +1,7 @@
 <?php
 /**
  * 5r.php : Halaman Monitoring 5R (Clean URL: /5r). Login lewat halaman /login (pilih "5R").
- * Frontend: index5R.html, backend: api5r.php + lima_r.php.
+ * Frontend: App5R.html, backend: api5r.php + lima_r.php.
  */
 require_once __DIR__ . '/config.php';
 
@@ -20,7 +20,7 @@ $area = substr(preg_replace('/[^A-Za-z0-9_-]/', '', (string)($_GET['area'] ?? ''
 
 $js = fn($v) => json_encode($v, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
-$html = (string)file_get_contents(__DIR__ . '/index5R.html');
+$html = (string)file_get_contents(__DIR__ . '/App5R.html');
 $html = str_replace(
     ['<?!= JSON.stringify(areaParam) ?>', '<?!= JSON.stringify(appUrl) ?>', '<?!= JSON.stringify(loginUrl) ?>'],
     [$js($area), $js($appUrl), $js($base . 'login')],

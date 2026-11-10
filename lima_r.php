@@ -3,7 +3,8 @@
  * lima_r.php : Backend Monitoring 5R (port dari Code.gs Apps Script ke PHP + database HRIS).
  *
  * Data disimpan di tabel r5_* pada database yang sama dengan HRIS (SQLite / MySQL).
- * Akun 5R terpisah dari akun HRIS: login dengan NIK + PIN (role Admin / Auditor / PIC / Viewer).
+ * Login memakai akun & sesi HRIS (username + password). Role 5R (Admin / Auditor / PIC / Viewer)
+ * otomatis dari role HRIS, dan bisa diubah per user di Master Data 5R.
  * Foto temuan disimpan lewat foto_save() ke uploads/foto (nama file acak).
  */
 require_once __DIR__ . '/config.php';
@@ -16,7 +17,6 @@ const R5_LIST    = ['Ringkas', 'Rapi', 'Resik', 'Rawat', 'Rajin'];
 const R5_TINGKAT = ['Minor', 'Mayor', 'Kritis'];
 const R5_ROLES   = ['Admin', 'Auditor', 'PIC', 'Viewer'];
 const R5_OPEN = 'Open', R5_WAIT = 'Menunggu Verifikasi', R5_REVISI = 'Revisi', R5_CLOSED = 'Closed', R5_BATAL = 'Batal';
-const R5_PIN_DEFAULT = '123456';
 const R5_FOTO_DIM = 1600;
 
 const R5_DEFAULT_CONFIG = [
@@ -35,7 +35,6 @@ const R5_DEFAULT_CONFIG = [
     ['BONUS_CEPAT', 2, 'Bonus bila selesai sebelum separuh batas waktu'],
     ['POTONG_TELAT_PER_HARI', 1, 'Potongan skor tim per hari keterlambatan perbaikan'],
     ['POIN_TIM_PELAPOR', 0, 'Poin untuk tim pelapor bila temuannya di area tim lain terbukti valid (0 = tidak aktif)'],
-    ['SESI_JAM', 12, 'Lama sesi login (jam)'],
 ];
 
 const R5_AREAS_SEED = [
@@ -124,6 +123,14 @@ function r5_init(): void {
         if (!in_array($c[0], $have, true)) db_insert('r5_config', ['key_name' => $c[0], 'value' => (string)$c[1], 'ket' => $c[2]]);
     }
 
+    // Sesi kini mengikuti sesi HRIS; akun NIK/PIN lama tidak dipakai lagi
+    if (!(int)db_val("SELECT COUNT(*) FROM settings WHERE key_name = 'migr_r5_hris_login'")) {
+        db_query("DELETE FROM r5_config WHERE key_name = 'SESI_JAM'");
+        db_query("DELETE FROM r5_users WHERE LOWER(nik) NOT IN (SELECT LOWER(username) FROM users)");
+        db_query("UPDATE r5_users SET pin_hash = NULL");
+        db_insert('settings', ['key_name' => 'migr_r5_hris_login', 'value' => '1', 'ket' => 'Monitoring 5R memakai login HRIS']);
+    }
+
     // Data awal sekali saja (penanda di settings HRIS)
     if (!(int)db_val("SELECT COUNT(*) FROM settings WHERE key_name = 'migr_r5_seed'")) {
         db_transaction(function () {
@@ -138,10 +145,6 @@ function r5_init(): void {
                         db_insert('r5_checklist', ['area_id' => $a[0], 'kategori_r' => $c[0], 'item' => $c[1], 'aktif' => 'Y']);
                     }
                 }
-            }
-            if (!(int)db_val("SELECT COUNT(*) FROM r5_users")) {
-                db_insert('r5_users', ['nik' => 'admin', 'nama' => 'Administrator 5R', 'role' => 'Admin', 'area_id' => '',
-                    'pin_hash' => password_hash(R5_PIN_DEFAULT, PASSWORD_DEFAULT), 'aktif' => 'Y']);
             }
             db_insert('settings', ['key_name' => 'migr_r5_seed', 'value' => '1', 'ket' => 'Data awal Monitoring 5R']);
         });
@@ -179,28 +182,53 @@ function r5_num(string $k, float $d): float {
 }
 
 /* =====================================================================
- *  AUTH (token HMAC, tanpa sesi server)
+ *  AUTH — memakai akun & sesi HRIS (satu login untuk HRIS dan 5R)
+ *
+ *  Tabel r5_users hanya menyimpan pengaturan 5R per user HRIS (nik = username HRIS):
+ *  role 5R khusus (kosong = ikut role HRIS), tim/area utama, dan aktif di 5R.
  * ===================================================================== */
-function r5_secret(): string {
-    $s = (string)db_val("SELECT value FROM settings WHERE key_name = 'r5_secret'", [], '');
-    if ($s === '') {
-        $s = bin2hex(random_bytes(32));
-        db_insert('settings', ['key_name' => 'r5_secret', 'value' => $s, 'ket' => 'Kunci token Monitoring 5R']);
-    }
-    return $s;
-}
-function r5_b64e(string $s): string { return rtrim(strtr(base64_encode($s), '+/', '-_'), '='); }
-function r5_b64d(string $s): string { return (string)base64_decode(strtr($s, '-_', '+/'), true); }
-function r5_sign(string $p): string { return r5_b64e(hash_hmac('sha256', $p, r5_secret(), true)); }
 
-function r5_make_token(string $nik): string {
-    $exp = r5_now() + (int)(r5_num('SESI_JAM', 12) * 3600000);
-    $p = r5_b64e($nik . '|' . $exp);
-    return $p . '.' . r5_sign($p);
+/** Role HRIS -> role 5R bawaan. */
+function r5_role_map(string $hrisRole): string {
+    $r = strtoupper($hrisRole);
+    if ($r === 'ADMIN' || $r === ROLE_SUPER) return 'Admin';
+    if ($r === 'SUPERVISOR') return 'Auditor';
+    if ($r === 'LEADER') return 'PIC';
+    return 'Viewer';
+}
+
+/** Gabungkan baris users (HRIS) dengan pengaturan r5_users. */
+function r5_merge_user(array $h, ?array $p): array {
+    $custom = $p && in_array(r5_str($p['role']), R5_ROLES, true);
+    return [
+        'nik'       => (string)$h['username'],
+        'nama'      => r5_str($h['nama']) !== '' ? r5_str($h['nama']) : (string)$h['username'],
+        'role'      => $custom ? r5_str($p['role']) : r5_role_map((string)$h['role']),
+        'area_id'   => $p ? r5_str($p['area_id']) : '',
+        'aktif'     => ((int)$h['aktif'] === 1 && (!$p || $p['aktif'] !== 'N')) ? 'Y' : 'N',
+        'hris_role' => strtoupper((string)$h['role']) === ROLE_SUPER ? 'ADMIN' : strtoupper((string)$h['role']),
+        'custom'    => $custom,
+        'super'     => strtoupper((string)$h['role']) === ROLE_SUPER,
+    ];
+}
+
+/** Semua user HRIS (tanpa super admin) beserta pengaturan 5R-nya. */
+function r5_users_all(): array {
+    $prof = [];
+    foreach (db_all("SELECT * FROM r5_users") as $p) $prof[mb_strtolower($p['nik'])] = $p;
+    $out = [];
+    foreach (db_all("SELECT username, nama, role, aktif FROM users WHERE UPPER(role) <> ? ORDER BY nama", [ROLE_SUPER]) as $h) {
+        $out[] = r5_merge_user($h, $prof[mb_strtolower($h['username'])] ?? null);
+    }
+    return $out;
 }
 
 function r5_find_user($nik): ?array {
-    return db_row("SELECT * FROM r5_users WHERE LOWER(nik) = ?", [mb_strtolower(r5_str($nik))]);
+    $k = mb_strtolower(r5_str($nik));
+    if ($k === '') return null;
+    $h = db_row("SELECT username, nama, role, aktif FROM users WHERE LOWER(username) = ?", [$k]);
+    if (!$h) return null;
+    return r5_merge_user($h, db_row("SELECT * FROM r5_users WHERE LOWER(nik) = ?", [$k]));
 }
 function r5_find_area($id): ?array {
     return db_row("SELECT * FROM r5_area WHERE area_id = ?", [r5_str($id)]);
@@ -212,59 +240,35 @@ function r5_timmap(?array $areas = null): array {
     return $m;
 }
 
+/** Token = token sesi HRIS (dari login HRIS). */
 function r5_auth($token, ?array $roles = null): array {
-    $parts = explode('.', (string)$token);
-    if (count($parts) !== 2 || !hash_equals(r5_sign($parts[0]), $parts[1])) throw new RuntimeException('SESI_HABIS');
-    $raw = r5_b64d($parts[0]);
-    $i = strrpos($raw, '|');
-    if ($i === false) throw new RuntimeException('SESI_HABIS');
-    $nik = substr($raw, 0, $i);
-    $exp = (int)substr($raw, $i + 1);
-    if (!$exp || r5_now() > $exp) throw new RuntimeException('SESI_HABIS');
-    $u = r5_find_user($nik);
-    if (!$u || $u['aktif'] === 'N') throw new RuntimeException('SESI_HABIS');
+    try {
+        $hu = auth_check((string)$token);
+    } catch (AuthException $e) {
+        throw new RuntimeException('SESI_HABIS');
+    }
+    if (!empty($hu['mustChange'])) throw new RuntimeException('GANTI_PASSWORD');
+    $u = r5_find_user($hu['username']);
+    if (!$u) throw new RuntimeException('SESI_HABIS');
+    if ($u['aktif'] === 'N') throw new RuntimeException('Akun Anda tidak aktif di Monitoring 5R. Hubungi Admin 5R.');
     if ($roles && !in_array($u['role'], $roles, true)) throw new RuntimeException('Menu ini tidak tersedia untuk role ' . $u['role'] . '.');
     return $u;
 }
 
 function r5_uout(array $u, ?array $tm = null): array {
     $o = ['nik' => r5_str($u['nik']), 'nama' => r5_str($u['nama']), 'role' => r5_str($u['role']),
-          'areaId' => r5_str($u['area_id']), 'aktif' => $u['aktif'] !== 'N'];
+          'areaId' => r5_str($u['area_id']), 'aktif' => $u['aktif'] !== 'N',
+          'hrisRole' => $u['hris_role'] ?? '', 'custom' => !empty($u['custom'])];
     if ($tm !== null) $o['tim'] = $tm[$o['areaId']] ?? '';
     return $o;
 }
 
-/** PIN kosong di database = PIN bawaan 123456. */
-function r5_pin_ok(array $u, string $pin): bool {
-    $h = r5_str($u['pin_hash']);
-    if ($h === '') return hash_equals(R5_PIN_DEFAULT, $pin);
-    return password_verify($pin, $h);
-}
-
 /* =====================================================================
- *  LOGIN & BOOTSTRAP
+ *  BOOTSTRAP
  * ===================================================================== */
-function apiLogin($nik, $pin): array {
-    $nik = r5_str($nik);
-    $pin = (string)$pin;
-    if ($nik === '' || $pin === '') throw new InvalidArgumentException('NIK dan PIN wajib diisi.');
-    if (strlen($pin) > 50) throw new RuntimeException('NIK atau PIN salah.');
-    $key = '5r:' . mb_strtolower($nik);
-    $ip = (string)($_SERVER['REMOTE_ADDR'] ?? 'cli');
-    login_throttle_check_($key, $ip);
-    $u = r5_find_user($nik);
-    if (!$u || $u['aktif'] === 'N' || !r5_pin_ok($u, $pin)) {
-        if (!$u) password_verify($pin, '$2y$10$abcdefghijklmnopqrstuuG2Jp3rEw2tVhPjm6gG1yDtd8m0uuq3m');
-        login_fail_($key, $ip);
-        throw new RuntimeException('NIK atau PIN salah.');
-    }
-    login_clear_($key);
-    return ['token' => r5_make_token($u['nik']), 'user' => r5_uout($u), 'defaultPin' => $pin === R5_PIN_DEFAULT];
-}
-
 function apiBootstrap($token): array {
     $u = r5_auth($token);
-    $users = db_all("SELECT * FROM r5_users WHERE aktif <> 'N' ORDER BY nama");
+    $users = array_values(array_filter(r5_users_all(), fn($x) => $x['aktif'] !== 'N'));
     $byNik = [];
     foreach ($users as $x) $byNik[mb_strtolower($x['nik'])] = $x;
     $areaRows = db_all("SELECT * FROM r5_area ORDER BY area_id");
@@ -294,15 +298,6 @@ function apiBootstrap($token): array {
         'bulanIni' => r5_bulan(r5_now()),
         'version'  => R5_VERSION,
     ];
-}
-
-function apiGantiPin($token, $lama, $baru): bool {
-    $u = r5_auth($token);
-    if (!r5_pin_ok($u, (string)$lama)) throw new RuntimeException('PIN lama salah.');
-    if (!preg_match('/^\d{4,8}$/', (string)$baru)) throw new RuntimeException('PIN baru harus 4–8 angka.');
-    if ((string)$baru === R5_PIN_DEFAULT) throw new RuntimeException('Gunakan PIN selain 123456.');
-    db_update('r5_users', ['pin_hash' => password_hash((string)$baru, PASSWORD_DEFAULT)], 'nik = ?', [$u['nik']]);
-    return true;
 }
 
 /** Foto disajikan langsung dari uploads/foto; fungsi ini hanya cadangan (mengembalikan URL). */
@@ -708,7 +703,7 @@ function apiLeaderboard($token, $bulan): array {
         ];
     }
     $userArea = [];
-    foreach (db_all("SELECT nik, area_id FROM r5_users") as $x) $userArea[mb_strtolower($x['nik'])] = r5_str($x['area_id']);
+    foreach (r5_users_all() as $x) $userArea[mb_strtolower($x['nik'])] = r5_str($x['area_id']);
     $pics = array_map(function ($p) use ($userArea, $tm) {
         $aid = $userArea[mb_strtolower($p['nik'])] ?? '';
         $p['tim'] = $aid !== '' ? ($tm[$aid] ?? '') : '';
@@ -790,7 +785,7 @@ function apiAdminData($token): array {
         $chk[$c['area_id']][] = ['r' => $c['kategori_r'], 'item' => $c['item']];
     }
     return [
-        'users' => array_map(fn($u) => r5_uout($u, $tm), db_all("SELECT * FROM r5_users ORDER BY nama")),
+        'users' => array_map(fn($u) => r5_uout($u, $tm), r5_users_all()),
         'areas' => array_map(fn($a) => ['id' => $a['area_id'], 'nama' => $a['nama'], 'tim' => r5_str($a['tim']) !== '' ? r5_str($a['tim']) : $a['nama'],
             'picNik' => r5_str($a['pic_nik']), 'aktif' => $a['aktif'] !== 'N'], db_all("SELECT * FROM r5_area ORDER BY area_id")),
         'config' => array_map(fn($c) => ['key' => $c['key_name'], 'value' => r5_str($c['value']), 'ket' => r5_str($c['ket'])],
@@ -799,28 +794,32 @@ function apiAdminData($token): array {
     ];
 }
 
+/** Simpan pengaturan 5R untuk satu user HRIS. Role '' = ikut role HRIS. */
+function r5_set_profile(array $u, string $role, string $areaId, bool $aktif): void {
+    $row = ['nama' => $u['nama'], 'role' => $role, 'area_id' => $areaId, 'aktif' => $aktif ? 'Y' : 'N'];
+    if (db_val("SELECT COUNT(*) FROM r5_users WHERE LOWER(nik) = ?", [mb_strtolower($u['nik'])])) {
+        db_update('r5_users', $row, 'LOWER(nik) = ?', [mb_strtolower($u['nik'])]);
+    } else {
+        db_insert('r5_users', $row + ['nik' => $u['nik'], 'pin_hash' => null]);
+    }
+}
+
+/** Ubah role / tim / status 5R user HRIS. Akun baru & password dikelola di HRIS → Pengaturan → Pengguna. */
 function apiSaveUser($token, $d): array {
-    r5_auth($token, ['Admin']);
+    $me = r5_auth($token, ['Admin']);
     $d = is_array($d) ? $d : [];
-    $nik = r5_str($d['nik'] ?? '');
-    if ($nik === '' || r5_str($d['nama'] ?? '') === '') throw new RuntimeException('NIK dan nama wajib diisi.');
-    if (mb_strlen($nik) > 40) throw new RuntimeException('NIK maksimal 40 karakter.');
-    if (!in_array($d['role'] ?? '', R5_ROLES, true)) throw new RuntimeException('Role tidak valid.');
+    $u = r5_find_user($d['nik'] ?? '');
+    if (!$u) throw new RuntimeException('User tidak ditemukan di HRIS. Tambahkan akun di HRIS → Pengaturan → Pengguna.');
+    $role = r5_str($d['role'] ?? '');
+    if ($role !== '' && !in_array($role, R5_ROLES, true)) throw new RuntimeException('Role tidak valid.');
     $areaId = r5_str($d['areaId'] ?? '');
     if ($areaId !== '' && !r5_find_area($areaId)) throw new RuntimeException('Area tidak valid.');
-    $pin = r5_str($d['pin'] ?? '');
-    if ($pin !== '' && !preg_match('/^\d{4,8}$/', $pin)) throw new RuntimeException('PIN harus 4–8 angka.');
-    $u = r5_find_user($nik);
-    $patch = ['nama' => r5_str($d['nama']), 'role' => $d['role'], 'area_id' => $areaId, 'aktif' => ($d['aktif'] ?? true) === false ? 'N' : 'Y'];
-    if ($u) {
-        if ($pin !== '') $patch['pin_hash'] = password_hash($pin, PASSWORD_DEFAULT);
-        db_update('r5_users', $patch, 'nik = ?', [$u['nik']]);
-    } else {
-        $patch['nik'] = $nik;
-        $patch['pin_hash'] = password_hash($pin !== '' ? $pin : R5_PIN_DEFAULT, PASSWORD_DEFAULT);
-        db_insert('r5_users', $patch);
+    $aktif = ($d['aktif'] ?? true) !== false;
+    if (mb_strtolower($u['nik']) === mb_strtolower($me['nik']) && (!$aktif || ($role !== '' && $role !== 'Admin') || ($role === '' && r5_role_map($u['hris_role']) !== 'Admin'))) {
+        throw new RuntimeException('Anda tidak bisa menurunkan role atau menonaktifkan akun Anda sendiri.');
     }
-    return r5_uout(r5_find_user($nik));
+    r5_set_profile($u, $role, $areaId, $aktif);
+    return r5_uout(r5_find_user($u['nik']));
 }
 
 function apiSaveArea($token, $d): bool {
@@ -828,7 +827,7 @@ function apiSaveArea($token, $d): bool {
     $d = is_array($d) ? $d : [];
     $a = r5_find_area($d['id'] ?? '');
     $picNik = r5_str($d['picNik'] ?? '');
-    if ($picNik !== '' && !r5_find_user($picNik)) throw new RuntimeException('PIC (NIK ' . $picNik . ') tidak terdaftar.');
+    if ($picNik !== '' && !r5_find_user($picNik)) throw new RuntimeException('PIC (username ' . $picNik . ') tidak terdaftar di HRIS.');
     if ($a) {
         $nama = r5_str($d['nama'] ?? '') !== '' ? r5_str($d['nama']) : $a['nama'];
         db_update('r5_area', ['nama' => $nama, 'pic_nik' => $picNik, 'aktif' => ($d['aktif'] ?? true) === false ? 'N' : 'Y',
@@ -869,8 +868,8 @@ function apiSaveChecklist($token, $areaId, $items): array {
 }
 
 /**
- * Import banyak pengguna sekaligus (tempel dari Excel).
- * Tiap baris: NIK, Nama, Kode area / nama area / nama tim, Role (opsional, bawaan PIC).
+ * Atur tim/role 5R banyak user sekaligus (tempel dari Excel).
+ * Tiap baris: Username HRIS, Kode area / nama area / nama tim, Role 5R (opsional, kosong = ikut role HRIS).
  */
 function apiImportUsers($token, $rows): array {
     r5_auth($token, ['Admin']);
@@ -883,37 +882,28 @@ function apiImportUsers($token, $rows): array {
         return null;
     };
     return db_transaction(function () use ($rows, $findAreaId) {
-        $existing = [];
-        foreach (db_all("SELECT nik FROM r5_users") as $u) $existing[mb_strtolower($u['nik'])] = 'db';
-        $baru = 0; $diubah = 0; $gagal = [];
+        $seen = []; $diubah = 0; $gagal = [];
         foreach ((array)$rows as $i => $r) {
             $r = array_values((array)$r);
-            $nik = r5_str($r[0] ?? ''); $nama = r5_str($r[1] ?? '');
-            if ($nik === '' && $nama === '') continue;
+            $uname = r5_str($r[0] ?? '');
+            if ($uname === '' && r5_str($r[1] ?? '') === '') continue;
             $no = 'Baris ' . ($i + 1);
-            if ($nik === '' || $nama === '') { $gagal[] = $no . ': NIK/nama kosong'; continue; }
-            $areaId = $findAreaId($r[2] ?? '');
-            if ($areaId === null) { $gagal[] = $no . ': area/tim "' . r5_str($r[2] ?? '') . '" tidak dikenal'; continue; }
-            $roleIn = r5_str($r[3] ?? '') !== '' ? r5_str($r[3]) : 'PIC';
-            $role = null;
-            foreach (R5_ROLES as $x) if (strtolower($x) === strtolower($roleIn)) $role = $x;
-            if (!$role) { $gagal[] = $no . ': role "' . $roleIn . '" tidak valid'; continue; }
-            $k = mb_strtolower($nik);
-            $st = $existing[$k] ?? null;
-            if ($st === 'db') {
-                db_update('r5_users', ['nama' => $nama, 'area_id' => $areaId, 'role' => $role, 'aktif' => 'Y'], 'LOWER(nik) = ?', [$k]);
-                $diubah++;
-                $existing[$k] = 'done';
-            } elseif ($st !== null) {
-                $gagal[] = $no . ': NIK ' . $nik . ' ganda di data tempelan';
-            } else {
-                db_insert('r5_users', ['nik' => $nik, 'nama' => $nama, 'role' => $role, 'area_id' => $areaId,
-                    'pin_hash' => '', 'aktif' => 'Y']);   // PIN kosong = PIN bawaan 123456
-                $existing[$k] = 'new';
-                $baru++;
+            $u = r5_find_user($uname);
+            if (!$u) { $gagal[] = $no . ': username "' . $uname . '" tidak ada di HRIS'; continue; }
+            if (isset($seen[mb_strtolower($u['nik'])])) { $gagal[] = $no . ': username ' . $uname . ' ganda'; continue; }
+            $areaId = $findAreaId($r[1] ?? '');
+            if ($areaId === null) { $gagal[] = $no . ': area/tim "' . r5_str($r[1] ?? '') . '" tidak dikenal'; continue; }
+            $roleIn = r5_str($r[2] ?? '');
+            $role = '';
+            if ($roleIn !== '') {
+                foreach (R5_ROLES as $x) if (strtolower($x) === strtolower($roleIn)) $role = $x;
+                if ($role === '') { $gagal[] = $no . ': role "' . $roleIn . '" tidak valid'; continue; }
             }
+            r5_set_profile($u, $role, $areaId, true);
+            $seen[mb_strtolower($u['nik'])] = 1;
+            $diubah++;
         }
-        return ['baru' => $baru, 'diubah' => $diubah, 'gagal' => $gagal];
+        return ['baru' => 0, 'diubah' => $diubah, 'gagal' => $gagal];
     });
 }
 
@@ -934,7 +924,7 @@ function apiSaveConfig($token, $list): bool {
 
 /** Daftar fungsi yang boleh dipanggil dari frontend (api5r.php). */
 const R5_API = [
-    'apiLogin', 'apiBootstrap', 'apiGantiPin', 'apiFoto', 'apiCreateTemuan', 'apiListTemuan', 'apiGetTemuan',
+    'apiBootstrap', 'apiFoto', 'apiCreateTemuan', 'apiListTemuan', 'apiGetTemuan',
     'apiSubmitPerbaikan', 'apiVerifikasi', 'apiBatalkanTemuan', 'apiDashboard', 'apiLeaderboard', 'apiChecklist',
     'apiSaveAudit', 'apiListAudit', 'apiAdminData', 'apiSaveUser', 'apiSaveArea', 'apiSaveChecklist',
     'apiImportUsers', 'apiSaveConfig',
