@@ -83,12 +83,15 @@ function current_shift_(?array $shifts = null): array {
             return ['tanggal' => date('Y-m-d', strtotime('-1 day', strtotime($today))), 'kode' => $s['kode'], 'berjalan' => true];
         }
     }
-    foreach ($shifts as $s) {
+    // Shift berikutnya = yang mulainya paling dekat (bukan sekadar urutan tampil)
+    $byStart = $shifts;
+    usort($byStart, fn($a, $b) => $a['startMin'] <=> $b['startMin']);
+    foreach ($byStart as $s) {
         if ($s['startMin'] > $m) {
             return ['tanggal' => $today, 'kode' => $s['kode'], 'berjalan' => false];
         }
     }
-    $firstCode = !empty($shifts) ? $shifts[0]['kode'] : 'S1';
+    $firstCode = !empty($byStart) ? $byStart[0]['kode'] : 'S1';
     return ['tanggal' => date('Y-m-d', strtotime('+1 day', strtotime($today))), 'kode' => $firstCode, 'berjalan' => false];
 }
 
@@ -248,6 +251,8 @@ function get_master(array $currentUser): array {
 function target_of_bagian(array $b, string $kode): int {
     if ($kode === 'S1') return $b['targetS1'];
     if ($kode === 'S2') return $b['targetS2'];
+    // Shift 1 Pagi (06:00) memakai target Shift 1
+    if ($kode === 'S3') return $b['targetS1'];
     return 0;
 }
 

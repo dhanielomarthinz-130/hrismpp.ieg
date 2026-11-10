@@ -197,7 +197,7 @@ function jadwal_minggu(array $p, array $currentUser): array {
     });
 
     $targets = [];
-    foreach (['S1', 'S2'] as $k) {
+    foreach (array_column(shifts_(), 'kode') as $k) {
         $tSum = 0;
         foreach ($bag as $b) {
             if ($b['aktif']) $tSum += target_of_bagian($b, $k);

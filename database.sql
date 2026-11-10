@@ -217,7 +217,8 @@ ON DUPLICATE KEY UPDATE `username`=`username`;
 -- Shift
 INSERT INTO `shift` (`kode`, `nama`, `mulai`, `selesai`, `kirim`, `urutan`, `kirim_req`) VALUES
 ('S1', 'Shift 1', '08:00', '16:00', '08:30', 1, ''),
-('S2', 'Shift 2', '16:00', '00:00', '16:30', 2, '')
+('S2', 'Shift 2', '16:00', '00:00', '16:30', 2, ''),
+('S3', 'Shift 1 Pagi', '06:00', '14:00', '06:30', 3, '')
 ON DUPLICATE KEY UPDATE `kode`=`kode`;
 
 -- Kode Jadwal
@@ -230,7 +231,7 @@ INSERT INTO `kode_jadwal` (`kode`, `label`, `nama`, `mulai`, `selesai`, `jam`, `
 ('HALF', 'HALF', 'Half Day', '08:00', '12:00', 4.0, 1, 'S1', '#FCE4D6', 6),
 ('OFF', 'OFF', 'Libur', '', '', 0.0, 0, '', '#F4CCCC', 7),
 ('CUTI', 'CUTI', 'Cuti', '', '', 0.0, 0, '', '#FFF2CC', 8),
-('J06', '06', 'Jam Masuk 06', '06:00', '14:00', 8.0, 1, 'S1', '#DDEBF7', 9)
+('J06', '06', 'Jam Masuk 06', '06:00', '14:00', 8.0, 1, 'S3', '#DDEBF7', 9)
 ON DUPLICATE KEY UPDATE `kode`=`kode`;
 
 -- Bagian / Divisi

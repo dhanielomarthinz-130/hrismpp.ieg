@@ -1427,8 +1427,9 @@
             if (!c.some(Boolean)) return;
             h += '<tr><td colspan="3" class="c-foot">' + esc(k.label) + '</td><td class="wide-only" colspan="2"></td>' + c.map(n => '<td>' + (n || '') + '</td>').join('') + '<td colspan="2"></td></tr>';
         });
-        ['S1', 'S2'].forEach(sh => {
+        (S.master.shifts || []).map(x => x.kode).forEach(sh => {
             const c = count(x => { const kk = kodeOf(x); return kk && kk.kerja && kk.shift === sh; });
+            if (sh !== 'S1' && sh !== 'S2' && !c.some(Boolean)) return;
             const t = J.targets[sh] || 0;
             h += '<tr class="tot"><td colspan="3" class="c-foot">Total ' + esc(shiftName(sh)) + (t ? ' <small>/ ' + t + '</small>' : '') + '</td><td class="wide-only" colspan="2"></td>' +
                 c.map(n => '<td style="color:' + (t && n < t ? 'var(--err)' : 'inherit') + '">' + n + '</td>').join('') + '<td colspan="2"></td></tr>';
@@ -2940,6 +2941,13 @@
         all.forEach(p => { counts[p.employer]++; });
         return { days: days, rows: rows, counts: counts };
     }
+    // Ringkas absensi 1 karyawan di 1 hari: status terbaik, label shift (2 shift berbeda = LS / Long Shift), total lembur
+    const DA_PRIO = ['H', 'T', 'S', 'I', 'C', 'A'];
+    function daDay(list) {
+        const best = list.slice().sort((a, b) => DA_PRIO.indexOf(a.status) - DA_PRIO.indexOf(b.status))[0];
+        const sh = list.map(x => x.shift).filter((v, i, a) => a.indexOf(v) === i);
+        return { status: best.status, label: sh.length > 1 ? 'LS' : (sh[0] || ''), lembur: list.reduce((n, x) => n + (x.lembur || 0), 0) };
+    }
     function drawDataAbsen() {
         const f = S.da, today = S.master.today;
         const g = daGrid(), days = g.days, rows = g.rows;
@@ -2947,12 +2955,13 @@
         const d0 = days[0], d6 = days[6];
         $('#pageSub').textContent = 'Employee ' + f.employer + ' · Minggu ' + (+d0.slice(8)) + ' ' + BULAN[+d0.slice(5, 7) - 1] + ' – ' + (+d6.slice(8)) + ' ' + BULAN[+d6.slice(5, 7) - 1] + ' ' + d6.slice(0, 4);
         // Ringkasan minggu ini (sesuai tab & filter)
+        // Satu karyawan dihitung satu kali per hari (Long Shift = absen di 2 shift tetap 1 hari)
         const c = { H: 0, T: 0, S: 0, I: 0, A: 0, C: 0 };
         let total = 0, lembur = 0;
-        rows.forEach(p => Object.keys(p.cells).forEach(t => p.cells[t].forEach(r => { total++; if (c[r.status] !== undefined) c[r.status]++; lembur += r.lembur || 0; })));
+        rows.forEach(p => Object.keys(p.cells).forEach(t => { const x = daDay(p.cells[t]); total++; if (c[x.status] !== undefined) c[x.status]++; lembur += x.lembur; }));
         const hadir = c.H + c.T;
         $('#daStats').innerHTML = '<div class="kpis da-kpis">' +
-            '<div class="kpi"><div class="lbl">Karyawan ' + esc(f.employer) + '</div><div class="val">' + rows.length + '</div><div class="sub">' + total + ' catatan absensi</div></div>' +
+            '<div class="kpi"><div class="lbl">Karyawan ' + esc(f.employer) + '</div><div class="val">' + rows.length + '</div><div class="sub">' + total + ' hari tercatat</div></div>' +
             '<div class="kpi"><div class="lbl">Hadir</div><div class="val" style="color:var(--ok)">' + hadir + '</div><div class="sub">Telat ' + c.T + (total ? ' · ' + Math.round(hadir / total * 100) + '%' : '') + '</div></div>' +
             '<div class="kpi"><div class="lbl">Sakit / Izin / Cuti</div><div class="val" style="color:var(--warn)">' + (c.S + c.I + c.C) + '</div><div class="sub">S ' + c.S + ' · I ' + c.I + ' · C ' + c.C + '</div></div>' +
             '<div class="kpi"><div class="lbl">Alpa</div><div class="val" style="color:' + (c.A ? 'var(--err)' : 'inherit') + '">' + c.A + '</div><div class="sub">Lembur ' + (Math.round(lembur * 10) / 10) + ' jam</div></div>' +
@@ -2969,12 +2978,13 @@
             const cells = days.map(t => {
                 const list = p.cells[t] || [];
                 if (!list.length) return '<td class="c-day' + (t === today ? ' today' : '') + '"><span class="da-c' + (t > today ? ' fut' : '') + '" title="' + (t > today ? 'Belum waktunya' : 'Belum diabsen') + '">·</span></td>';
-                const r = list[list.length - 1];
-                list.forEach(x => { if (x.status === 'H' || x.status === 'T') nh++; nl += x.lembur || 0; });
-                const tip = list.map(x => shiftName(x.shift) + ': ' + (STATUS[x.status] || x.status) + (x.lembur ? ' · lembur ' + x.lembur + ' jam' : '') + (x.ket ? ' · ' + x.ket : '') +
+                const r = daDay(list);
+                if (r.status === 'H' || r.status === 'T') nh++;
+                nl += r.lembur;
+                const tip = (r.label === 'LS' ? 'Long Shift · ' : '') + list.map(x => shiftName(x.shift) + ': ' + (STATUS[x.status] || x.status) + (x.lembur ? ' · lembur ' + x.lembur + ' jam' : '') + (x.ket ? ' · ' + x.ket : '') +
                     (x.updatedBy ? ' · oleh ' + x.updatedBy + (x.updatedAt ? ' ' + x.updatedAt.slice(11, 16) : '') : '')).join('\n');
                 return '<td class="c-day' + (t === today ? ' today' : '') + '"><span class="da-c st-' + esc(r.status) + '" title="' + esc(tip) + '"><b>' + esc(r.status) + '</b>' +
-                    '<small>' + esc(list.map(x => x.shift).join('/')) + '</small>' + (list.some(x => x.lembur) ? '<i class="da-ot" aria-label="lembur"></i>' : '') + '</span></td>';
+                    '<small>' + esc(r.label) + '</small>' + (r.lembur ? '<i class="da-ot" aria-label="lembur"></i>' : '') + '</span></td>';
             }).join('');
             h += '<tr><td class="c-no">' + (idx + 1) + '</td>' +
                 '<td class="c-nama"><div class="wk-nm"><span class="op-ava clickable" data-view-foto="' + esc(p.id) + '" role="button" tabindex="0" title="Lihat foto">' + avatarHtml(p.nama, p.foto) + '</span>' +
@@ -3336,7 +3346,7 @@
             '<td><input class="k-nama" value="' + esc(k.nama) + '" style="min-width:110px"></td><td><input type="checkbox" class="k-kerja"' + (k.kerja ? ' checked' : '') + '></td>' +
             '<td><input type="time" class="k-mulai" value="' + esc(k.mulai) + '"></td><td><input type="time" class="k-selesai" value="' + esc(k.selesai) + '"></td>' +
             '<td><input type="number" class="k-jam" min="0" max="24" step="0.5" value="' + (k.jam || 0) + '" style="width:64px"></td>' +
-            '<td><select class="k-shift"><option value="">—</option><option value="S1"' + (k.shift === 'S1' ? ' selected' : '') + '>' + esc(shiftName('S1')) + '</option><option value="S2"' + (k.shift === 'S2' ? ' selected' : '') + '>' + esc(shiftName('S2')) + '</option></select></td>' +
+            '<td><select class="k-shift"><option value="">—</option>' + (S.master.shifts || []).map(x => '<option value="' + x.kode + '"' + (k.shift === x.kode ? ' selected' : '') + '>' + esc(x.nama) + '</option>').join('') + '</select></td>' +
             '<td><input type="color" class="k-warna" value="' + esc(k.warna || '#ffffff') + '" style="width:48px;padding:2px"></td><td><button type="button" class="icon-btn k-x" aria-label="Hapus"><span class="material-symbols-outlined">close</span></button></td></tr>';
         const bindK = () => $$('#kRows .k-x').forEach(b => b.onclick = () => b.closest('tr').remove());
         $('#kRows').innerHTML = (S.master.kodes || []).map(kodeRow).join(''); bindK();

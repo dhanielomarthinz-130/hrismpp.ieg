@@ -362,6 +362,19 @@ function init_db_tables(PDO $pdo, string $driver): void {
         }
         $pdo->prepare("INSERT INTO settings (key_name, value, ket) VALUES ('migr_kode_j06', '1', 'Migrasi kode jadwal Jam Masuk 06:00-14:00')")->execute();
     }
+
+    // Shift baru "Shift 1 Pagi" (S3) 06:00–14:00 dengan jam kirim WA sendiri — ditambahkan SEKALI.
+    // Kode jadwal J06 (06:00–14:00) dipindah agar dihitung ke shift ini.
+    $flagS3 = $pdo->query("SELECT COUNT(*) FROM settings WHERE key_name = 'migr_shift_s3'")->fetchColumn();
+    if ((int)$flagS3 === 0) {
+        $chk = $pdo->query("SELECT COUNT(*) FROM shift WHERE UPPER(kode) = 'S3'");
+        if ((int)$chk->fetchColumn() === 0) {
+            $maxUrut = (int)$pdo->query("SELECT COALESCE(MAX(urutan), 0) FROM shift")->fetchColumn();
+            $pdo->prepare("INSERT INTO shift (kode, nama, mulai, selesai, kirim, urutan, kirim_req) VALUES ('S3', 'Shift 1 Pagi', '06:00', '14:00', '06:30', ?, '')")->execute([max(3, $maxUrut + 1)]);
+        }
+        $pdo->exec("UPDATE kode_jadwal SET shift = 'S3' WHERE UPPER(kode) = 'J06' AND shift = 'S1'");
+        $pdo->prepare("INSERT INTO settings (key_name, value, ket) VALUES ('migr_shift_s3', '1', 'Migrasi shift S3 Shift 1 Pagi 06:00-14:00')")->execute();
+    }
 }
 
 /** ID operator berikutnya (OP0001, OP0002, …) — dihitung di PHP agar jalan di SQLite & MySQL. */
@@ -396,6 +409,7 @@ function seed_default_data(PDO $pdo): void {
     $stmt = $pdo->prepare("INSERT INTO shift (kode, nama, mulai, selesai, kirim, urutan, kirim_req) VALUES (?, ?, ?, ?, ?, ?, ?)");
     $stmt->execute(['S1', 'Shift 1', '08:00', '16:00', '08:30', 1, '']);
     $stmt->execute(['S2', 'Shift 2', '16:00', '00:00', '16:30', 2, '']);
+    $stmt->execute(['S3', 'Shift 1 Pagi', '06:00', '14:00', '06:30', 3, '']);
 
     // 3. Kode Jadwal Bawaan
     $kodes = [
@@ -407,7 +421,7 @@ function seed_default_data(PDO $pdo): void {
         ['HALF', 'HALF', 'Half Day', '08:00', '12:00', 4.0, 1, 'S1', '#FCE4D6', 6],
         ['OFF', 'OFF', 'Libur', '', '', 0.0, 0, '', '#F4CCCC', 7],
         ['CUTI', 'CUTI', 'Cuti', '', '', 0.0, 0, '', '#FFF2CC', 8],
-        ['J06', '06', 'Jam Masuk 06', '06:00', '14:00', 8.0, 1, 'S1', '#DDEBF7', 9]
+        ['J06', '06', 'Jam Masuk 06', '06:00', '14:00', 8.0, 1, 'S3', '#DDEBF7', 9]
     ];
     $stmt = $pdo->prepare("INSERT INTO kode_jadwal (kode, label, nama, mulai, selesai, jam, kerja, shift, warna, urutan) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     foreach ($kodes as $k) {
