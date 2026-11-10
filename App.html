@@ -3295,7 +3295,8 @@
             return;
         }
 
-        box.innerHTML = items.map(it => {
+        // Kartu satu Request OS. compact = baris ringkas yang bisa dibuka (dipakai di grup Approved)
+        const cardHtml = (it, compact) => {
             const st = it.approvalStatus || 'DRAFT';
             const spvName = it.supervisorName || spvDefault;
             const appByName = it.approvedByNama || it.approvedBy || spvName;
@@ -3336,6 +3337,34 @@
                 }).join('');
             }
 
+            const tableHtml = '<div class="table-wrap" style="max-height:none"><table class="tbl"><thead><tr>' +
+                '<th style="width:42px">No</th><th>Nama Karyawan</th><th>NIK</th><th>Divisi</th><th>Jam Kerja</th><th>Status Approval &amp; User Supervisor</th>' +
+                '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
+
+            if (compact) {
+                // Ringkasan per divisi, mis. "Inbound 4 · Return 2"
+                const byBag = {};
+                names.forEach(n => { byBag[n.bagian] = (byBag[n.bagian] || 0) + 1; });
+                const bagSum = Object.keys(byBag).map(k => esc(bagName(k)) + ' <b>' + byBag[k] + '</b>').join(' · ');
+                return '<details class="ra-ap-item">' +
+                    '<summary>' +
+                    '<span class="ra-ap-ic"><span class="material-symbols-outlined">verified</span></span>' +
+                    '<span class="ra-ap-main"><b>' + esc(shiftName(it.shift)) + '</b>' +
+                    '<small>' + (bagSum || 'Belum ada nama') + '</small></span>' +
+                    '<span class="ra-ap-meta"><span class="chip xs pri">' + it.request + ' MP · ' + names.length + ' nama</span>' +
+                    '<small>' + esc(appByName) + (it.approvedAt ? ' · ' + esc(it.approvedAt.slice(11, 16)) : '') + '</small></span>' +
+                    '<span class="material-symbols-outlined ra-ap-chev">expand_more</span>' +
+                    '</summary>' +
+                    '<div class="ra-ap-body">' +
+                    '<div class="row" style="justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">' +
+                    '<div class="small muted">Diajukan oleh <b>' + esc(subByName) + '</b>' + (it.submitAt ? ' (' + esc(it.submitAt.slice(0, 16)) + ')' : '') +
+                    ' · Approved oleh <b>' + esc(appByName) + '</b>' + (it.approvedAt ? ' (' + esc(it.approvedAt.slice(0, 16)) + ')' : '') + '</div>' +
+                    '<div class="row" style="gap:8px">' +
+                    '<button type="button" class="btn sm ghost" data-ra-open="' + it.tanggal + '|' + it.shift + '"><span class="material-symbols-outlined">edit_square</span> Buka Request OS</button>' +
+                    (canApp ? '<button type="button" class="btn sm danger" data-ra-reject="' + it.tanggal + '|' + it.shift + '"><span class="material-symbols-outlined">close</span> Tolak</button>' : '') +
+                    '</div></div>' + tableHtml + '</div></details>';
+            }
+
             return '<div class="card" style="margin-bottom:14px">' +
                 '<div class="card-head" style="flex-wrap:wrap;gap:10px">' +
                 '<div>' +
@@ -3356,12 +3385,39 @@
                 (canApp && st !== 'APPROVED' ? '<button type="button" class="btn sm ok" data-ra-approve="' + it.tanggal + '|' + it.shift + '"><span class="material-symbols-outlined">verified</span> Approve &amp; Masuk Jadwal</button>' : '') +
                 (canApp && st !== 'REJECTED' ? '<button type="button" class="btn sm danger" data-ra-reject="' + it.tanggal + '|' + it.shift + '"><span class="material-symbols-outlined">close</span> Tolak</button>' : '') +
                 '</div>' +
-                '</div>' +
-                '<div class="table-wrap" style="max-height:none"><table class="tbl"><thead><tr>' +
-                '<th style="width:42px">No</th><th>Nama Karyawan</th><th>NIK</th><th>Divisi</th><th>Jam Kerja</th><th>Status Approval &amp; User Supervisor</th>' +
-                '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>' +
+                '</div>' + tableHtml +
                 '</div>';
-        }).join('');
+        };
+
+        // Yang belum selesai (menunggu / ditolak / draft) tampil di atas sebagai kartu;
+        // yang sudah Approved dikumpulkan dalam satu grup, dikelompokkan per tanggal.
+        const approved = items.filter(it => it.approvalStatus === 'APPROVED')
+            .sort((a, b) => a.tanggal === b.tanggal ? String(a.shift).localeCompare(String(b.shift)) : (a.tanggal < b.tanggal ? 1 : -1));
+        const others = items.filter(it => it.approvalStatus !== 'APPROVED');
+        let html = others.map(it => cardHtml(it, false)).join('');
+        if (approved.length) {
+            const byDate = [];
+            approved.forEach(it => {
+                const last = byDate[byDate.length - 1];
+                if (last && last.tanggal === it.tanggal) last.items.push(it);
+                else byDate.push({ tanggal: it.tanggal, label: it.tanggalLabel, items: [it] });
+            });
+            const totMp = approved.reduce((s, it) => s + (+it.request || 0), 0);
+            const totNama = approved.reduce((s, it) => s + (it.reqNames || []).length, 0);
+            const open = reqAppFilter === 'APPROVED' || !others.length;
+            html += '<details class="card ra-ap"' + (open ? ' open' : '') + '>' +
+                '<summary class="ra-ap-head">' +
+                '<span class="ra-ap-hic"><span class="material-symbols-outlined">task_alt</span></span>' +
+                '<span class="ra-ap-main"><b>Sudah Di-Approve Supervisor</b><small>' + approved.length + ' request · ' + byDate.length + ' tanggal · ' + totMp + ' MP · ' + totNama + ' nama</small></span>' +
+                '<span class="chip ok">' + approved.length + '</span>' +
+                '<span class="material-symbols-outlined ra-ap-chev">expand_more</span>' +
+                '</summary>' +
+                byDate.map(g => '<div class="ra-ap-day"><div class="ra-ap-date"><span class="material-symbols-outlined">event</span>' + esc(g.label) +
+                    '<span class="muted">· ' + g.items.length + ' shift · ' + g.items.reduce((s, it) => s + (+it.request || 0), 0) + ' MP</span></div>' +
+                    g.items.map(it => cardHtml(it, true)).join('') + '</div>').join('') +
+                '</details>';
+        }
+        box.innerHTML = html;
 
         $$('[data-ra-open]', box).forEach(b => b.onclick = () => {
             const [dt, sh] = b.dataset.raOpen.split('|');

@@ -2619,6 +2619,180 @@
         height: 22px;
     }
 
+    /* Approval Request OS: grup "Sudah Di-Approve" */
+    .ra-ap {
+        padding: 0;
+        overflow: hidden;
+        margin-bottom: 14px;
+    }
+
+    .ra-ap > summary,
+    .ra-ap-item > summary {
+        list-style: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .ra-ap > summary::-webkit-details-marker,
+    .ra-ap-item > summary::-webkit-details-marker {
+        display: none;
+    }
+
+    .ra-ap-head {
+        padding: 14px 16px;
+        background: linear-gradient(90deg, var(--ok-bg), transparent 70%);
+    }
+
+    .ra-ap[open] > .ra-ap-head {
+        border-bottom: 1px solid var(--line);
+    }
+
+    .ra-ap-hic,
+    .ra-ap-ic {
+        flex: none;
+        display: inline-grid;
+        place-items: center;
+        border-radius: 10px;
+        background: var(--ok-bg);
+        color: var(--ok);
+    }
+
+    .ra-ap-hic {
+        width: 38px;
+        height: 38px;
+    }
+
+    .ra-ap-ic {
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+    }
+
+    .ra-ap-ic .material-symbols-outlined {
+        font-size: 18px;
+    }
+
+    .ra-ap-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .ra-ap-main small,
+    .ra-ap-meta small {
+        color: var(--text-3);
+        font-size: 11.5px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .ra-ap-head .ra-ap-main b {
+        font-size: 15px;
+    }
+
+    .ra-ap-chev {
+        flex: none;
+        color: var(--text-3);
+        transition: transform .2s ease;
+    }
+
+    .ra-ap[open] > summary .ra-ap-chev,
+    .ra-ap-item[open] > summary .ra-ap-chev {
+        transform: rotate(180deg);
+    }
+
+    .ra-ap-day {
+        padding: 12px 16px 4px;
+    }
+
+    .ra-ap-day + .ra-ap-day {
+        border-top: 1px dashed var(--line);
+    }
+
+    .ra-ap-date {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 8px;
+        font-size: 12.5px;
+        font-weight: 700;
+        color: var(--text-2);
+    }
+
+    .ra-ap-date .material-symbols-outlined {
+        font-size: 17px;
+        color: var(--primary);
+    }
+
+    .ra-ap-date .muted {
+        font-weight: 500;
+    }
+
+    .ra-ap-item {
+        margin-bottom: 8px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--surface);
+        transition: border-color .18s ease, box-shadow .18s ease;
+    }
+
+    .ra-ap-item > summary {
+        padding: 10px 12px;
+    }
+
+    .ra-ap-item[open] {
+        border-color: var(--ok);
+        box-shadow: 0 2px 10px rgba(15, 23, 42, .06);
+    }
+
+    @media (hover: hover) {
+        .ra-ap-item:not([open]):hover {
+            border-color: var(--border);
+            background: var(--surface-2);
+        }
+    }
+
+    .ra-ap-meta {
+        flex: none;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 3px;
+    }
+
+    .ra-ap-body {
+        padding: 4px 12px 12px;
+        border-top: 1px solid var(--line);
+        padding-top: 12px;
+    }
+
+    .ra-ap > summary:focus-visible,
+    .ra-ap-item > summary:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: -2px;
+    }
+
+    @media (max-width: 767px) {
+        .ra-ap-head,
+        .ra-ap-day {
+            padding-left: 12px;
+            padding-right: 12px;
+        }
+
+        .ra-ap-meta small {
+            display: none;
+        }
+
+        .ra-ap-main small {
+            white-space: normal;
+        }
+    }
+
     @media (max-width: 767px) {
         .da-tabs {
             max-width: none;
