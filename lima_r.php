@@ -12,11 +12,11 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/foto.php';
 
-const R5_VERSION = '2.0';
+const R5_VERSION = '2.1';
 const R5_LIST    = ['Ringkas', 'Rapi', 'Resik', 'Rawat', 'Rajin'];
 const R5_TINGKAT = ['Minor', 'Mayor', 'Kritis'];
 const R5_ROLES   = ['Admin', 'Auditor', 'PIC', 'Viewer'];
-const R5_OPEN = 'Open', R5_WAIT = 'Menunggu Verifikasi', R5_REVISI = 'Revisi', R5_CLOSED = 'Closed', R5_BATAL = 'Batal';
+const R5_OPEN = 'Open', R5_WAIT = 'Menunggu Verifikasi', R5_REVISI = 'Revisi', R5_CLOSED = 'Closed', R5_BATAL = 'Batal', R5_KEBERATAN = 'Keberatan';
 const R5_FOTO_DIM = 1280;   // foto temuan disimpan WebP (ringan), sisi terpanjang maks 1280px
 
 const R5_DEFAULT_CONFIG = [
@@ -35,6 +35,13 @@ const R5_DEFAULT_CONFIG = [
     ['BONUS_CEPAT', 2, 'Bonus bila selesai sebelum separuh batas waktu'],
     ['POTONG_TELAT_PER_HARI', 1, 'Potongan skor tim per hari keterlambatan perbaikan'],
     ['POIN_TIM_PELAPOR', 0, 'Poin untuk tim pelapor bila temuannya di area tim lain terbukti valid (0 = tidak aktif)'],
+    ['POTONG_REVISI', 1, 'Potongan untuk PIC & tim setiap kali perbaikan ditolak (revisi)'],
+    ['SLA_VERIFIKASI_JAM', 24, 'Batas waktu auditor memverifikasi perbaikan (jam)'],
+    ['KPI_TARGET', 85, 'Target skor KPI PIC per bulan (0–100)'],
+    ['KPI_BOBOT_TEPAT', 40, 'Bobot KPI: persentase perbaikan tepat waktu'],
+    ['KPI_BOBOT_FTR', 25, 'Bobot KPI: perbaikan disetujui tanpa revisi (first time right)'],
+    ['KPI_BOBOT_SELESAI', 25, 'Bobot KPI: persentase temuan selesai (closed) dari yang ditugaskan'],
+    ['KPI_BOBOT_OVERDUE', 10, 'Bobot KPI: tidak ada temuan lewat batas yang belum diperbaiki'],
 ];
 
 const R5_AREAS_SEED = [
@@ -102,6 +109,13 @@ function r5_init(): void {
         verifikator_nik VARCHAR(40) NULL, verifikator_nama VARCHAR(120) NULL, tgl_verifikasi $big NULL,
         catatan_verifikasi TEXT NULL, poin_area DOUBLE NOT NULL DEFAULT 0, poin_pic DOUBLE NULL,
         revisi INT NOT NULL DEFAULT 0, pelapor_area_id VARCHAR(12) NULL)");
+    // Kolom tambahan v2.1: alur keberatan PIC
+    $cols = $isSqlite
+        ? array_column($pdo->query("PRAGMA table_info(r5_temuan)")->fetchAll(), 'name')
+        : array_column($pdo->query("SHOW COLUMNS FROM r5_temuan")->fetchAll(), 'Field');
+    foreach (['catatan_keberatan' => 'TEXT NULL', 'tgl_keberatan' => "$big NULL", 'status_sebelum' => 'VARCHAR(30) NULL'] as $c => $def) {
+        if (!in_array($c, $cols, true)) $pdo->exec("ALTER TABLE r5_temuan ADD COLUMN $c $def");
+    }
     $pdo->exec("CREATE TABLE IF NOT EXISTS r5_poin (
         id $autoInc, ts $big NOT NULL, bulan VARCHAR(7) NOT NULL, jenis VARCHAR(10) NOT NULL,
         ref_id VARCHAR(40) NOT NULL, nama VARCHAR(120) NULL, poin DOUBLE NOT NULL DEFAULT 0,
@@ -200,12 +214,19 @@ function r5_role_map(string $hrisRole): string {
 /** Gabungkan baris users (HRIS) dengan pengaturan r5_users. */
 function r5_merge_user(array $h, ?array $p): array {
     $custom = $p && in_array(r5_str($p['role']), R5_ROLES, true);
+    $role = $custom ? r5_str($p['role']) : r5_role_map((string)$h['role']);
+    $aktif = ((int)$h['aktif'] === 1 && (!$p || $p['aktif'] !== 'N'));
+    $employer = strtoupper(r5_str($h['employer'] ?? ''));
     return [
+        // PIC 5R = Leader / PIC IEG dari HRIS (user yang tertaut ke operator RKA tidak bisa jadi PIC)
+        'pic'       => $aktif && $role === 'PIC' && ($employer === '' || $employer === 'IEG'),
+        'employer'  => $employer,
+        'bagian'    => r5_str($h['bagian'] ?? ''),
         'nik'       => (string)$h['username'],
         'nama'      => r5_str($h['nama']) !== '' ? r5_str($h['nama']) : (string)$h['username'],
-        'role'      => $custom ? r5_str($p['role']) : r5_role_map((string)$h['role']),
+        'role'      => $role,
         'area_id'   => $p ? r5_str($p['area_id']) : '',
-        'aktif'     => ((int)$h['aktif'] === 1 && (!$p || $p['aktif'] !== 'N')) ? 'Y' : 'N',
+        'aktif'     => $aktif ? 'Y' : 'N',
         'hris_role' => strtoupper((string)$h['role']) === ROLE_SUPER ? 'ADMIN' : strtoupper((string)$h['role']),
         'custom'    => $custom,
         'super'     => strtoupper((string)$h['role']) === ROLE_SUPER,
@@ -217,7 +238,7 @@ function r5_users_all(): array {
     $prof = [];
     foreach (db_all("SELECT * FROM r5_users") as $p) $prof[mb_strtolower($p['nik'])] = $p;
     $out = [];
-    foreach (db_all("SELECT username, nama, role, aktif FROM users WHERE UPPER(role) <> ? ORDER BY nama", [ROLE_SUPER]) as $h) {
+    foreach (db_all("SELECT u.username, u.nama, u.role, u.aktif, u.bagian, o.employer FROM users u LEFT JOIN operator o ON o.id = u.operator_id WHERE UPPER(u.role) <> ? ORDER BY u.nama", [ROLE_SUPER]) as $h) {
         $out[] = r5_merge_user($h, $prof[mb_strtolower($h['username'])] ?? null);
     }
     return $out;
@@ -226,7 +247,7 @@ function r5_users_all(): array {
 function r5_find_user($nik): ?array {
     $k = mb_strtolower(r5_str($nik));
     if ($k === '') return null;
-    $h = db_row("SELECT username, nama, role, aktif FROM users WHERE LOWER(username) = ?", [$k]);
+    $h = db_row("SELECT u.username, u.nama, u.role, u.aktif, u.bagian, o.employer FROM users u LEFT JOIN operator o ON o.id = u.operator_id WHERE LOWER(u.username) = ?", [$k]);
     if (!$h) return null;
     return r5_merge_user($h, db_row("SELECT * FROM r5_users WHERE LOWER(nik) = ?", [$k]));
 }
@@ -258,7 +279,8 @@ function r5_auth($token, ?array $roles = null): array {
 function r5_uout(array $u, ?array $tm = null): array {
     $o = ['nik' => r5_str($u['nik']), 'nama' => r5_str($u['nama']), 'role' => r5_str($u['role']),
           'areaId' => r5_str($u['area_id']), 'aktif' => $u['aktif'] !== 'N',
-          'hrisRole' => $u['hris_role'] ?? '', 'custom' => !empty($u['custom'])];
+          'hrisRole' => $u['hris_role'] ?? '', 'custom' => !empty($u['custom']), 'pic' => !empty($u['pic']),
+          'bagian' => $u['bagian'] ?? '', 'employer' => $u['employer'] ?? ''];
     if ($tm !== null) $o['tim'] = $tm[$o['areaId']] ?? '';
     return $o;
 }
@@ -286,7 +308,8 @@ function apiBootstrap($token): array {
     return [
         'user'  => $me,
         'areas' => $areas,
-        'users' => array_values(array_map(fn($x) => r5_uout($x, $tm), array_filter($users, fn($x) => $x['role'] !== 'Viewer'))),
+        // Pilihan PIC: hanya Leader / PIC IEG
+        'users' => array_values(array_map(fn($x) => r5_uout($x, $tm), array_filter($users, fn($x) => $x['pic']))),
         'rList' => R5_LIST, 'tingkat' => R5_TINGKAT, 'roles' => R5_ROLES,
         'config' => [
             'skorAwal' => r5_num('SKOR_AWAL_AREA', 100),
@@ -297,6 +320,8 @@ function apiBootstrap($token): array {
             'bonusCepat' => r5_num('BONUS_CEPAT', 2), 'potongTelat' => r5_num('POTONG_TELAT_PER_HARI', 1),
             'poinPelapor' => r5_num('POIN_TIM_PELAPOR', 0),
             'hariBerulang' => r5_num('HARI_BERULANG', 30),
+            'potongRevisi' => r5_num('POTONG_REVISI', 1), 'slaVerif' => r5_num('SLA_VERIFIKASI_JAM', 24),
+            'kpiTarget' => r5_num('KPI_TARGET', 85),
         ],
         'bulanIni' => r5_bulan(r5_now()),
         'version'  => R5_VERSION,
@@ -319,6 +344,7 @@ function r5_tout(array $t, ?array $tm = null): array {
     $dl = r5_ms($t['deadline']);
     $tp = r5_ms($t['tgl_perbaikan']);
     $late = false;
+    // Selama Keberatan ditinjau, batas waktu dihentikan (tidak dihitung terlambat)
     if ($t['status'] === R5_OPEN || $t['status'] === R5_REVISI) $late = $dl && $now > $dl;
     elseif ($t['status'] === R5_WAIT || $t['status'] === R5_CLOSED) $late = $tp && $dl && $tp > $dl;
     $aid = r5_str($t['area_id']);
@@ -336,6 +362,7 @@ function r5_tout(array $t, ?array $tm = null): array {
         'poinArea' => (float)$t['poin_area'],
         'poinPic' => $t['poin_pic'] === null || $t['poin_pic'] === '' ? null : (float)$t['poin_pic'],
         'revisi' => (int)$t['revisi'], 'terlambat' => (bool)$late,
+        'catatanKeberatan' => r5_str($t['catatan_keberatan'] ?? ''), 'tglKeberatan' => r5_ms($t['tgl_keberatan'] ?? null),
         'tim' => $tm !== null ? ($tm[$aid] ?? r5_str($t['nama_area'])) : '',
         'timPelapor' => ($tm !== null && $pa !== '') ? ($tm[$pa] ?? '') : '',
     ];
@@ -388,6 +415,7 @@ function apiCreateTemuan($token, $d): array {
     if (empty($d['foto'])) throw new RuntimeException('Foto sebelum (bukti temuan) wajib diunggah.');
     $pic = r5_find_user(r5_str($d['picNik'] ?? '') !== '' ? $d['picNik'] : $area['pic_nik']);
     if (!$pic || $pic['aktif'] === 'N') throw new RuntimeException('PIC belum dipilih, atau area ini belum punya PIC.');
+    if (!$pic['pic']) throw new RuntimeException($pic['nama'] . ' bukan Leader / PIC IEG di HRIS. Pilih PIC lain.');
 
     $fotoId = foto_save((string)$d['foto'], R5_FOTO_DIM, true);
     try {
@@ -437,12 +465,12 @@ function apiListTemuan($token, $f): array {
     $st = (string)($f['status'] ?? '');
     $rows = array_filter($rows, function ($t) use ($f, $q, $me, $scope, $st) {
         if ($scope === 'mine' && (mb_strtolower($t['picNik']) !== $me || $t['status'] === R5_BATAL)) return false;
-        if ($scope === 'verifikasi' && $t['status'] !== R5_WAIT) return false;
+        if ($scope === 'verifikasi' && $t['status'] !== R5_WAIT && $t['status'] !== R5_KEBERATAN) return false;
         if (!empty($f['bulan']) && (!$t['tanggal'] || r5_bulan($t['tanggal']) !== $f['bulan'])) return false;
         if (!empty($f['areaId']) && $t['areaId'] !== $f['areaId']) return false;
         if ($st === 'Terlambat') { if (!($t['terlambat'] && in_array($t['status'], [R5_OPEN, R5_REVISI], true))) return false; }
         elseif ($st === 'Perbaikan') { if (!in_array($t['status'], [R5_OPEN, R5_REVISI], true)) return false; }
-        elseif ($st === 'Aktif') { if (!in_array($t['status'], [R5_OPEN, R5_REVISI, R5_WAIT], true)) return false; }
+        elseif ($st === 'Aktif') { if (!in_array($t['status'], [R5_OPEN, R5_REVISI, R5_WAIT, R5_KEBERATAN], true)) return false; }
         elseif ($st !== '' && $t['status'] !== $st) return false;
         if (!empty($f['tim']) && $t['tim'] !== $f['tim']) return false;
         if ($q !== '' && strpos(r5_norm(implode(' ', [$t['id'], $t['area'], $t['tim'], $t['lokasi'], $t['deskripsi'], $t['pic'], $t['pelapor']])), $q) === false) return false;
@@ -519,20 +547,22 @@ function apiVerifikasi($token, $id, $setuju, $catatan): array {
             }
         } else {
             if (r5_str($catatan) === '') throw new RuntimeException('Tulis alasan penolakan agar PIC tahu apa yang harus diperbaiki.');
+            $ke = (int)$t['revisi'] + 1;
+            // Batas waktu tetap yang awal: revisi tidak memperpanjang waktu perbaikan
             db_update('r5_temuan', ['status' => R5_REVISI, 'verifikator_nik' => $u['nik'], 'verifikator_nama' => $u['nama'],
-                'tgl_verifikasi' => $now, 'catatan_verifikasi' => r5_str($catatan), 'revisi' => (int)$t['revisi'] + 1], 'id = ?', [$t['id']]);
+                'tgl_verifikasi' => $now, 'catatan_verifikasi' => r5_str($catatan), 'revisi' => $ke], 'id = ?', [$t['id']]);
+            $pr = r5_num('POTONG_REVISI', 1);
+            if ($pr > 0) {
+                r5_log_poin('AREA', $t['area_id'], r5_str($t['nama_area']), -$pr, $t['id'], 'Revisi ke-' . $ke . ' (perbaikan ditolak) · PIC ' . r5_str($t['pic_nama']), $now);
+                r5_log_poin('PIC', r5_str($t['pic_nik']), r5_str($t['pic_nama']), -$pr, $t['id'], 'Revisi ke-' . $ke . ' (perbaikan ditolak)', $now);
+            }
         }
         return r5_tout(r5_find_temuan($id), r5_timmap());
     });
 }
 
-function apiBatalkanTemuan($token, $id, $alasan): array {
-    $u = r5_auth($token, ['Admin']);
-    if (r5_str($alasan) === '') throw new RuntimeException('Alasan pembatalan wajib diisi.');
-    return db_transaction(function () use ($u, $id, $alasan) {
-        $t = r5_find_temuan($id);
-        if (!$t) throw new RuntimeException('Temuan tidak ditemukan.');
-        if ($t['status'] === R5_BATAL) throw new RuntimeException('Temuan sudah dibatalkan.');
+/** Batalkan temuan & kembalikan semua poinnya (dipanggil di dalam transaksi). */
+function r5_batal(array $t, array $u, string $catatan): void {
         $now = r5_now();
         $sum = [];
         foreach (db_all("SELECT * FROM r5_poin WHERE temuan_id = ?", [$t['id']]) as $p) {
@@ -543,8 +573,59 @@ function apiBatalkanTemuan($token, $id, $alasan): array {
         foreach ($sum as $s) {
             if (abs($s['poin']) > 1e-9) r5_log_poin($s['jenis'], $s['ref'], $s['nama'], -r5_round1($s['poin']), $t['id'], 'Pembatalan temuan oleh ' . $u['nama'], $now);
         }
-        db_update('r5_temuan', ['status' => R5_BATAL, 'catatan_verifikasi' => 'DIBATALKAN: ' . r5_str($alasan),
-            'verifikator_nama' => $u['nama'], 'tgl_verifikasi' => $now], 'id = ?', [$t['id']]);
+        db_update('r5_temuan', ['status' => R5_BATAL, 'catatan_verifikasi' => $catatan,
+            'verifikator_nik' => $u['nik'], 'verifikator_nama' => $u['nama'], 'tgl_verifikasi' => $now], 'id = ?', [$t['id']]);
+}
+
+function apiBatalkanTemuan($token, $id, $alasan): array {
+    $u = r5_auth($token, ['Admin']);
+    if (r5_str($alasan) === '') throw new RuntimeException('Alasan pembatalan wajib diisi.');
+    return db_transaction(function () use ($u, $id, $alasan) {
+        $t = r5_find_temuan($id);
+        if (!$t) throw new RuntimeException('Temuan tidak ditemukan.');
+        if ($t['status'] === R5_BATAL) throw new RuntimeException('Temuan sudah dibatalkan.');
+        r5_batal($t, $u, 'DIBATALKAN: ' . r5_str($alasan));
+        return r5_tout(r5_find_temuan($id), r5_timmap());
+    });
+}
+
+/* =====================================================================
+ *  KEBERATAN — PIC menyanggah temuan yang dirasa tidak valid
+ *  Open/Revisi -> Keberatan -> (Auditor) diterima = Batal (poin kembali)
+ *                                       ditolak  = kembali ke status semula,
+ *                                                  batas waktu diperpanjang sebesar lama peninjauan
+ * ===================================================================== */
+function apiKeberatan($token, $id, $alasan): array {
+    $u = r5_auth($token, ['Admin', 'Auditor', 'PIC']);
+    if (r5_str($alasan) === '') throw new RuntimeException('Tulis alasan keberatan.');
+    return db_transaction(function () use ($u, $id, $alasan) {
+        $t = r5_find_temuan($id);
+        if (!$t) throw new RuntimeException('Temuan tidak ditemukan.');
+        if (mb_strtolower(r5_str($t['pic_nik'])) !== mb_strtolower($u['nik'])) throw new RuntimeException('Hanya PIC temuan ini yang bisa mengajukan keberatan.');
+        if (!in_array($t['status'], [R5_OPEN, R5_REVISI], true)) throw new RuntimeException('Keberatan hanya bisa diajukan saat status Open atau Revisi.');
+        db_update('r5_temuan', ['status' => R5_KEBERATAN, 'status_sebelum' => $t['status'], 'catatan_keberatan' => r5_str($alasan),
+            'tgl_keberatan' => r5_now()], 'id = ?', [$t['id']]);
+        return r5_tout(r5_find_temuan($id), r5_timmap());
+    });
+}
+
+function apiPutusKeberatan($token, $id, $terima, $catatan): array {
+    $u = r5_auth($token, ['Admin', 'Auditor']);
+    return db_transaction(function () use ($u, $id, $terima, $catatan) {
+        $t = r5_find_temuan($id);
+        if (!$t) throw new RuntimeException('Temuan tidak ditemukan.');
+        if ($t['status'] !== R5_KEBERATAN) throw new RuntimeException('Temuan tidak sedang dalam keberatan.');
+        if (mb_strtolower(r5_str($t['pic_nik'])) === mb_strtolower($u['nik'])) throw new RuntimeException('Keberatan Anda sendiri harus diputuskan auditor lain.');
+        if ($terima) {
+            r5_batal($t, $u, 'KEBERATAN DITERIMA: ' . (r5_str($catatan) !== '' ? r5_str($catatan) : r5_str($t['catatan_keberatan'])));
+        } else {
+            if (r5_str($catatan) === '') throw new RuntimeException('Tulis alasan keberatan ditolak.');
+            $now = r5_now();
+            $jeda = max(0, $now - (int)$t['tgl_keberatan']);
+            db_update('r5_temuan', ['status' => in_array($t['status_sebelum'], [R5_OPEN, R5_REVISI], true) ? $t['status_sebelum'] : R5_OPEN,
+                'deadline' => (int)$t['deadline'] + $jeda, 'catatan_verifikasi' => 'Keberatan ditolak: ' . r5_str($catatan),
+                'verifikator_nik' => $u['nik'], 'verifikator_nama' => $u['nama'], 'tgl_verifikasi' => $now], 'id = ?', [$t['id']]);
+        }
         return r5_tout(r5_find_temuan($id), r5_timmap());
     });
 }
@@ -569,9 +650,11 @@ function r5_rekap_tim(string $bulan, array $areas, array $poinRows, array $temua
     $awal = r5_num('SKOR_AWAL_AREA', 100);
     $tm = r5_timmap($areas);
     $audit = r5_audit_avg($bulan);
+    $berjalan = $bulan === r5_bulan(r5_now());
+    $potTelat = r5_num('POTONG_TELAT_PER_HARI', 1);
     $T = [];
     $get = function (string $nama) use (&$T, $awal) {
-        if (!isset($T[$nama])) $T[$nama] = ['tim' => $nama, 'areas' => [], 'skor' => $awal, 'potongan' => 0.0, 'perbaikan' => 0.0,
+        if (!isset($T[$nama])) $T[$nama] = ['tim' => $nama, 'areas' => [], 'skor' => $awal, 'potongan' => 0.0, 'perbaikan' => 0.0, 'telatBerjalan' => 0.0,
             'pelapor' => 0.0, 'temuan' => 0, 'aktif' => 0, 'berulang' => 0, 'mandiri' => 0, 'dilaporkan' => 0, 'auditN' => 0, 'auditSum' => 0.0];
         return $nama;
     };
@@ -588,7 +671,12 @@ function r5_rekap_tim(string $bulan, array $areas, array $poinRows, array $temua
     foreach ($temuanAll as $t) {
         $nama = $tm[$t['areaId']] ?? null; if (!$nama) continue;
         $k = $get($nama);
-        if (in_array($t['status'], [R5_OPEN, R5_REVISI], true)) $T[$k]['aktif']++;
+        if (in_array($t['status'], [R5_OPEN, R5_REVISI], true)) {
+            $T[$k]['aktif']++;
+            // Temuan lewat batas yang belum diperbaiki: potongan per hari berjalan (bulan berjalan saja,
+            // tidak dicatat; saat perbaikan dikirim diganti potongan keterlambatan final)
+            if ($berjalan && $t['terlambat']) $T[$k]['telatBerjalan'] -= r5_hari_telat($t) * $potTelat;
+        }
         if (!$t['tanggal'] || r5_bulan($t['tanggal']) !== $bulan) continue;
         $T[$k]['temuan']++;
         if ($t['berulang']) $T[$k]['berulang']++;
@@ -601,7 +689,7 @@ function r5_rekap_tim(string $bulan, array $areas, array $poinRows, array $temua
     }
     $out = [];
     foreach ($T as $r) {
-        $r['skor'] = r5_round1($r['skor']); $r['potongan'] = r5_round1($r['potongan']);
+        $r['skor'] = r5_round1($r['skor'] + $r['telatBerjalan']); $r['potongan'] = r5_round1($r['potongan']); $r['telatBerjalan'] = r5_round1($r['telatBerjalan']);
         $r['perbaikan'] = r5_round1($r['perbaikan']); $r['pelapor'] = r5_round1($r['pelapor']);
         $r['audit'] = $r['auditN'] ? r5_round1($r['auditSum'] / $r['auditN']) : null;
         unset($r['auditSum']);
@@ -611,25 +699,115 @@ function r5_rekap_tim(string $bulan, array $areas, array $poinRows, array $temua
     return $out;
 }
 
+/** Hari keterlambatan (dibulatkan ke atas) temuan yang belum diperbaiki. */
+function r5_hari_telat(array $t): int {
+    return $t['deadline'] ? max(1, (int)ceil((r5_now() - $t['deadline']) / 86400000)) : 0;
+}
+
 function r5_leader_pic(string $bulan, array $poin, array $temuanAll): array {
+    $berjalan = $bulan === r5_bulan(r5_now());
+    $potTelat = r5_num('POTONG_TELAT_PER_HARI', 1);
     $m = [];
+    $row = fn($nik, $nama) => ['nik' => $nik, 'nama' => $nama, 'poin' => 0.0, 'tepat' => 0, 'telat' => 0, 'revisi' => 0, 'overdue' => 0, 'telatBerjalan' => 0.0];
     foreach ($poin as $p) {
         if ($p['jenis'] !== 'PIC' || $p['bulan'] !== $bulan) continue;
         $k = mb_strtolower($p['ref_id']);
-        if (!isset($m[$k])) $m[$k] = ['nik' => $p['ref_id'], 'nama' => r5_str($p['nama']), 'poin' => 0.0, 'tepat' => 0, 'telat' => 0, 'overdue' => 0];
+        if (!isset($m[$k])) $m[$k] = $row($p['ref_id'], r5_str($p['nama']));
         $m[$k]['poin'] += (float)$p['poin'];
-        if (preg_match('/tepat waktu/i', (string)$p['ket'])) $m[$k]['tepat']++;
-        if (preg_match('/terlambat/i', (string)$p['ket'])) $m[$k]['telat']++;
+        $ket = (string)$p['ket'];
+        if (preg_match('/tepat waktu/i', $ket)) $m[$k]['tepat']++;
+        if (preg_match('/^Perbaikan terlambat/i', $ket)) $m[$k]['telat']++;
+        if (preg_match('/^Revisi/i', $ket)) $m[$k]['revisi']++;
     }
     foreach ($temuanAll as $t) {
         if (!$t['terlambat'] || !in_array($t['status'], [R5_OPEN, R5_REVISI], true)) continue;
         $k = mb_strtolower($t['picNik']);
-        if (!isset($m[$k])) $m[$k] = ['nik' => $t['picNik'], 'nama' => $t['pic'], 'poin' => 0.0, 'tepat' => 0, 'telat' => 0, 'overdue' => 0];
+        if (!isset($m[$k])) $m[$k] = $row($t['picNik'], $t['pic']);
         $m[$k]['overdue']++;
+        if ($berjalan) $m[$k]['telatBerjalan'] -= r5_hari_telat($t) * $potTelat;
     }
-    $out = array_values(array_map(function ($x) { $x['poin'] = r5_round1($x['poin']); return $x; }, $m));
+    $out = array_values(array_map(function ($x) {
+        $x['poin'] = r5_round1($x['poin'] + $x['telatBerjalan']);
+        $x['telatBerjalan'] = r5_round1($x['telatBerjalan']);
+        return $x;
+    }, $m));
     usort($out, fn($a, $b) => ($b['poin'] <=> $a['poin']) ?: ($a['overdue'] <=> $b['overdue']) ?: strcmp($a['nama'], $b['nama']));
     return $out;
+}
+
+/* =====================================================================
+ *  KPI PIC — terukur per Leader / PIC IEG, per bulan (temuan yang dibuat di bulan itu)
+ * ===================================================================== */
+function r5_kpi_rows(string $bulan, ?string $onlyNik = null): array {
+    $tm = r5_timmap();
+    $all = array_values(array_filter(r5_all_temuan($tm), fn($t) => $t['status'] !== R5_BATAL));
+    $W = ['tepat' => r5_num('KPI_BOBOT_TEPAT', 40), 'ftr' => r5_num('KPI_BOBOT_FTR', 25),
+          'selesai' => r5_num('KPI_BOBOT_SELESAI', 25), 'overdue' => r5_num('KPI_BOBOT_OVERDUE', 10)];
+    $poinPic = [];
+    foreach (r5_leader_pic($bulan, db_all("SELECT * FROM r5_poin WHERE jenis = 'PIC' AND bulan = ?", [$bulan]), $all) as $p) $poinPic[mb_strtolower($p['nik'])] = $p['poin'];
+    // Tim PIC: tim utama di 5R, atau tim area tempat ia menjadi PIC area
+    $timPic = [];
+    foreach (db_all("SELECT area_id, pic_nik FROM r5_area WHERE aktif <> 'N'") as $a) {
+        $k = mb_strtolower(r5_str($a['pic_nik']));
+        if ($k !== '' && !in_array($tm[$a['area_id']], $timPic[$k] ?? [], true)) $timPic[$k][] = $tm[$a['area_id']];
+    }
+    $rows = [];
+    foreach (r5_users_all() as $u) {
+        if (!$u['pic']) continue;
+        if ($onlyNik !== null && mb_strtolower($u['nik']) !== mb_strtolower($onlyNik)) continue;
+        $rows[mb_strtolower($u['nik'])] = ['nik' => $u['nik'], 'nama' => $u['nama'], 'tim' => ($tm[$u['area_id']] ?? '') !== '' ? $tm[$u['area_id']] : implode(', ', $timPic[mb_strtolower($u['nik'])] ?? []), 'bagian' => $u['bagian'],
+            'ditugaskan' => 0, 'selesai' => 0, 'tepat' => 0, 'ftr' => 0, 'menunggu' => 0, 'keberatan' => 0, 'aktif' => 0, 'overdue' => 0,
+            'revisi' => 0, 'jamTotal' => 0.0];
+    }
+    foreach ($all as $t) {
+        $k = mb_strtolower($t['picNik']);
+        if (!isset($rows[$k])) continue;
+        $r = &$rows[$k];
+        // Temuan lewat batas yang belum diperbaiki dihitung kapan pun dibuatnya (tanggung jawab berjalan)
+        if (in_array($t['status'], [R5_OPEN, R5_REVISI], true) && $t['terlambat'] && $bulan === r5_bulan(r5_now())) $r['overdue']++;
+        if (!$t['tanggal'] || r5_bulan($t['tanggal']) !== $bulan) { unset($r); continue; }
+        $r['ditugaskan']++;
+        $r['revisi'] += $t['revisi'];
+        if ($t['status'] === R5_CLOSED) {
+            $r['selesai']++;
+            if (!$t['terlambat']) $r['tepat']++;
+            if ($t['revisi'] === 0) $r['ftr']++;
+            if ($t['tglPerbaikan']) $r['jamTotal'] += ($t['tglPerbaikan'] - $t['tanggal']) / 3600000;
+        } elseif ($t['status'] === R5_WAIT) $r['menunggu']++;
+        elseif ($t['status'] === R5_KEBERATAN) $r['keberatan']++;
+        else $r['aktif']++;
+        unset($r);
+    }
+    $target = r5_num('KPI_TARGET', 85);
+    $out = [];
+    foreach ($rows as $k => $r) {
+        $pct = fn($a, $b) => $b > 0 ? round($a / $b * 100, 1) : null;
+        $r['pctTepat'] = $pct($r['tepat'], $r['selesai']);
+        $r['pctFtr'] = $pct($r['ftr'], $r['selesai']);
+        $basisSelesai = $r['ditugaskan'] - $r['keberatan'];
+        $r['pctSelesai'] = $pct($r['selesai'] + $r['menunggu'] * 0.5, $basisSelesai);   // menunggu verifikasi dihitung setengah
+        $r['skorOverdue'] = max(0, 100 - 25 * $r['overdue']);
+        $r['rataJam'] = $r['selesai'] ? round($r['jamTotal'] / $r['selesai'], 1) : null;
+        unset($r['jamTotal']);
+        // Skor KPI = rata-rata berbobot komponen yang sudah ada datanya
+        $parts = [['tepat', $r['pctTepat']], ['ftr', $r['pctFtr']], ['selesai', $r['pctSelesai']], ['overdue', ($r['ditugaskan'] || $r['overdue']) ? $r['skorOverdue'] : null]];
+        $sw = 0; $sv = 0;
+        foreach ($parts as [$key, $v]) { if ($v === null || $W[$key] <= 0) continue; $sw += $W[$key]; $sv += $W[$key] * min(100, $v); }
+        $r['skor'] = $sw > 0 ? round($sv / $sw, 1) : null;
+        $r['status'] = $r['skor'] === null ? 'Belum ada data' : ($r['skor'] >= $target ? 'Tercapai' : 'Di bawah target');
+        $r['poin'] = $poinPic[$k] ?? 0;
+        $out[] = $r;
+    }
+    usort($out, fn($a, $b) => (($b['skor'] ?? -1) <=> ($a['skor'] ?? -1)) ?: ($b['ditugaskan'] <=> $a['ditugaskan']) ?: strcmp($a['nama'], $b['nama']));
+    return $out;
+}
+
+function apiKpiPic($token, $bulan): array {
+    r5_auth($token);
+    $bulan = r5_valid_bulan($bulan);
+    return ['bulan' => $bulan, 'rows' => r5_kpi_rows($bulan), 'target' => r5_num('KPI_TARGET', 85),
+            'bobot' => ['tepat' => r5_num('KPI_BOBOT_TEPAT', 40), 'ftr' => r5_num('KPI_BOBOT_FTR', 25),
+                        'selesai' => r5_num('KPI_BOBOT_SELESAI', 25), 'overdue' => r5_num('KPI_BOBOT_OVERDUE', 10)]];
 }
 
 function r5_valid_bulan($b): string {
@@ -681,6 +859,8 @@ function apiDashboard($token, $bulan): array {
             'total' => count($bln),
             'aktif' => count($aktif),
             'menunggu' => count(array_filter($all, fn($t) => $t['status'] === R5_WAIT)),
+            'lewatSla' => count(array_filter($all, fn($t) => $t['status'] === R5_WAIT && $t['tglPerbaikan'] && r5_now() - $t['tglPerbaikan'] > r5_num('SLA_VERIFIKASI_JAM', 24) * 3600000)),
+            'keberatan' => count(array_filter($all, fn($t) => $t['status'] === R5_KEBERATAN)),
             'terlambat' => count($terlambat),
             'closed' => count($closedBln),
             'tepatPct' => count($closedBln) ? (int)round($tepat / count($closedBln) * 100) : null,
@@ -831,7 +1011,11 @@ function apiSaveArea($token, $d): bool {
     $d = is_array($d) ? $d : [];
     $a = r5_find_area($d['id'] ?? '');
     $picNik = r5_str($d['picNik'] ?? '');
-    if ($picNik !== '' && !r5_find_user($picNik)) throw new RuntimeException('PIC (username ' . $picNik . ') tidak terdaftar di HRIS.');
+    if ($picNik !== '') {
+        $pu = r5_find_user($picNik);
+        if (!$pu) throw new RuntimeException('PIC (username ' . $picNik . ') tidak terdaftar di HRIS.');
+        if (!$pu['pic']) throw new RuntimeException($pu['nama'] . ' bukan Leader / PIC IEG di HRIS.');
+    }
     if ($a) {
         $nama = r5_str($d['nama'] ?? '') !== '' ? r5_str($d['nama']) : $a['nama'];
         db_update('r5_area', ['nama' => $nama, 'pic_nik' => $picNik, 'aktif' => ($d['aktif'] ?? true) === false ? 'N' : 'Y',
@@ -931,5 +1115,5 @@ const R5_API = [
     'apiBootstrap', 'apiFoto', 'apiCreateTemuan', 'apiListTemuan', 'apiGetTemuan',
     'apiSubmitPerbaikan', 'apiVerifikasi', 'apiBatalkanTemuan', 'apiDashboard', 'apiLeaderboard', 'apiChecklist',
     'apiSaveAudit', 'apiListAudit', 'apiAdminData', 'apiSaveUser', 'apiSaveArea', 'apiSaveChecklist',
-    'apiImportUsers', 'apiSaveConfig',
+    'apiImportUsers', 'apiSaveConfig', 'apiKeberatan', 'apiPutusKeberatan', 'apiKpiPic',
 ];
