@@ -17,7 +17,7 @@ const R5_LIST    = ['Ringkas', 'Rapi', 'Resik', 'Rawat', 'Rajin'];
 const R5_TINGKAT = ['Minor', 'Mayor', 'Kritis'];
 const R5_ROLES   = ['Admin', 'Auditor', 'PIC', 'Viewer'];
 const R5_OPEN = 'Open', R5_WAIT = 'Menunggu Verifikasi', R5_REVISI = 'Revisi', R5_CLOSED = 'Closed', R5_BATAL = 'Batal';
-const R5_FOTO_DIM = 1600;
+const R5_FOTO_DIM = 1280;   // foto temuan disimpan WebP (ringan), sisi terpanjang maks 1280px
 
 const R5_DEFAULT_CONFIG = [
     ['SKOR_AWAL_AREA', 100, 'Skor awal setiap tim per bulan'],
@@ -280,8 +280,11 @@ function apiBootstrap($token): array {
         $areas[] = ['id' => $a['area_id'], 'nama' => $a['nama'], 'tim' => $tm[$a['area_id']],
                     'picNik' => r5_str($a['pic_nik']), 'picNama' => $p ? $p['nama'] : ''];
     }
+    $me = r5_uout($u, $tm);
+    $hrow = db_row("SELECT * FROM users WHERE LOWER(username) = ?", [mb_strtolower($u['nik'])]);
+    $me['foto'] = $hrow ? foto_url(user_foto_name($hrow)) : '';
     return [
-        'user'  => r5_uout($u, $tm),
+        'user'  => $me,
         'areas' => $areas,
         'users' => array_values(array_map(fn($x) => r5_uout($x, $tm), array_filter($users, fn($x) => $x['role'] !== 'Viewer'))),
         'rList' => R5_LIST, 'tingkat' => R5_TINGKAT, 'roles' => R5_ROLES,
@@ -386,7 +389,7 @@ function apiCreateTemuan($token, $d): array {
     $pic = r5_find_user(r5_str($d['picNik'] ?? '') !== '' ? $d['picNik'] : $area['pic_nik']);
     if (!$pic || $pic['aktif'] === 'N') throw new RuntimeException('PIC belum dipilih, atau area ini belum punya PIC.');
 
-    $fotoId = foto_save((string)$d['foto'], R5_FOTO_DIM);
+    $fotoId = foto_save((string)$d['foto'], R5_FOTO_DIM, true);
     try {
         return db_transaction(function () use ($u, $d, $area, $kat, $ting, $pic, $fotoId) {
             $now = r5_now();
@@ -438,6 +441,7 @@ function apiListTemuan($token, $f): array {
         if (!empty($f['bulan']) && (!$t['tanggal'] || r5_bulan($t['tanggal']) !== $f['bulan'])) return false;
         if (!empty($f['areaId']) && $t['areaId'] !== $f['areaId']) return false;
         if ($st === 'Terlambat') { if (!($t['terlambat'] && in_array($t['status'], [R5_OPEN, R5_REVISI], true))) return false; }
+        elseif ($st === 'Perbaikan') { if (!in_array($t['status'], [R5_OPEN, R5_REVISI], true)) return false; }
         elseif ($st === 'Aktif') { if (!in_array($t['status'], [R5_OPEN, R5_REVISI, R5_WAIT], true)) return false; }
         elseif ($st !== '' && $t['status'] !== $st) return false;
         if (!empty($f['tim']) && $t['tim'] !== $f['tim']) return false;
@@ -462,7 +466,7 @@ function apiSubmitPerbaikan($token, $id, $catatan, $foto): array {
     if (mb_strtolower(r5_str($t0['pic_nik'])) !== mb_strtolower($u['nik']) && $u['role'] !== 'Admin')
         throw new RuntimeException('Hanya PIC temuan ini yang bisa mengirim perbaikan.');
     if (!in_array($t0['status'], [R5_OPEN, R5_REVISI], true)) throw new RuntimeException('Status temuan sudah ' . $t0['status'] . '.');
-    $fotoId = foto_save((string)$foto, R5_FOTO_DIM);
+    $fotoId = foto_save((string)$foto, R5_FOTO_DIM, true);
     try {
         return db_transaction(function () use ($id, $catatan, $fotoId) {
             $t = r5_find_temuan($id);

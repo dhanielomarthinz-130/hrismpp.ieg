@@ -36,8 +36,9 @@ function foto_delete_file(?string $name): void {
 /**
  * Simpan gambar dari data URL / base64. Mengembalikan nama file acak yang tersimpan.
  * $maxDim = sisi terpanjang hasil re-encode (bawaan 512px untuk foto profil).
+ * $webp   = simpan sebagai WebP (jauh lebih ringan dari JPEG) bila server mendukung.
  */
-function foto_save(string $data, int $maxDim = FOTO_MAX_DIM): string {
+function foto_save(string $data, int $maxDim = FOTO_MAX_DIM, bool $webp = false): string {
     $data = trim($data);
     if (preg_match('/^data:([a-z0-9.+\/-]+);base64,/i', $data, $m)) {
         $data = substr($data, strlen($m[0]));
@@ -91,11 +92,16 @@ function foto_save(string $data, int $maxDim = FOTO_MAX_DIM): string {
             imagefill($dst, 0, 0, $white); // latar putih untuk PNG transparan
             imagecopyresampled($dst, $src, 0, 0, 0, 0, $nw, $nh, $w, $h);
             ob_start();
-            imagejpeg($dst, null, 85);
+            if ($webp && function_exists('imagewebp')) {
+                imagewebp($dst, null, 72);
+                $ext = 'webp';
+            } else {
+                imagejpeg($dst, null, $webp ? 75 : 85);
+                $ext = 'jpg';
+            }
             $out = ob_get_clean();
             imagedestroy($src);
             imagedestroy($dst);
-            $ext = 'jpg';
         }
     }
 
