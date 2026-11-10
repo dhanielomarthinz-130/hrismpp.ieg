@@ -619,7 +619,7 @@ async function refreshBadges() {
     }
     if (canDo('verif')) {
       const v = await call('apiListTemuan', S.token, { scope: 'verifikasi' });
-      S.badge.verif = v.filter(t => t.picNik.toLowerCase() !== S.user.nik.toLowerCase()).length;
+      S.badge.verif = S.user.super ? v.length : v.filter(t => t.picNik.toLowerCase() !== S.user.nik.toLowerCase()).length;
     }
     $$('[data-b]').forEach(b => { const n = S.badge[b.dataset.b] || 0; b.textContent = n > 99 ? '99+' : n; b.hidden = !n; });
   } catch (e) { /* abaikan */ }
@@ -1106,13 +1106,13 @@ VIEWS.verif = async function () {
             '<td>' + esc(t.pic || '-') + (own ? '<div><span class="chip c-warn">Perbaikan Anda</span></div>' : '') + '</td>' +
             '<td style="white-space:nowrap">' + fDate(w) + '<div class="cell-sub" style="' + (telat ? 'color:var(--err-t);font-weight:700' : '') + '">menunggu ' + durasi(tunggu) + (telat ? ' · lewat SLA' : '') + '</div></td>' +
             '<td>' + statusChip(t) + (t.terlambat ? '<div class="cell-sub" style="color:var(--err-t)">dikirim lewat target</div>' : '') + '</td>' +
-            '<td>' + (own ? '<button class="btn sm" data-open="' + esc(t.id) + '" title="Anda yang memproses — harus diverifikasi auditor lain">Lihat</button>'
+            '<td>' + (own && !S.user.super ? '<button class="btn sm" data-open="' + esc(t.id) + '" title="Anda yang memproses — harus diverifikasi auditor lain">Lihat</button>'
               : '<button class="btn sm primary" data-open="' + esc(t.id) + '">' + (t.status === 'Keberatan' ? 'Putuskan' : 'Periksa') + '</button>') + '</td></tr>';
         }).join('') + '</tbody></table></div>' +
         '<div class="dt-foot"><span>Menampilkan ' + ((st.page - 1) * st.per + 1) + '–' + Math.min(n, st.page * st.per) + ' dari ' + n + '</span>' +
         '<span class="pg"><select class="inp" id="vfPer" style="width:auto;min-height:32px">' + [10, 20, 50, 100].map(x => '<option' + (x === st.per ? ' selected' : '') + '>' + x + '</option>').join('') + '</select>' +
         '<button class="btn sm" id="vfPrev"' + (st.page <= 1 ? ' disabled' : '') + '>‹</button><span style="align-self:center">' + st.page + ' / ' + pages + '</span><button class="btn sm" id="vfNext"' + (st.page >= pages ? ' disabled' : '') + '>›</button></span></div>' +
-        (rows.some(t => (t.picNik || '').toLowerCase() === me) ? '<p class="small muted" style="margin:8px 0 0">Baris bertanda <b>Perbaikan Anda</b> dikerjakan oleh akun Anda sendiri, jadi harus diverifikasi auditor lain.</p>' : '')
+        (rows.some(t => (t.picNik || '').toLowerCase() === me) ? '<p class="small muted" style="margin:8px 0 0">Baris bertanda <b>Perbaikan Anda</b> dikerjakan oleh akun Anda sendiri' + (S.user.super ? '. Sebagai super admin Anda tetap bisa memverifikasinya (tercatat di riwayat).' : ', jadi harus diverifikasi auditor lain.') + '</p>' : '')
       : emptyBox(rows.length ? 'Tidak ada data untuk filter ini.' : 'Tidak ada perbaikan atau keberatan yang perlu diputuskan.'));
     $$('th.sort', VB).forEach(h => h.onclick = () => { const k = h.dataset.k; if (st.sort === k) st.dir = -st.dir; else { st.sort = k; st.dir = k === 'kirim' ? 1 : 1; } draw(); });
     $$('[data-open]', VB).forEach(b => b.onclick = () => openDetail(b.dataset.open));
@@ -1213,7 +1213,7 @@ function renderDetail(t) {
   if (t.status === 'Keberatan') {
     h += '<div class="card" style="margin-top:12px;background:var(--surface-2)"><h3>Keberatan PIC</h3>' +
       '<div class="note" style="margin-bottom:10px">' + esc(t.catatanKeberatan) + '<div class="small" style="margin-top:4px">Diajukan ' + fDate(t.tglKeberatan) + ' · batas waktu dihentikan selama ditinjau</div></div>' +
-      (canEdit('verif') ? (isPic ? '<div class="note warn">Keberatan Anda sendiri harus diputuskan auditor lain.</div>' :
+      (canEdit('verif') ? (isPic && !S.user.super ? '<div class="note warn">Keberatan Anda sendiri harus diputuskan auditor lain.</div>' :
         '<div class="field"><label for="kCat">Catatan keputusan (wajib bila ditolak)</label><textarea class="inp" id="kCat"></textarea></div>' +
         '<div class="grid g2"><button class="btn" id="kNo">Tolak, lanjut perbaikan</button><button class="btn danger" id="kYes">Terima, batalkan temuan</button></div>' +
         '<p class="small muted" style="margin:8px 0 0">Diterima: temuan batal dan semua poinnya dikembalikan. Ditolak: kembali ke PIC, batas waktu diperpanjang sebesar lama peninjauan.</p>') : '<div class="small muted">Menunggu keputusan auditor.</div>') + '</div>';
@@ -1221,7 +1221,8 @@ function renderDetail(t) {
   // Aksi Auditor
   if (canEdit('verif') && t.status === 'Menunggu Verifikasi') {
     h += '<div class="card" style="margin-top:12px;background:var(--surface-2)"><h3>Verifikasi perbaikan</h3>' +
-      (isPic ? '<div class="note warn">Anda PIC temuan ini, jadi verifikasi harus dilakukan auditor lain.</div>' :
+      (isPic && !S.user.super ? '<div class="note warn">Anda PIC temuan ini, jadi verifikasi harus dilakukan auditor lain.</div>' :
+        (isPic ? '<div class="note" style="margin-bottom:10px">Anda yang mengerjakan perbaikan ini. Sebagai super admin Anda tetap bisa memverifikasi; tindakan ini tercatat di riwayat.</div>' : '') +
         '<div class="field"><label for="vCat">Catatan (wajib bila ditolak)</label><textarea class="inp" id="vCat"></textarea></div>' +
         '<div class="grid g2"><button class="btn danger" id="vNo">Tolak, perbaiki lagi</button><button class="btn ok" id="vYes">Setujui &amp; tutup</button></div>') + '</div>';
   }

@@ -714,7 +714,8 @@ function r5_uout(array $u, ?array $tm = null, ?array $apm = null): array {
     $o = ['nik' => r5_str($u['nik']), 'nama' => r5_str($u['nama']), 'role' => r5_str($u['role']),
           'areaId' => r5_str($u['area_id']), 'aktif' => $u['aktif'] !== 'N',
           'hrisRole' => $u['hris_role'] ?? '', 'custom' => !empty($u['custom']), 'pic' => !empty($u['pic']),
-          'bagian' => $u['bagian'] ?? '', 'employer' => $u['employer'] ?? '', 'tertaut' => r5_str($u['operator_id'] ?? '') !== ''];
+          'bagian' => $u['bagian'] ?? '', 'employer' => $u['employer'] ?? '', 'tertaut' => r5_str($u['operator_id'] ?? '') !== '',
+          'super' => !empty($u['super'])];
     if ($tm !== null) $o['tim'] = $tm[$o['areaId']] ?? '';
     if ($apm !== null) $o['areaPic'] = $apm[mb_strtolower($o['nik'])] ?? [];
     return $o;
@@ -1187,8 +1188,10 @@ function apiVerifikasi($token, $id, $setuju, $catatan): array {
         $t = r5_find_temuan($id);
         if (!$t) throw new RuntimeException('Temuan tidak ditemukan.');
         if ($t['status'] !== R5_WAIT) throw new RuntimeException('Temuan tidak sedang menunggu verifikasi.');
-        if (mb_strtolower(r5_str($t['pic_nik'])) === mb_strtolower($u['nik'])) throw new RuntimeException('Anda tidak bisa memverifikasi perbaikan Anda sendiri.');
+        $sendiri = mb_strtolower(r5_str($t['pic_nik'])) === mb_strtolower($u['nik']);
+        if ($sendiri && empty($u['super'])) throw new RuntimeException('Anda tidak bisa memverifikasi perbaikan Anda sendiri.');
         $now = r5_now();
+        if ($sendiri) db_update('r5_temuan', ['riwayat' => r6_riwayat($t['riwayat'], 'Verifikasi pekerjaan sendiri', $u['nama'], 'Super admin memverifikasi perbaikan yang ia kerjakan sendiri', $now)], 'id = ?', [$t['id']]);
         if ($setuju) {
             $hp = r5_poin_pic($t);
             db_update('r5_temuan', ['status' => R5_CLOSED, 'verifikator_nik' => $u['nik'], 'verifikator_nama' => $u['nama'],
@@ -1273,7 +1276,9 @@ function apiPutusKeberatan($token, $id, $terima, $catatan): array {
         $t = r5_find_temuan($id);
         if (!$t) throw new RuntimeException('Temuan tidak ditemukan.');
         if ($t['status'] !== R5_KEBERATAN) throw new RuntimeException('Temuan tidak sedang dalam keberatan.');
-        if (mb_strtolower(r5_str($t['pic_nik'])) === mb_strtolower($u['nik'])) throw new RuntimeException('Keberatan Anda sendiri harus diputuskan auditor lain.');
+        $sendiri = mb_strtolower(r5_str($t['pic_nik'])) === mb_strtolower($u['nik']);
+        if ($sendiri && empty($u['super'])) throw new RuntimeException('Keberatan Anda sendiri harus diputuskan auditor lain.');
+        if ($sendiri) db_update('r5_temuan', ['riwayat' => r6_riwayat($t['riwayat'], 'Keberatan diputuskan sendiri', $u['nama'], 'Super admin memutuskan keberatan miliknya sendiri', r5_now())], 'id = ?', [$t['id']]);
         if ($terima) {
             r5_batal($t, $u, 'KEBERATAN DITERIMA: ' . (r5_str($catatan) !== '' ? r5_str($catatan) : r5_str($t['catatan_keberatan'])));
         } else {
