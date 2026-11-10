@@ -46,6 +46,17 @@ Satu akun untuk dua aplikasi: di halaman login (`/login`) pilih **HRIS** atau **
 
 Role 6S bawaan mengikuti role HRIS: Admin → Admin, Supervisor → Auditor, Leader → PIC, Viewer → Viewer. Admin 6S bisa mengubah role, tim/area, dan status aktif 6S per user.
 
+**Alur temuan (PIC otomatis per shift):**
+
+1. **Lapor**: pelapor memilih area. Sistem memilih Leader / PIC area yang **sedang bertugas** menurut jadwal shift HRIS dan melewati yang libur atau tidak masuk di absensi. Bila belum ada yang bertugas, dipilih PIC dengan shift berikutnya, lalu PIC cadangan area. Pelapor tetap boleh memilih PIC lain.
+2. **Terima & tentukan target**: PIC menerima tugas dalam `SLA_RESPON_JAM` (dihitung sejak shift-nya mulai) dan menentukan target selesai sendiri. Target yang melewati batas standar tingkat temuan wajib diberi alasan. Temuan Kritis tidak boleh melewati batas standar.
+3. **Tidak direspon**: PIC dipotong `POTONG_TIDAK_RESPON`, lalu tugas otomatis dialihkan ke PIC area lain yang sedang bertugas.
+4. **Perbaiki → verifikasi**: alurnya sama seperti sebelumnya.
+   - Tepat waktu diukur terhadap target PIC.
+   - Poin tim penuh hanya bila selesai dalam batas standar; setengahnya bila lewat standar tetapi masih sesuai target.
+
+PIC dan auditor bisa mengalihkan tugas dengan alasan. Area tanggung jawab tiap Leader diatur di **Master Data → Pengguna**. Akun Leader harus ditautkan ke karyawan IEG di **HRIS → Pengaturan → Pengguna** supaya jadwalnya terbaca.
+
 Tim/role pengguna, area & PIC, checklist audit, dan aturan poin diatur di **Monitoring 6S → Master Data**; akun baru & password tetap di **HRIS → Pengaturan → Pengguna**. Tabel 6S (nama lama `r5_*` dipertahankan) dibuat otomatis di database yang sama saat 6S pertama kali dibuka.
 
 ---

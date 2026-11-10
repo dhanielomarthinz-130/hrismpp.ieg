@@ -12,7 +12,7 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/foto.php';
 
-const R5_VERSION = '3.0';
+const R5_VERSION = '3.1';
 // Lean 6S: Sort, Set in Order, Shine, Standardize, Sustain, Safety
 const R5_LIST    = ['Sort', 'Set in Order', 'Shine', 'Standardize', 'Sustain', 'Safety'];
 /** Penjelasan singkat tiap S (ditampilkan di form temuan). */
@@ -76,6 +76,10 @@ const R5_DEFAULT_CONFIG = [
     ['KPI_BOBOT_FTR', 25, 'Bobot KPI: perbaikan disetujui tanpa revisi (first time right)'],
     ['KPI_BOBOT_SELESAI', 25, 'Bobot KPI: persentase temuan selesai (closed) dari yang ditugaskan'],
     ['KPI_BOBOT_OVERDUE', 10, 'Bobot KPI: tidak ada temuan lewat batas yang belum diperbaiki'],
+    ['SLA_RESPON_JAM', 4, 'Batas waktu PIC menerima tugas & menentukan target (jam, dihitung sejak shift PIC mulai)'],
+    ['TARGET_MAKS_JAM', 168, 'Target perbaikan terlama yang boleh ditentukan PIC (jam). Temuan Kritis maksimal sama dengan batas standar'],
+    ['POTONG_TIDAK_RESPON', 1, 'Potongan poin PIC bila tugas tidak diterima sampai batas respon (tugas dialihkan otomatis ke PIC yang bertugas)'],
+    ['KPI_BOBOT_RESPON', 10, 'Bobot KPI: tugas diterima PIC sebelum batas respon'],
 ];
 
 const R5_AREAS_SEED = [
@@ -162,9 +166,15 @@ function r5_init(): void {
     $cols = $isSqlite
         ? array_column($pdo->query("PRAGMA table_info(r5_temuan)")->fetchAll(), 'name')
         : array_column($pdo->query("SHOW COLUMNS FROM r5_temuan")->fetchAll(), 'Field');
-    foreach (['catatan_keberatan' => 'TEXT NULL', 'tgl_keberatan' => "$big NULL", 'status_sebelum' => 'VARCHAR(30) NULL'] as $c => $def) {
+    // v3.1: PIC bertugas per shift menerima tugas & menentukan target sendiri
+    foreach (['catatan_keberatan' => 'TEXT NULL', 'tgl_keberatan' => "$big NULL", 'status_sebelum' => 'VARCHAR(30) NULL',
+              'tgl_terima' => "$big NULL", 'batas_respon' => "$big NULL", 'deadline_standar' => "$big NULL",
+              'target_alasan' => 'TEXT NULL', 'respon_lewat' => "CHAR(1) NOT NULL DEFAULT 'N'", 'riwayat' => 'TEXT NULL'] as $c => $def) {
         if (!in_array($c, $cols, true)) $pdo->exec("ALTER TABLE r5_temuan ADD COLUMN $c $def");
     }
+    // Leader / PIC yang bertanggung jawab atas area (bergantian per shift sesuai jadwal HRIS)
+    $pdo->exec("CREATE TABLE IF NOT EXISTS r6_area_pic (
+        area_id VARCHAR(12) NOT NULL, nik VARCHAR(40) NOT NULL, PRIMARY KEY (area_id, nik))");
     $pdo->exec("CREATE TABLE IF NOT EXISTS r5_poin (
         id $autoInc, ts $big NOT NULL, bulan VARCHAR(7) NOT NULL, jenis VARCHAR(10) NOT NULL,
         ref_id VARCHAR(40) NOT NULL, nama VARCHAR(120) NULL, poin DOUBLE NOT NULL DEFAULT 0,
@@ -243,6 +253,170 @@ function r5_init(): void {
             db_insert('settings', ['key_name' => 'migr_r6s_aman', 'value' => '1', 'ket' => 'Monitoring 6S: item checklist Safety']);
         });
     }
+
+    // v3.1: PIC area per shift + respon PIC. PIC area lama menjadi PIC area pertama; temuan lama dianggap sudah diterima.
+    if (!(int)db_val("SELECT COUNT(*) FROM settings WHERE key_name = 'migr_r6s_shift'")) {
+        db_transaction(function () {
+            foreach (db_all("SELECT area_id, pic_nik FROM r5_area WHERE pic_nik IS NOT NULL AND pic_nik <> ''") as $a) {
+                if (!(int)db_val("SELECT COUNT(*) FROM r6_area_pic WHERE area_id = ? AND LOWER(nik) = ?", [$a['area_id'], mb_strtolower($a['pic_nik'])])) {
+                    db_insert('r6_area_pic', ['area_id' => $a['area_id'], 'nik' => $a['pic_nik']]);
+                }
+            }
+            db_query("UPDATE r5_temuan SET tgl_terima = tanggal WHERE tgl_terima IS NULL");
+            db_query("UPDATE r5_temuan SET deadline_standar = deadline WHERE deadline_standar IS NULL");
+            foreach (['MINOR' => 'Minor', 'MAYOR' => 'Mayor', 'KRITIS' => 'Kritis'] as $k => $l) {
+                db_update('r5_config', ['ket' => 'Batas standar perbaikan ' . $l . ' (jam): acuan target PIC & poin tepat waktu'], 'key_name = ?', ['DEADLINE_JAM_' . $k]);
+            }
+            db_insert('settings', ['key_name' => 'migr_r6s_shift', 'value' => '1', 'ket' => 'Monitoring 6S: PIC area per shift']);
+        });
+    }
+}
+
+/* =====================================================================
+ *  PIC BERTUGAS — dari jadwal shift HRIS (akun Leader tertaut ke karyawan IEG lewat users.operator_id)
+ * ===================================================================== */
+const R6_TZ = 'Asia/Jakarta';
+
+/**
+ * Status jadwal seorang karyawan pada waktu $now:
+ * bertugas | nanti (shift hari ini belum mulai) | selesai | libur | absen | tanpa_jadwal | tanpa_karyawan
+ */
+function r6_jadwal_status(string $operatorId, int $now): array {
+    $out = ['status' => 'tanpa_karyawan', 'label' => 'Akun belum ditautkan ke karyawan IEG', 'mulai' => null, 'selesai' => null];
+    if ($operatorId === '') return $out;
+    $tz = new DateTimeZone(R6_TZ);
+    $d = (new DateTime('@' . intdiv($now, 1000)))->setTimezone($tz);
+    $today = $d->format('Y-m-d');
+    $yday = (clone $d)->modify('-1 day')->format('Y-m-d');
+    $rows = db_all("SELECT j.tanggal, j.shift, k.nama, k.mulai, k.selesai, k.kerja FROM jadwal j LEFT JOIN kode_jadwal k ON k.kode = j.shift
+                    WHERE j.operator_id = ? AND j.tanggal IN (?, ?) ORDER BY j.tanggal", [$operatorId, $yday, $today]);
+    $span = function (array $r) use ($tz): ?array {
+        if ((int)($r['kerja'] ?? 0) !== 1 || r5_str($r['mulai']) === '' || r5_str($r['selesai']) === '') return null;
+        $a = (new DateTime($r['tanggal'] . ' ' . $r['mulai'], $tz))->getTimestamp() * 1000;
+        $b = (new DateTime($r['tanggal'] . ' ' . $r['selesai'], $tz))->getTimestamp() * 1000;
+        if ($b <= $a) $b += 86400000;   // shift lewat tengah malam
+        return [$a, $b];
+    };
+    $lbl = fn($r) => (r5_str($r['nama']) !== '' ? r5_str($r['nama']) : r5_str($r['shift'])) . (r5_str($r['mulai']) !== '' ? ' ' . $r['mulai'] . '–' . $r['selesai'] : '');
+    $absen = (int)db_val("SELECT COUNT(*) FROM absensi WHERE operator_id = ? AND tanggal = ? AND status IN ('S','I','A','C')", [$operatorId, $today]);
+    $todayRow = null;
+    foreach ($rows as $r) {
+        $s = $span($r);
+        if ($s && $now >= $s[0] && $now < $s[1] && !($absen && $r['tanggal'] === $today)) {
+            return ['status' => 'bertugas', 'label' => $lbl($r), 'mulai' => $s[0], 'selesai' => $s[1]];
+        }
+        if ($r['tanggal'] === $today) $todayRow = $r;
+    }
+    if ($absen) return ['status' => 'absen', 'label' => 'Tidak masuk hari ini (absensi)', 'mulai' => null, 'selesai' => null];
+    if (!$todayRow) return ['status' => 'tanpa_jadwal', 'label' => 'Jadwal hari ini belum ada', 'mulai' => null, 'selesai' => null];
+    $s = $span($todayRow);
+    if (!$s) return ['status' => 'libur', 'label' => r5_str($todayRow['nama']) !== '' ? r5_str($todayRow['nama']) : 'Libur', 'mulai' => null, 'selesai' => null];
+    if ($now < $s[0]) return ['status' => 'nanti', 'label' => $lbl($todayRow), 'mulai' => $s[0], 'selesai' => $s[1]];
+    return ['status' => 'selesai', 'label' => $lbl($todayRow) . ' (sudah selesai)', 'mulai' => $s[0], 'selesai' => $s[1]];
+}
+
+/** Peta username (huruf kecil) -> daftar area tempat ia menjadi PIC. */
+function r6_area_pic_map(): array {
+    $m = [];
+    foreach (db_all("SELECT area_id, nik FROM r6_area_pic ORDER BY area_id") as $r) $m[mb_strtolower($r['nik'])][] = $r['area_id'];
+    return $m;
+}
+
+/**
+ * Pilih PIC yang menerima temuan di area ini:
+ * 1) PIC area yang sedang bertugas (paling sedikit tugas aktif), 2) PIC area dengan shift berikutnya hari ini,
+ * 3) PIC area yang jadwalnya tidak terbaca, 4) PIC cadangan area, 5) PIC area lain yang ada.
+ */
+function r6_pic_bertugas(string $areaId, int $now, array $exclude = []): array {
+    $area = r5_find_area($areaId);
+    $none = ['pic' => null, 'status' => '', 'alasan' => 'Area ini belum punya PIC. Atur di Master Data → Pengguna (Area tanggung jawab).', 'mulai' => null, 'kandidat' => []];
+    if (!$area) return $none;
+    $ex = array_map('mb_strtolower', $exclude);
+    $pool = [];
+    foreach (r5_users_all() as $u) if ($u['pic']) $pool[mb_strtolower($u['nik'])] = $u;
+    $aktif = [];
+    foreach (db_all("SELECT pic_nik, COUNT(*) n FROM r5_temuan WHERE status IN (?, ?) GROUP BY pic_nik", [R5_OPEN, R5_REVISI]) as $r) $aktif[mb_strtolower(r5_str($r['pic_nik']))] = (int)$r['n'];
+    $rank = ['bertugas' => 0, 'nanti' => 1, 'tanpa_jadwal' => 2, 'tanpa_karyawan' => 2, 'selesai' => 3, 'libur' => 4, 'absen' => 4];
+    $kand = [];
+    foreach (db_all("SELECT nik FROM r6_area_pic WHERE area_id = ?", [$area['area_id']]) as $r) {
+        $k = mb_strtolower($r['nik']);
+        if (!isset($pool[$k]) || in_array($k, $ex, true)) continue;
+        $st = r6_jadwal_status($pool[$k]['operator_id'], $now);
+        $kand[] = ['nik' => $pool[$k]['nik'], 'nama' => $pool[$k]['nama'], 'status' => $st['status'], 'label' => $st['label'],
+                   'mulai' => $st['mulai'], 'aktif' => $aktif[$k] ?? 0, 'rank' => $rank[$st['status']] ?? 2];
+    }
+    usort($kand, fn($a, $b) => ($a['rank'] <=> $b['rank']) ?: ($a['rank'] === 1 ? ($a['mulai'] <=> $b['mulai']) : ($a['aktif'] <=> $b['aktif'])) ?: strcmp($a['nama'], $b['nama']));
+    $alasan = [
+        'bertugas' => fn($c) => 'Sedang bertugas · ' . $c['label'],
+        'nanti' => fn($c) => 'Shift berikutnya hari ini · ' . $c['label'],
+        'tanpa_jadwal' => fn($c) => 'PIC area · jadwal hari ini belum ada',
+        'tanpa_karyawan' => fn($c) => 'PIC area · akun belum ditautkan ke karyawan IEG (jadwal tidak terbaca)',
+        'selesai' => fn($c) => 'PIC area · shift hari ini sudah selesai',
+    ];
+    $out = fn($c, $why) => ['pic' => ['nik' => $c['nik'], 'nama' => $c['nama']], 'status' => $c['status'], 'alasan' => $why,
+                            'mulai' => $c['status'] === 'nanti' ? $c['mulai'] : null,
+                            'kandidat' => array_map(fn($x) => array_diff_key($x, ['rank' => 1, 'mulai' => 1]), $kand)];
+    if ($kand && $kand[0]['rank'] < 4) return $out($kand[0], $alasan[$kand[0]['status']]($kand[0]));
+    // Semua PIC area libur / tidak masuk (atau belum diatur) -> PIC cadangan area
+    $cad = mb_strtolower(r5_str($area['pic_nik']));
+    if ($cad !== '' && isset($pool[$cad]) && !in_array($cad, $ex, true)) {
+        $st = r6_jadwal_status($pool[$cad]['operator_id'], $now);
+        $c = ['nik' => $pool[$cad]['nik'], 'nama' => $pool[$cad]['nama'], 'status' => $st['status'], 'label' => $st['label'], 'mulai' => $st['mulai']];
+        return $out($c, $kand ? 'PIC cadangan area (PIC area lain libur / tidak masuk)' : 'PIC cadangan area');
+    }
+    if ($kand) return $out($kand[0], 'PIC area (' . $kand[0]['label'] . ')');
+    return $none;
+}
+
+/** Batas respon PIC: SLA dihitung sejak sekarang, atau sejak shift PIC mulai bila shift-nya belum mulai. */
+function r6_batas_respon(?int $mulaiShift, int $now): int {
+    $base = ($mulaiShift && $mulaiShift > $now) ? $mulaiShift : $now;
+    return $base + (int)(r5_num('SLA_RESPON_JAM', 4) * 3600000);
+}
+
+/** Tambah satu kejadian ke riwayat temuan (JSON). */
+function r6_riwayat(?string $json, string $ev, string $oleh, string $ket, int $now, array $extra = []): string {
+    $h = json_decode((string)$json, true);
+    $h = is_array($h) ? $h : [];
+    $h[] = ['ts' => $now, 'ev' => $ev, 'oleh' => $oleh, 'ket' => $ket] + $extra;
+    return json_encode($h, JSON_UNESCAPED_UNICODE);
+}
+
+/**
+ * Eskalasi otomatis: tugas yang belum diterima sampai batas respon -> PIC dipotong poin sekali,
+ * lalu tugas dialihkan ke PIC area lain yang sedang bertugas (bila ada).
+ */
+function r6_eskalasi(): void {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    $now = r5_now();
+    $rows = db_all("SELECT * FROM r5_temuan WHERE status = ? AND tgl_terima IS NULL AND batas_respon IS NOT NULL AND batas_respon < ?", [R5_OPEN, $now]);
+    foreach ($rows as $t0) {
+        db_transaction(function () use ($t0, $now) {
+            $t = r5_find_temuan($t0['id']);
+            if (!$t || $t['status'] !== R5_OPEN || $t['tgl_terima'] !== null) return;
+            $riw = $t['riwayat'];
+            $upd = [];
+            if ($t['respon_lewat'] !== 'Y') {
+                $pot = r5_num('POTONG_TIDAK_RESPON', 1);
+                if ($pot > 0) r5_log_poin('PIC', r5_str($t['pic_nik']), r5_str($t['pic_nama']), -$pot, $t['id'], 'Tidak merespon tugas sampai batas respon', $now);
+                $riw = r6_riwayat($riw, 'Tidak direspon', 'Sistem', r5_str($t['pic_nama']) . ' belum menerima tugas sampai batas respon', $now, ['nik' => r5_str($t['pic_nik'])]);
+                $upd['respon_lewat'] = 'Y';
+            }
+            // PIC yang pernah tidak merespon temuan ini tidak dipilih lagi
+            $gagal = [r5_str($t['pic_nik'])];
+            foreach ((array)json_decode((string)$riw, true) as $e) if (($e['ev'] ?? '') === 'Tidak direspon' && !empty($e['nik'])) $gagal[] = $e['nik'];
+            $c = r6_pic_bertugas($t['area_id'], $now, $gagal);
+            if ($c['pic'] && $c['status'] === 'bertugas') {
+                // array_merge (bukan +=) agar respon_lewat 'Y' milik PIC lama ditimpa 'N' untuk PIC baru
+                $upd = array_merge($upd, ['pic_nik' => $c['pic']['nik'], 'pic_nama' => $c['pic']['nama'], 'batas_respon' => r6_batas_respon(null, $now), 'respon_lewat' => 'N']);
+                $riw = r6_riwayat($riw, 'Dialihkan otomatis', 'Sistem', 'Ke ' . $c['pic']['nama'] . ' · ' . $c['alasan'], $now);
+            }
+            $upd['riwayat'] = $riw;
+            db_update('r5_temuan', $upd, 'id = ?', [$t['id']]);
+        });
+    }
 }
 
 /* =====================================================================
@@ -307,6 +481,7 @@ function r5_merge_user(array $h, ?array $p): array {
         // PIC 6S = Leader / PIC IEG dari HRIS (user yang tertaut ke operator RKA tidak bisa jadi PIC)
         'pic'       => $aktif && $role === 'PIC' && ($employer === '' || $employer === 'IEG'),
         'employer'  => $employer,
+        'operator_id' => r5_str($h['operator_id'] ?? ''),
         'bagian'    => r5_str($h['bagian'] ?? ''),
         'nik'       => (string)$h['username'],
         'nama'      => r5_str($h['nama']) !== '' ? r5_str($h['nama']) : (string)$h['username'],
@@ -324,7 +499,7 @@ function r5_users_all(): array {
     $prof = [];
     foreach (db_all("SELECT * FROM r5_users") as $p) $prof[mb_strtolower($p['nik'])] = $p;
     $out = [];
-    foreach (db_all("SELECT u.username, u.nama, u.role, u.aktif, u.bagian, o.employer FROM users u LEFT JOIN operator o ON o.id = u.operator_id WHERE UPPER(u.role) <> ? ORDER BY u.nama", [ROLE_SUPER]) as $h) {
+    foreach (db_all("SELECT u.username, u.nama, u.role, u.aktif, u.bagian, u.operator_id, o.employer FROM users u LEFT JOIN operator o ON o.id = u.operator_id WHERE UPPER(u.role) <> ? ORDER BY u.nama", [ROLE_SUPER]) as $h) {
         $out[] = r5_merge_user($h, $prof[mb_strtolower($h['username'])] ?? null);
     }
     return $out;
@@ -333,7 +508,7 @@ function r5_users_all(): array {
 function r5_find_user($nik): ?array {
     $k = mb_strtolower(r5_str($nik));
     if ($k === '') return null;
-    $h = db_row("SELECT u.username, u.nama, u.role, u.aktif, u.bagian, o.employer FROM users u LEFT JOIN operator o ON o.id = u.operator_id WHERE LOWER(u.username) = ?", [$k]);
+    $h = db_row("SELECT u.username, u.nama, u.role, u.aktif, u.bagian, u.operator_id, o.employer FROM users u LEFT JOIN operator o ON o.id = u.operator_id WHERE LOWER(u.username) = ?", [$k]);
     if (!$h) return null;
     return r5_merge_user($h, db_row("SELECT * FROM r5_users WHERE LOWER(nik) = ?", [$k]));
 }
@@ -425,12 +600,13 @@ function r5_auth($token, ?string $menu = null, bool $edit = false): array {
     return $u;
 }
 
-function r5_uout(array $u, ?array $tm = null): array {
+function r5_uout(array $u, ?array $tm = null, ?array $apm = null): array {
     $o = ['nik' => r5_str($u['nik']), 'nama' => r5_str($u['nama']), 'role' => r5_str($u['role']),
           'areaId' => r5_str($u['area_id']), 'aktif' => $u['aktif'] !== 'N',
           'hrisRole' => $u['hris_role'] ?? '', 'custom' => !empty($u['custom']), 'pic' => !empty($u['pic']),
-          'bagian' => $u['bagian'] ?? '', 'employer' => $u['employer'] ?? ''];
+          'bagian' => $u['bagian'] ?? '', 'employer' => $u['employer'] ?? '', 'tertaut' => r5_str($u['operator_id'] ?? '') !== ''];
     if ($tm !== null) $o['tim'] = $tm[$o['areaId']] ?? '';
+    if ($apm !== null) $o['areaPic'] = $apm[mb_strtolower($o['nik'])] ?? [];
     return $o;
 }
 
@@ -439,6 +615,8 @@ function r5_uout(array $u, ?array $tm = null): array {
  * ===================================================================== */
 function apiBootstrap($token): array {
     $u = r5_auth($token);
+    r6_eskalasi();
+    $apm = r6_area_pic_map();
     $users = array_values(array_filter(r5_users_all(), fn($x) => $x['aktif'] !== 'N'));
     $byNik = [];
     foreach ($users as $x) $byNik[mb_strtolower($x['nik'])] = $x;
@@ -449,16 +627,17 @@ function apiBootstrap($token): array {
         if ($a['aktif'] === 'N') continue;
         $p = $byNik[mb_strtolower(r5_str($a['pic_nik']))] ?? null;
         $areas[] = ['id' => $a['area_id'], 'nama' => $a['nama'], 'tim' => $tm[$a['area_id']],
-                    'picNik' => r5_str($a['pic_nik']), 'picNama' => $p ? $p['nama'] : ''];
+                    'picNik' => r5_str($a['pic_nik']), 'picNama' => $p ? $p['nama'] : '',
+                    'pics' => array_keys(array_filter($apm, fn($l) => in_array($a['area_id'], $l, true)))];
     }
-    $me = r5_uout($u, $tm);
+    $me = r5_uout($u, $tm, $apm);
     $hrow = db_row("SELECT * FROM users WHERE LOWER(username) = ?", [mb_strtolower($u['nik'])]);
     $me['foto'] = $hrow ? foto_url(user_foto_name($hrow)) : '';
     return [
         'user'  => $me,
         'areas' => $areas,
         // Pilihan PIC: hanya Leader / PIC IEG
-        'users' => array_values(array_map(fn($x) => r5_uout($x, $tm), array_filter($users, fn($x) => $x['pic']))),
+        'users' => array_values(array_map(fn($x) => r5_uout($x, $tm, $apm), array_filter($users, fn($x) => $x['pic']))),
         'rList' => R5_LIST, 'rInfo' => R6_INFO, 'tingkat' => R5_TINGKAT, 'roles' => R5_ROLES,
         'config' => [
             'skorAwal' => r5_num('SKOR_AWAL_AREA', 100),
@@ -471,6 +650,7 @@ function apiBootstrap($token): array {
             'hariBerulang' => r5_num('HARI_BERULANG', 30),
             'potongRevisi' => r5_num('POTONG_REVISI', 1), 'slaVerif' => r5_num('SLA_VERIFIKASI_JAM', 24),
             'kpiTarget' => r5_num('KPI_TARGET', 85),
+            'slaRespon' => r5_num('SLA_RESPON_JAM', 4), 'targetMaks' => r5_num('TARGET_MAKS_JAM', 168),
         ],
         'access' => r5_access_for($u),
         'bulanIni' => r5_bulan(r5_now()),
@@ -513,6 +693,12 @@ function r5_tout(array $t, ?array $tm = null): array {
         'poinPic' => $t['poin_pic'] === null || $t['poin_pic'] === '' ? null : (float)$t['poin_pic'],
         'revisi' => (int)$t['revisi'], 'terlambat' => (bool)$late,
         'catatanKeberatan' => r5_str($t['catatan_keberatan'] ?? ''), 'tglKeberatan' => r5_ms($t['tgl_keberatan'] ?? null),
+        // Respon PIC: menerima tugas & menentukan target
+        'tglTerima' => r5_ms($t['tgl_terima'] ?? null), 'batasRespon' => r5_ms($t['batas_respon'] ?? null),
+        'deadlineStandar' => r5_ms($t['deadline_standar'] ?? null) ?? $dl, 'targetAlasan' => r5_str($t['target_alasan'] ?? ''),
+        'responTelat' => ($t['respon_lewat'] ?? 'N') === 'Y'
+            || ($t['status'] === R5_OPEN && empty($t['tgl_terima']) && !empty($t['batas_respon']) && $now > (int)$t['batas_respon']),
+        'riwayat' => is_array($rw = json_decode((string)($t['riwayat'] ?? ''), true)) ? $rw : [],
         'tim' => $tm !== null ? ($tm[$aid] ?? r5_str($t['nama_area'])) : '',
         'timPelapor' => ($tm !== null && $pa !== '') ? ($tm[$pa] ?? '') : '',
     ];
@@ -563,13 +749,24 @@ function apiCreateTemuan($token, $d): array {
     if (!in_array($ting, R5_TINGKAT, true)) throw new RuntimeException('Pilih tingkat temuan.');
     if (r5_str($d['deskripsi'] ?? '') === '') throw new RuntimeException('Deskripsi temuan wajib diisi.');
     if (empty($d['foto'])) throw new RuntimeException('Foto sebelum (bukti temuan) wajib diunggah.');
-    $pic = r5_find_user(r5_str($d['picNik'] ?? '') !== '' ? $d['picNik'] : $area['pic_nik']);
-    if (!$pic || $pic['aktif'] === 'N') throw new RuntimeException('PIC belum dipilih, atau area ini belum punya PIC.');
+    // PIC otomatis: Leader / PIC area yang bertugas sesuai jadwal shift HRIS (pelapor boleh memilih PIC lain)
+    $now0 = r5_now();
+    $auto = r6_pic_bertugas($area['area_id'], $now0);
+    $pilih = r5_str($d['picNik'] ?? '');
+    if ($pilih === '' && !$auto['pic']) throw new RuntimeException('Area ini belum punya PIC. Atur di Master Data → Pengguna (Area tanggung jawab).');
+    $pic = r5_find_user($pilih !== '' ? $pilih : $auto['pic']['nik']);
+    if (!$pic || $pic['aktif'] === 'N') throw new RuntimeException('PIC tidak ditemukan atau tidak aktif.');
     if (!$pic['pic']) throw new RuntimeException($pic['nama'] . ' bukan Leader / PIC IEG di HRIS. Pilih PIC lain.');
+    if ($auto['pic'] && mb_strtolower($auto['pic']['nik']) === mb_strtolower($pic['nik'])) {
+        $tugas = ['ket' => 'Otomatis · ' . $auto['alasan'], 'mulai' => $auto['mulai']];
+    } else {
+        $st = r6_jadwal_status($pic['operator_id'], $now0);
+        $tugas = ['ket' => 'Dipilih pelapor · ' . $st['label'], 'mulai' => $st['status'] === 'nanti' ? $st['mulai'] : null];
+    }
 
     $fotoId = foto_save((string)$d['foto'], R5_FOTO_DIM, true);
     try {
-        return db_transaction(function () use ($u, $d, $area, $kat, $ting, $pic, $fotoId) {
+        return db_transaction(function () use ($u, $d, $area, $kat, $ting, $pic, $fotoId, $tugas) {
             $now = r5_now();
             $id = r5_next_id($now);
             $tm = r5_timmap();
@@ -591,6 +788,9 @@ function apiCreateTemuan($token, $d): array {
                 'berulang' => $berulang ? 'Y' : 'N', 'pic_nik' => $pic['nik'], 'pic_nama' => $pic['nama'],
                 'deadline' => $deadline, 'status' => R5_OPEN, 'poin_area' => $potong, 'poin_pic' => null,
                 'revisi' => 0, 'pelapor_area_id' => r5_str($u['area_id']),
+                // PIC menerima tugas & menentukan target; sampai itu batas standar yang berlaku
+                'deadline_standar' => $deadline, 'tgl_terima' => null, 'batas_respon' => r6_batas_respon($tugas['mulai'], $now),
+                'respon_lewat' => 'N', 'riwayat' => r6_riwayat(null, 'Ditugaskan', $u['nama'], 'Ke ' . $pic['nama'] . ' · ' . $tugas['ket'], $now),
             ];
             db_insert('r5_temuan', $row);
             if ($potong != 0) {
@@ -605,8 +805,74 @@ function apiCreateTemuan($token, $d): array {
     }
 }
 
+/** PIC yang akan menerima temuan di area ini (untuk form Input Temuan). */
+function apiPicBertugas($token, $areaId): array {
+    r5_auth($token, 'input');
+    $r = r6_pic_bertugas(r5_str($areaId), r5_now());
+    $r['slaRespon'] = r5_num('SLA_RESPON_JAM', 4);
+    return $r;
+}
+
+/** PIC menerima tugas & menentukan target selesai (maks. TARGET_MAKS_JAM; Kritis maks. batas standar). */
+function apiTerimaTugas($token, $id, $target, $alasan): array {
+    $u = r5_auth($token, 'tugas', true);
+    return db_transaction(function () use ($u, $id, $target, $alasan) {
+        $t = r5_find_temuan($id);
+        if (!$t) throw new RuntimeException('Temuan tidak ditemukan.');
+        if (mb_strtolower(r5_str($t['pic_nik'])) !== mb_strtolower($u['nik']) && $u['role'] !== 'Admin')
+            throw new RuntimeException('Hanya PIC temuan ini yang bisa menerima tugas.');
+        if ($t['status'] !== R5_OPEN || $t['tgl_terima'] !== null) throw new RuntimeException('Tugas ini sudah diterima.');
+        $now = r5_now();
+        $target = (int)$target;
+        $std = (int)($t['deadline_standar'] ?: $t['deadline']);
+        $maks = $t['tingkat'] === 'Kritis' ? $std : max($std, (int)$t['tanggal'] + (int)(r5_num('TARGET_MAKS_JAM', 168) * 3600000));
+        $maks = max($maks, $now + 2 * 3600000);   // batas standar sudah lewat: tetap bisa diterima dengan target terdekat (alasan wajib)
+        $alasan = r5_str($alasan);
+        if ($target < $now + 30 * 60000) throw new RuntimeException('Target selesai minimal 30 menit dari sekarang.');
+        if ($target > $maks + 60000) throw new RuntimeException('Target terlalu lama. Paling lambat ' . r5_fmt($maks, 'd/m/Y H:i') . ' WIB' . ($t['tingkat'] === 'Kritis' ? ' (temuan Kritis).' : '.'));
+        if ($target > $std + 60000 && $alasan === '') throw new RuntimeException('Target melewati batas standar (' . r5_fmt($std, 'd/m H:i') . '). Tulis alasannya, mis. pekerjaan lain yang sedang dikerjakan.');
+        $telat = $t['batas_respon'] && $now > (int)$t['batas_respon'];
+        db_update('r5_temuan', ['deadline' => $target, 'tgl_terima' => $now, 'target_alasan' => $alasan,
+            'respon_lewat' => ($telat || $t['respon_lewat'] === 'Y') ? 'Y' : 'N',
+            'riwayat' => r6_riwayat($t['riwayat'], 'Diterima', $u['nama'], 'Target selesai ' . r5_fmt($target, 'd/m H:i') . ($alasan !== '' ? ' · ' . $alasan : ''), $now)],
+            'id = ?', [$t['id']]);
+        return r5_tout(r5_find_temuan($id), r5_timmap());
+    });
+}
+
+/** Alihkan tugas ke PIC lain (oleh PIC saat ini, Auditor, atau Admin). */
+function apiAlihkan($token, $id, $nik, $alasan): array {
+    $u = r5_auth($token);
+    $acc = r5_access_for($u);
+    $boleh = fn($m) => in_array($m, $acc['menus'], true) && !in_array($m, $acc['ro'], true);
+    return db_transaction(function () use ($u, $id, $nik, $alasan, $boleh) {
+        $t = r5_find_temuan($id);
+        if (!$t) throw new RuntimeException('Temuan tidak ditemukan.');
+        $isPic = mb_strtolower(r5_str($t['pic_nik'])) === mb_strtolower($u['nik']);
+        if (!(($isPic && $boleh('tugas')) || $boleh('verif') || $boleh('admin'))) throw new RuntimeException('Anda tidak punya akses mengalihkan tugas ini.');
+        if (!in_array($t['status'], [R5_OPEN, R5_REVISI], true)) throw new RuntimeException('Hanya tugas yang belum diperbaiki yang bisa dialihkan.');
+        if (r5_str($alasan) === '') throw new RuntimeException('Tulis alasan pengalihan.');
+        $p = r5_find_user($nik);
+        if (!$p || $p['aktif'] === 'N' || !$p['pic']) throw new RuntimeException('PIC tujuan harus Leader / PIC IEG yang aktif.');
+        if (mb_strtolower($p['nik']) === mb_strtolower(r5_str($t['pic_nik']))) throw new RuntimeException('PIC tujuan sama dengan PIC sekarang.');
+        $now = r5_now();
+        $st = r6_jadwal_status($p['operator_id'], $now);
+        $upd = ['pic_nik' => $p['nik'], 'pic_nama' => $p['nama'],
+            'riwayat' => r6_riwayat($t['riwayat'], 'Dialihkan', $u['nama'], 'Dari ' . r5_str($t['pic_nama']) . ' ke ' . $p['nama'] . ' · ' . r5_str($alasan), $now)];
+        if ($t['status'] === R5_OPEN) {
+            // PIC baru menerima tugas & menentukan target sendiri; sampai itu batas standar berlaku lagi
+            $upd = array_merge($upd, ['tgl_terima' => null, 'target_alasan' => '', 'respon_lewat' => 'N',
+                     'deadline' => (int)($t['deadline_standar'] ?: $t['deadline']),
+                     'batas_respon' => r6_batas_respon($st['status'] === 'nanti' ? $st['mulai'] : null, $now)]);
+        }
+        db_update('r5_temuan', $upd, 'id = ?', [$t['id']]);
+        return r5_tout(r5_find_temuan($id), r5_timmap());
+    });
+}
+
 function apiListTemuan($token, $f): array {
     $u = r5_auth($token);
+    r6_eskalasi();
     $f = is_array($f) ? $f : [];
     $q = r5_norm($f['q'] ?? '');
     $rows = r5_all_temuan();
@@ -650,8 +916,14 @@ function apiSubmitPerbaikan($token, $id, $catatan, $foto): array {
             $t = r5_find_temuan($id);
             if (!in_array($t['status'], [R5_OPEN, R5_REVISI], true)) throw new RuntimeException('Status temuan sudah ' . $t['status'] . '.');
             $old = r5_str($t['foto_after']);
-            db_update('r5_temuan', ['foto_after' => $fotoId, 'catatan_perbaikan' => r5_str($catatan),
-                'tgl_perbaikan' => r5_now(), 'status' => R5_WAIT], 'id = ?', [$t['id']]);
+            $now = r5_now();
+            $upd = ['foto_after' => $fotoId, 'catatan_perbaikan' => r5_str($catatan), 'tgl_perbaikan' => $now, 'status' => R5_WAIT];
+            if ($t['tgl_terima'] === null) {   // langsung diperbaiki tanpa menentukan target = menerima dengan batas standar
+                $upd['tgl_terima'] = $now;
+                if ($t['batas_respon'] && $now > (int)$t['batas_respon']) $upd['respon_lewat'] = 'Y';
+                $upd['riwayat'] = r6_riwayat($t['riwayat'], 'Diterima', r5_str($t['pic_nama']), 'Langsung diperbaiki', $now);
+            }
+            db_update('r5_temuan', $upd, 'id = ?', [$t['id']]);
             if ($old !== '') foto_delete_file($old);
             return r5_tout(r5_find_temuan($id), r5_timmap());
         });
@@ -663,10 +935,12 @@ function apiSubmitPerbaikan($token, $id, $catatan, $foto): array {
 
 function r5_poin_pic(array $t): array {
     $submit = (int)$t['tgl_perbaikan']; $dl = (int)$t['deadline']; $cr = (int)$t['tanggal'];
+    $std = (int)($t['deadline_standar'] ?? 0) ?: $dl;
     if ($submit <= $dl) {
         $p = $t['tingkat'] === 'Kritis' ? r5_num('POIN_TEPAT_KRITIS', 10) : r5_num('POIN_TEPAT', 5);
+        if ($submit > $std) return ['poin' => r5_round1($p / 2), 'ket' => 'Perbaikan tepat waktu (sesuai target PIC, melebihi batas standar)'];
         $ket = 'Perbaikan tepat waktu';
-        if ($submit - $cr <= ($dl - $cr) / 2) { $p += r5_num('BONUS_CEPAT', 2); $ket .= ' + bonus cepat'; }
+        if ($submit - $cr <= ($std - $cr) / 2) { $p += r5_num('BONUS_CEPAT', 2); $ket .= ' + bonus cepat'; }
         return ['poin' => $p, 'ket' => $ket];
     }
     $hari = (int)ceil(($submit - $dl) / 86400000);
@@ -892,7 +1166,8 @@ function r5_kpi_rows(string $bulan, ?string $onlyNik = null): array {
     $tm = r5_timmap();
     $all = array_values(array_filter(r5_all_temuan($tm), fn($t) => $t['status'] !== R5_BATAL));
     $W = ['tepat' => r5_num('KPI_BOBOT_TEPAT', 40), 'ftr' => r5_num('KPI_BOBOT_FTR', 25),
-          'selesai' => r5_num('KPI_BOBOT_SELESAI', 25), 'overdue' => r5_num('KPI_BOBOT_OVERDUE', 10)];
+          'selesai' => r5_num('KPI_BOBOT_SELESAI', 25), 'overdue' => r5_num('KPI_BOBOT_OVERDUE', 10),
+          'respon' => r5_num('KPI_BOBOT_RESPON', 10)];
     $poinPic = [];
     foreach (r5_leader_pic($bulan, db_all("SELECT * FROM r5_poin WHERE jenis = 'PIC' AND bulan = ?", [$bulan]), $all) as $p) $poinPic[mb_strtolower($p['nik'])] = $p['poin'];
     // Tim PIC: tim utama di 6S, atau tim area tempat ia menjadi PIC area
@@ -907,7 +1182,14 @@ function r5_kpi_rows(string $bulan, ?string $onlyNik = null): array {
         if ($onlyNik !== null && mb_strtolower($u['nik']) !== mb_strtolower($onlyNik)) continue;
         $rows[mb_strtolower($u['nik'])] = ['nik' => $u['nik'], 'nama' => $u['nama'], 'tim' => ($tm[$u['area_id']] ?? '') !== '' ? $tm[$u['area_id']] : implode(', ', $timPic[mb_strtolower($u['nik'])] ?? []), 'bagian' => $u['bagian'],
             'ditugaskan' => 0, 'selesai' => 0, 'tepat' => 0, 'ftr' => 0, 'menunggu' => 0, 'keberatan' => 0, 'aktif' => 0, 'overdue' => 0,
-            'revisi' => 0, 'jamTotal' => 0.0];
+            'revisi' => 0, 'jamTotal' => 0.0, 'respon' => 0, 'responDue' => 0];
+    }
+    // Tugas yang dialihkan otomatis karena tidak direspon tetap dihitung gagal respon untuk PIC lama
+    $picNow = [];
+    foreach ($all as $t) $picNow[$t['id']] = mb_strtolower($t['picNik']);
+    foreach (db_all("SELECT ref_id, temuan_id FROM r5_poin WHERE jenis = 'PIC' AND bulan = ? AND ket LIKE 'Tidak merespon%'", [$bulan]) as $p) {
+        $k = mb_strtolower($p['ref_id']);
+        if (isset($rows[$k]) && ($picNow[$p['temuan_id']] ?? '') !== $k) $rows[$k]['responDue']++;
     }
     foreach ($all as $t) {
         $k = mb_strtolower($t['picNik']);
@@ -918,6 +1200,7 @@ function r5_kpi_rows(string $bulan, ?string $onlyNik = null): array {
         if (!$t['tanggal'] || r5_bulan($t['tanggal']) !== $bulan) { unset($r); continue; }
         $r['ditugaskan']++;
         $r['revisi'] += $t['revisi'];
+        if ($t['tglTerima'] || $t['responTelat']) { $r['responDue']++; if ($t['tglTerima'] && !$t['responTelat']) $r['respon']++; }
         if ($t['status'] === R5_CLOSED) {
             $r['selesai']++;
             if (!$t['terlambat']) $r['tepat']++;
@@ -937,10 +1220,12 @@ function r5_kpi_rows(string $bulan, ?string $onlyNik = null): array {
         $basisSelesai = $r['ditugaskan'] - $r['keberatan'];
         $r['pctSelesai'] = $pct($r['selesai'] + $r['menunggu'] * 0.5, $basisSelesai);   // menunggu verifikasi dihitung setengah
         $r['skorOverdue'] = max(0, 100 - 25 * $r['overdue']);
+        $r['pctRespon'] = $pct($r['respon'], $r['responDue']);
         $r['rataJam'] = $r['selesai'] ? round($r['jamTotal'] / $r['selesai'], 1) : null;
         unset($r['jamTotal']);
         // Skor KPI = rata-rata berbobot komponen yang sudah ada datanya
-        $parts = [['tepat', $r['pctTepat']], ['ftr', $r['pctFtr']], ['selesai', $r['pctSelesai']], ['overdue', ($r['ditugaskan'] || $r['overdue']) ? $r['skorOverdue'] : null]];
+        $parts = [['tepat', $r['pctTepat']], ['ftr', $r['pctFtr']], ['selesai', $r['pctSelesai']], ['overdue', ($r['ditugaskan'] || $r['overdue']) ? $r['skorOverdue'] : null],
+                  ['respon', $r['pctRespon']]];
         $sw = 0; $sv = 0;
         foreach ($parts as [$key, $v]) { if ($v === null || $W[$key] <= 0) continue; $sw += $W[$key]; $sv += $W[$key] * min(100, $v); }
         $r['skor'] = $sw > 0 ? round($sv / $sw, 1) : null;
@@ -957,7 +1242,8 @@ function apiKpiPic($token, $bulan): array {
     $bulan = r5_valid_bulan($bulan);
     return ['bulan' => $bulan, 'rows' => r5_kpi_rows($bulan), 'target' => r5_num('KPI_TARGET', 85),
             'bobot' => ['tepat' => r5_num('KPI_BOBOT_TEPAT', 40), 'ftr' => r5_num('KPI_BOBOT_FTR', 25),
-                        'selesai' => r5_num('KPI_BOBOT_SELESAI', 25), 'overdue' => r5_num('KPI_BOBOT_OVERDUE', 10)]];
+                        'selesai' => r5_num('KPI_BOBOT_SELESAI', 25), 'overdue' => r5_num('KPI_BOBOT_OVERDUE', 10),
+                        'respon' => r5_num('KPI_BOBOT_RESPON', 10)], 'slaRespon' => r5_num('SLA_RESPON_JAM', 4)];
 }
 
 function r5_valid_bulan($b): string {
@@ -967,6 +1253,7 @@ function r5_valid_bulan($b): string {
 
 function apiDashboard($token, $bulan): array {
     r5_auth($token, 'dash');
+    r6_eskalasi();
     $bulan = r5_valid_bulan($bulan);
     $areas = db_all("SELECT * FROM r5_area");
     $tm = r5_timmap($areas);
@@ -1011,6 +1298,8 @@ function apiDashboard($token, $bulan): array {
             'menunggu' => count(array_filter($all, fn($t) => $t['status'] === R5_WAIT)),
             'lewatSla' => count(array_filter($all, fn($t) => $t['status'] === R5_WAIT && $t['tglPerbaikan'] && r5_now() - $t['tglPerbaikan'] > r5_num('SLA_VERIFIKASI_JAM', 24) * 3600000)),
             'keberatan' => count(array_filter($all, fn($t) => $t['status'] === R5_KEBERATAN)),
+            'belumDiterima' => count(array_filter($all, fn($t) => $t['status'] === R5_OPEN && !$t['tglTerima'])),
+            'belumRespon' => count(array_filter($all, fn($t) => $t['status'] === R5_OPEN && !$t['tglTerima'] && $t['responTelat'])),
             'terlambat' => count($terlambat),
             'closed' => count($closedBln),
             'tepatPct' => count($closedBln) ? (int)round($tepat / count($closedBln) * 100) : null,
@@ -1118,10 +1407,18 @@ function apiAdminData($token): array {
     foreach (db_all("SELECT area_id, kategori_r, item FROM r5_checklist WHERE aktif <> 'N' ORDER BY id") as $c) {
         $chk[$c['area_id']][] = ['r' => $c['kategori_r'], 'item' => $c['item']];
     }
+    $apm = r6_area_pic_map();
+    $now = r5_now();
+    $users = array_map(function ($u) use ($tm, $apm, $now) {
+        $o = r5_uout($u, $tm, $apm);
+        if ($u['pic']) { $st = r6_jadwal_status($u['operator_id'], $now); $o['jadwal'] = ['status' => $st['status'], 'label' => $st['label']]; }
+        return $o;
+    }, r5_users_all());
     return [
-        'users' => array_map(fn($u) => r5_uout($u, $tm), r5_users_all()),
+        'users' => $users,
         'areas' => array_map(fn($a) => ['id' => $a['area_id'], 'nama' => $a['nama'], 'tim' => r5_str($a['tim']) !== '' ? r5_str($a['tim']) : $a['nama'],
-            'picNik' => r5_str($a['pic_nik']), 'aktif' => $a['aktif'] !== 'N'], db_all("SELECT * FROM r5_area ORDER BY area_id")),
+            'picNik' => r5_str($a['pic_nik']), 'aktif' => $a['aktif'] !== 'N',
+            'pics' => array_keys(array_filter($apm, fn($l) => in_array($a['area_id'], $l, true)))], db_all("SELECT * FROM r5_area ORDER BY area_id")),
         'config' => array_map(fn($c) => ['key' => $c['key_name'], 'value' => r5_str($c['value']), 'ket' => r5_str($c['ket'])],
             db_all("SELECT * FROM r5_config ORDER BY key_name")),
         'checklist' => $chk,
@@ -1152,8 +1449,21 @@ function apiSaveUser($token, $d): array {
     if (mb_strtolower($u['nik']) === mb_strtolower($me['nik']) && (!$aktif || ($role !== '' && $role !== 'Admin') || ($role === '' && r5_role_map($u['hris_role']) !== 'Admin'))) {
         throw new RuntimeException('Anda tidak bisa menurunkan role atau menonaktifkan akun Anda sendiri.');
     }
-    r5_set_profile($u, $role, $areaId, $aktif);
-    return r5_uout(r5_find_user($u['nik']));
+    // Area tanggung jawab (PIC per shift): hanya untuk Leader / PIC IEG
+    $areaPic = null;
+    if (array_key_exists('areaPic', $d)) {
+        $areaPic = array_values(array_unique(array_filter(array_map('r5_str', (array)$d['areaPic']))));
+        foreach ($areaPic as $aid) if (!r5_find_area($aid)) throw new RuntimeException('Area ' . $aid . ' tidak valid.');
+    }
+    db_transaction(function () use ($u, $role, $areaId, $aktif, $areaPic) {
+        r5_set_profile($u, $role, $areaId, $aktif);
+        if ($areaPic === null) return;
+        $nu = r5_find_user($u['nik']);
+        if ($areaPic && !$nu['pic']) throw new RuntimeException($u['nama'] . ' bukan Leader / PIC IEG, jadi tidak bisa menjadi PIC area.');
+        db_delete('r6_area_pic', 'LOWER(nik) = ?', [mb_strtolower($u['nik'])]);
+        foreach ($areaPic as $aid) db_insert('r6_area_pic', ['area_id' => $aid, 'nik' => $u['nik']]);
+    });
+    return r5_uout(r5_find_user($u['nik']), null, r6_area_pic_map());
 }
 
 function apiSaveArea($token, $d): bool {
@@ -1267,4 +1577,5 @@ const R5_API = [
     'apiSubmitPerbaikan', 'apiVerifikasi', 'apiBatalkanTemuan', 'apiDashboard', 'apiLeaderboard', 'apiChecklist',
     'apiSaveAudit', 'apiListAudit', 'apiAdminData', 'apiSaveUser', 'apiSaveArea', 'apiSaveChecklist',
     'apiImportUsers', 'apiSaveConfig', 'apiKeberatan', 'apiPutusKeberatan', 'apiKpiPic',
+    'apiPicBertugas', 'apiTerimaTugas', 'apiAlihkan',
 ];
