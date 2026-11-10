@@ -771,7 +771,7 @@ VIEWS.dash = async function () {
     h += '<div class="dash3"><div class="card span2"><h3>Poin per PIC<span class="sub">' + fBulan(d.bulan) + ' · ' + pics.length + ' Leader / PIC · ' + kp.bertugas + ' sedang bertugas</span></h3>' +
       (pics.length ? '<div class="tbl-wrap"><table class="tbl pic-tbl" style="min-width:760px"><tr><th>#</th><th>PIC</th><th class="num">Poin</th><th class="num">KPI</th><th class="num">Ditugaskan</th><th class="num">Selesai</th><th class="num">Lewat target</th><th class="num">Respon</th></tr>' +
         pics.map((p, i) => '<tr><td><span class="rank ' + (i < 3 && p.poin > 0 ? 'r' + (i + 1) : '') + '">' + (i + 1) + '</span></td>' +
-          '<td><button type="button" class="pic-name" title="Lihat temuan ' + esc(p.nama) + '" onclick="go(\'daftar\',{q:' + esc(JSON.stringify(p.nama)) + ',bulan:\'\'})">' + esc(p.nama) + '</button>' +
+          '<td><button type="button" class="pic-name" title="Riwayat poin ' + esc(p.nama) + '" onclick="openPoinPic(' + esc(JSON.stringify(p.nik)) + ',' + esc(JSON.stringify(d.bulan)) + ')">' + esc(p.nama) + '</button>' +
           '<div class="pic-meta" title="' + esc(p.area.join(', ')) + '">' + (p.area.length ? esc(p.area.join(', ')) : 'Area belum diatur') + shiftChip(p) + '</div></td>' +
           '<td class="num"><div class="pbar"><b>' + signed(p.poin) + '</b><i><span class="' + (p.poin < 0 ? 'neg' : '') + '" style="width:' + (Math.abs(p.poin) / mx * 100) + '%"></span></i></div></td>' +
           '<td class="num">' + kpiChip(p, kp.target) + '</td><td class="num">' + p.ditugaskan + '</td>' +
@@ -779,7 +779,7 @@ VIEWS.dash = async function () {
           '<td class="num">' + (p.overdue ? '<span class="chip c-err">' + p.overdue + '</span>' : '0') + '</td>' +
           '<td class="num">' + pctTxt(p.pctRespon) + '</td></tr>').join('') + '</table></div>'
         : emptyBox('Belum ada Leader / PIC IEG. Tambahkan akun role Leader di HRIS → Pengaturan → Pengguna.')) +
-      '<p class="small muted" style="margin:10px 0 0">Poin PIC: + perbaikan tepat waktu (bonus bila cepat) · − terlambat, revisi, dan tugas yang tidak direspon. Urut dari poin tertinggi; klik nama untuk melihat temuannya.' +
+      '<p class="small muted" style="margin:10px 0 0">Poin PIC: <b>+</b> menemukan temuan di area PIC lain, perbaikan tepat waktu (bonus bila cepat) · <b>−</b> temuan di area yang ia pegang, terlambat, revisi, tugas tidak direspon. Klik nama untuk melihat riwayat poinnya.' +
       (canDo('kpi') ? ' <a href="#" onclick="go(\'kpi\');return false">Rincian KPI PIC</a>' : '') + '</p></div>';
 
     // Perlu tindakan
@@ -850,7 +850,8 @@ VIEWS.input = function () {
     sel.innerHTML = (r.pic ? '<option value="">Otomatis — ' + esc(r.pic.nama) + '</option>' : '<option value="">— Pilih PIC —</option>') +
       (areaPic.length ? '<optgroup label="Kandidat sesuai jadwal hari ini">' + areaPic.map(u => opt(u, lbl[u.nik.toLowerCase()])).join('') + '</optgroup>' : '') +
       (lain.length ? '<optgroup label="PIC lain">' + lain.map(u => opt(u)).join('') + '</optgroup>' : '');
-    $('#iGanti').onclick = () => manual($('#iPicWrap').hidden);
+    $('#iGanti').onclick = () => { manual($('#iPicWrap').hidden); est(); };
+    F.autoPic = r.pic || null; est();
     if (r.pic) {
       $('#iGanti').hidden = false;
       box.className = 'note';
@@ -863,14 +864,19 @@ VIEWS.input = function () {
   };
   const est = () => {
     if (!F.areaId || !F.tingkat) return;
-    const c = B.config; let p = c.potong[F.tingkat]; const ket = [];
+    const c = B.config, ket = [];
+    // Poin per PIC: PIC penanggung jawab dipotong, penemu dari area lain mendapat poin
+    const sel = $('#iPic'), man = sel && sel.value && !$('#iPicWrap').hidden;
+    const pic = man ? { nik: sel.value, nama: (B.users.find(u => u.nik === sel.value) || {}).nama || sel.value } : F.autoPic;
+    const me = S.user.nik.toLowerCase();
+    const mandiri = (pic && pic.nik.toLowerCase() === me) || (S.user.areaPic || []).indexOf(F.areaId) >= 0;
+    let p = c.potong[F.tingkat] * (c.faktorPotongPic == null ? 1 : c.faktorPotongPic);
     if ($('#iBer').checked) { p *= c.faktorBerulang; ket.push('berulang ×' + c.faktorBerulang); }
-    const a = B.areas.find(x => x.id === F.areaId);
-    if (S.user.tim && a && S.user.tim === a.tim) { p *= c.faktorMandiri; ket.push('lapor mandiri ×' + c.faktorMandiri); }
+    if (mandiri) { p *= c.faktorMandiri; ket.push('lapor mandiri ×' + c.faktorMandiri); }
     const plus = F.tingkat === 'Kritis' ? c.poinTepatKritis : c.poinTepat;
-    $('#iEst').innerHTML = 'Skor Tim ' + esc(a ? a.tim : '') + ' dipotong <b>−' + num(p) + '</b>' + (ket.length ? ' (' + ket.join(', ') + ')' : '') +
-      '. Bila diperbaiki dalam batas standar <b>' + c.deadline[F.tingkat] + ' jam</b>, tim mendapat kembali <b>+' + plus + '</b> (bonus +' + c.bonusCepat + ' bila sangat cepat; setengahnya bila lewat standar tapi sesuai target PIC).' +
-      (c.poinPelapor && a && S.user.tim && S.user.tim !== a.tim ? ' Tim Anda dapat <b>+' + c.poinPelapor + '</b> setelah temuan diverifikasi.' : '');
+    $('#iEst').innerHTML = (pic ? 'PIC <b>' + esc(pic.nama) + '</b>' : 'PIC area') + ' dipotong <b>−' + num(p) + '</b>' + (ket.length ? ' (' + ket.join(', ') + ')' : '') +
+      (!mandiri && S.user.pic && c.poinLaporPic ? '. Anda mendapat <b>+' + num(c.poinLaporPic) + '</b> karena menemukan temuan di area PIC lain' : '') +
+      '. Bila diperbaiki dalam batas standar <b>' + c.deadline[F.tingkat] + ' jam</b>, PIC mendapat <b>+' + plus + '</b> (bonus +' + c.bonusCepat + ' bila sangat cepat).';
   };
   const seg = (id, key) => $$('#' + id + ' button').forEach(b => b.addEventListener('click', () => {
     $$('#' + id + ' button').forEach(x => x.classList.remove('on')); b.classList.add('on'); F[key] = b.dataset.v; est();
@@ -879,6 +885,7 @@ VIEWS.input = function () {
   seg('iR', 'r'); seg('iT', 'tingkat');
   $('#iArea').addEventListener('change', e => { F.areaId = e.target.value; setPic(); est(); });
   $('#iBer').addEventListener('change', est);
+  $('#iPic').addEventListener('change', est);
   bindPhoto('iFoto', () => { const a = B.areas.find(x => x.id === F.areaId); return stampText(a ? a.nama : 'Area belum dipilih'); }, d => { F.foto = d; });
   setPic();
 
@@ -992,7 +999,7 @@ VIEWS.kpi = async function () {
       '<div class="kpi"><div class="l">Revisi</div><div class="v tnum">' + rows.reduce((n, r) => n + r.revisi, 0) + '</div><div class="s">perbaikan ditolak</div></div></div>';
     h += rows.length ? '<div class="tbl-wrap"><table class="tbl" id="kTbl" style="min-width:1060px"><tr><th>#</th><th>Leader / PIC</th><th>Tim</th><th class="num">Skor KPI</th><th class="num">Ditugaskan</th><th class="num">Selesai</th><th class="num">Tepat waktu</th><th class="num">Tanpa revisi</th><th class="num">Penyelesaian</th><th class="num">Lewat batas</th><th class="num">Respon</th><th class="num">Rata-rata</th><th class="num">Poin</th></tr>' +
       rows.map((r, i) => '<tr data-q="' + esc((r.nama + ' ' + r.nik + ' ' + (r.tim || '')).toLowerCase()) + '"><td><span class="rank ' + (i < 3 && r.skor != null ? 'r' + (i + 1) : '') + '">' + (i + 1) + '</span></td>' +
-        '<td><b>' + esc(r.nama) + '</b><div class="small muted">' + esc(r.nik) + (r.bagian ? ' · ' + esc(r.bagian) : '') + '</div></td><td>' + esc(r.tim || '-') + '</td>' +
+        '<td><button type="button" class="pic-name" title="Riwayat poin ' + esc(r.nama) + '" onclick="openPoinPic(' + esc(JSON.stringify(r.nik)) + ',' + esc(JSON.stringify(d.bulan)) + ')">' + esc(r.nama) + '</button><div class="small muted">' + esc(r.nik) + (r.bagian ? ' · ' + esc(r.bagian) : '') + '</div></td><td>' + esc(r.tim || '-') + '</td>' +
         '<td class="num">' + kpiChip(r, d.target) + '</td><td class="num">' + r.ditugaskan + '</td><td class="num">' + r.selesai + (r.menunggu ? ' <span class="small muted">+' + r.menunggu + ' verif</span>' : '') + '</td>' +
         '<td class="num">' + pctTxt(r.pctTepat) + '</td><td class="num">' + pctTxt(r.pctFtr) + (r.revisi ? ' <span class="small muted">(' + r.revisi + 'x)</span>' : '') + '</td><td class="num">' + pctTxt(r.pctSelesai) + '</td>' +
         '<td class="num">' + (r.overdue ? '<span class="chip c-err">' + r.overdue + '</span>' : '0') + '</td><td class="num">' + pctTxt(r.pctRespon) + '</td><td class="num">' + (r.rataJam == null ? '-' : num(r.rataJam) + ' jam') + '</td><td class="num"><b>' + signed(r.poin) + '</b></td></tr>').join('') + '</table></div>'
@@ -1189,6 +1196,25 @@ function renderDetail(t) {
       catch (e) { toast(e.message, true); $('#bGo').disabled = false; }
     };
   };
+}
+/* Riwayat poin satu PIC: bertambah / berkurang per kejadian, saldo berjalan */
+async function openPoinPic(nik, bulan) {
+  openModal('Riwayat poin', '<div class="spin"></div>');
+  try {
+    const d = await call('apiRiwayatPoinPic', S.token, nik, bulan || S.bulan);
+    const box = (l, v, cls) => '<div class="kpi"><div class="l">' + l + '</div><div class="v tnum' + (cls ? ' ' + cls : '') + '" style="font-size:22px">' + v + '</div></div>';
+    let h = '<div class="small muted" style="margin:-4px 0 12px">' + fBulan(d.bulan) + '</div>' +
+      '<div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:12px">' +
+      box('Bertambah', '+' + num(d.plus)) + box('Berkurang', num(d.minus), d.minus < 0 ? 'err' : '') + box('Total', signed(d.total), d.total < 0 ? 'err' : '') + '</div>' +
+      (d.telatBerjalan ? '<div class="note warn" style="margin-bottom:10px">Total termasuk ' + signed(d.telatBerjalan) + ' potongan berjalan dari temuan yang lewat target dan belum diperbaiki.</div>' : '');
+    h += d.rows.length ? '<div class="tbl-wrap"><table class="tbl" style="min-width:0"><tr><th>Waktu</th><th>Kejadian</th><th class="num">Poin</th><th class="num">Saldo</th></tr>' +
+      d.rows.map(r => '<tr><td class="small" style="white-space:nowrap">' + fDate(r.ts) + '</td><td>' + esc(r.ket) +
+        (r.temuanId ? '<div class="small"><a href="#" onclick="openDetail(' + esc(JSON.stringify(r.temuanId)) + ');return false">' + esc(r.temuanId) + '</a>' + (r.area ? ' · ' + esc(r.area) : '') + '</div>' : '') + '</td>' +
+        '<td class="num"><span class="chip nodot ' + (r.poin < 0 ? 'c-err' : 'c-ok') + '">' + signed(r.poin) + '</span></td><td class="num tnum">' + signed(r.saldo) + '</td></tr>').join('') + '</table></div>'
+      : emptyBox('Belum ada poin bulan ini');
+    h += '<div class="grid g2" style="margin-top:12px"><button class="btn" onclick="closeModal();go(\'daftar\',{q:' + esc(JSON.stringify(d.nama)) + ',bulan:\'\'})">' + ic('list') + 'Temuan PIC ini</button><button class="btn primary" onclick="closeModal()">Tutup</button></div>';
+    $('#sheet').innerHTML = '<div class="sheet-h"><h2>' + esc(d.nama) + '</h2><button class="icon-btn" onclick="closeModal()" aria-label="Tutup">' + ic('x') + '</button></div>' + h;
+  } catch (e) { $('#sheet').innerHTML = emptyBox(e.message); }
 }
 function afterChange() {
   // Muat ulang daftar di belakang modal; modal yang sedang terbuka tidak tersentuh.

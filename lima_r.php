@@ -12,7 +12,7 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/foto.php';
 
-const R5_VERSION = '3.2';
+const R5_VERSION = '3.3';
 // Lean 6S: Sort, Set in Order, Shine, Standardize, Sustain, Safety
 const R5_LIST    = ['Sort', 'Set in Order', 'Shine', 'Standardize', 'Sustain', 'Safety'];
 /** Penjelasan singkat tiap S (ditampilkan di form temuan). */
@@ -80,6 +80,8 @@ const R5_DEFAULT_CONFIG = [
     ['TARGET_MAKS_JAM', 168, 'Target perbaikan terlama yang boleh ditentukan PIC (jam). Temuan Kritis maksimal sama dengan batas standar'],
     ['POTONG_TIDAK_RESPON', 1, 'Potongan poin PIC bila tugas tidak diterima sampai batas respon (tugas dialihkan otomatis ke PIC yang bertugas)'],
     ['KPI_BOBOT_RESPON', 10, 'Bobot KPI: tugas diterima PIC sebelum batas respon'],
+    ['POIN_LAPOR_PIC', 2, 'Poin untuk PIC yang menemukan temuan di area PIC lain (dikembalikan bila temuan batal)'],
+    ['FAKTOR_POTONG_PIC', 1, 'Pengali potongan temuan untuk PIC yang bertanggung jawab atas area (1 = sama dengan potongan tim, 0 = PIC tidak dipotong)'],
 ];
 
 const R5_AREAS_SEED = [
@@ -460,6 +462,16 @@ function r6_pic_bertugas(string $areaId, int $now, array $exclude = []): array {
     return $out($all[0], 'Tidak ada PIC yang terbaca sedang bertugas · dipilih yang tugas aktifnya paling sedikit', array_slice($all, 0, 8));
 }
 
+/** Potongan temuan milik PIC lama dipindah ke PIC baru saat tugas dialihkan (dalam transaksi). */
+function r6_pindah_potongan(array $t, string $nikBaru, string $namaBaru, int $now): void {
+    $lama = r5_str($t['pic_nik']);
+    $sum = (float)db_val("SELECT COALESCE(SUM(poin), 0) FROM r5_poin WHERE jenis = 'PIC' AND temuan_id = ? AND LOWER(ref_id) = ? AND (ket LIKE 'Temuan %' OR ket LIKE 'Potongan temuan%')",
+        [$t['id'], mb_strtolower($lama)]);
+    if (abs($sum) < 1e-9) return;
+    r5_log_poin('PIC', $lama, r5_str($t['pic_nama']), -$sum, $t['id'], 'Temuan dialihkan ke ' . $namaBaru . ' (potongan dipindah)', $now);
+    r5_log_poin('PIC', $nikBaru, $namaBaru, $sum, $t['id'], 'Potongan temuan dialihkan dari ' . r5_str($t['pic_nama']), $now);
+}
+
 /** Batas respon PIC: SLA dihitung sejak sekarang, atau sejak shift PIC mulai bila shift-nya belum mulai. */
 function r6_batas_respon(?int $mulaiShift, int $now): int {
     $base = ($mulaiShift && $mulaiShift > $now) ? $mulaiShift : $now;
@@ -501,6 +513,7 @@ function r6_eskalasi(): void {
             foreach ((array)json_decode((string)$riw, true) as $e) if (($e['ev'] ?? '') === 'Tidak direspon' && !empty($e['nik'])) $gagal[] = $e['nik'];
             $c = r6_pic_bertugas($t['area_id'], $now, $gagal);
             if ($c['pic'] && $c['status'] === 'bertugas') {
+                r6_pindah_potongan($t, $c['pic']['nik'], $c['pic']['nama'], $now);
                 // array_merge (bukan +=) agar respon_lewat 'Y' milik PIC lama ditimpa 'N' untuk PIC baru
                 $upd = array_merge($upd, ['pic_nik' => $c['pic']['nik'], 'pic_nama' => $c['pic']['nama'], 'batas_respon' => r6_batas_respon(null, $now), 'respon_lewat' => 'N']);
                 $riw = r6_riwayat($riw, 'Dialihkan otomatis', 'Sistem', 'Ke ' . $c['pic']['nama'] . ' · ' . $c['alasan'], $now);
@@ -743,6 +756,7 @@ function apiBootstrap($token): array {
             'potongRevisi' => r5_num('POTONG_REVISI', 1), 'slaVerif' => r5_num('SLA_VERIFIKASI_JAM', 24),
             'kpiTarget' => r5_num('KPI_TARGET', 85),
             'slaRespon' => r5_num('SLA_RESPON_JAM', 4), 'targetMaks' => r5_num('TARGET_MAKS_JAM', 168),
+            'poinLaporPic' => r5_num('POIN_LAPOR_PIC', 2), 'faktorPotongPic' => r5_num('FAKTOR_POTONG_PIC', 1),
         ],
         'access' => r5_access_for($u),
         'bulanIni' => r5_bulan(r5_now()),
@@ -889,12 +903,58 @@ function apiCreateTemuan($token, $d): array {
                 r5_log_poin('AREA', $area['area_id'], $area['nama'], $potong, $id,
                     'Temuan ' . implode(', ', $ket) . ($timPelapor !== '' && !$mandiri ? ' · dilaporkan tim ' . $timPelapor : ''), $now);
             }
+            // Poin per PIC: PIC penanggung jawab area dipotong, PIC penemu dari area lain mendapat poin
+            $pelArea = r6_area_pic_map()[mb_strtolower($u['nik'])] ?? [];
+            $mandiriPic = mb_strtolower($u['nik']) === mb_strtolower($pic['nik']) || in_array($area['area_id'], $pelArea, true);
+            $potPic = r5_num('POTONG_' . strtoupper($ting), 2) * r5_num('FAKTOR_POTONG_PIC', 1);
+            if ($berulang) $potPic *= r5_num('FAKTOR_BERULANG', 2);
+            if ($mandiriPic) $potPic *= r5_num('FAKTOR_MANDIRI', 0.5);
+            $potPic = -r5_round1($potPic);
+            if ($potPic != 0) {
+                r5_log_poin('PIC', $pic['nik'], $pic['nama'], $potPic, $id,
+                    'Temuan ' . $ting . ($berulang ? ' berulang' : '') . ' di ' . $area['nama'] . ($mandiriPic ? ' (lapor mandiri)' : ' · ditemukan ' . $u['nama']), $now);
+            }
+            $bonusLapor = r5_num('POIN_LAPOR_PIC', 2);
+            if (!$mandiriPic && $bonusLapor > 0 && !empty($u['pic'])) {
+                r5_log_poin('PIC', $u['nik'], $u['nama'], $bonusLapor, $id, 'Menemukan temuan di ' . $area['nama'] . ' (PIC ' . $pic['nama'] . ')', $now);
+            }
             return r5_tout(r5_find_temuan($id), $tm);
         });
     } catch (Throwable $e) {
         foto_delete_file($fotoId);
         throw $e;
     }
+}
+
+/** Riwayat poin satu PIC dalam sebulan (bertambah / berkurang, saldo berjalan). */
+function apiRiwayatPoinPic($token, $nik, $bulan): array {
+    $u = r5_auth($token);
+    $acc = r5_access_for($u);
+    if (!array_intersect(['dash', 'poin', 'kpi'], $acc['menus'])) throw new RuntimeException('Anda tidak punya akses melihat poin.');
+    $bulan = r5_valid_bulan($bulan);
+    $p = r5_find_user($nik);
+    if (!$p) throw new RuntimeException('PIC tidak ditemukan.');
+    $area = [];
+    foreach (db_all("SELECT id, nama_area, lokasi FROM r5_temuan") as $t) $area[$t['id']] = r5_str($t['nama_area']) . (r5_str($t['lokasi']) !== '' ? ' · ' . r5_str($t['lokasi']) : '');
+    $rows = db_all("SELECT ts, poin, ket, temuan_id FROM r5_poin WHERE jenis = 'PIC' AND LOWER(ref_id) = ? AND bulan = ? ORDER BY ts, id", [mb_strtolower($p['nik']), $bulan]);
+    $saldo = 0.0; $plus = 0.0; $minus = 0.0; $out = [];
+    foreach ($rows as $r) {
+        $v = (float)$r['poin'];
+        $saldo += $v; if ($v >= 0) $plus += $v; else $minus += $v;
+        $out[] = ['ts' => (int)$r['ts'], 'poin' => $v, 'saldo' => r5_round1($saldo), 'ket' => r5_str($r['ket']),
+                  'temuanId' => r5_str($r['temuan_id']), 'area' => $area[$r['temuan_id']] ?? ''];
+    }
+    // Temuan lewat target yang belum diperbaiki: potongan per hari berjalan (belum tercatat, ikut dihitung di total)
+    $berjalan = 0.0;
+    if ($bulan === r5_bulan(r5_now())) {
+        foreach (r5_all_temuan() as $t) {
+            if (mb_strtolower($t['picNik']) !== mb_strtolower($p['nik']) || !$t['terlambat'] || !in_array($t['status'], [R5_OPEN, R5_REVISI], true)) continue;
+            $berjalan -= r5_hari_telat($t) * r5_num('POTONG_TELAT_PER_HARI', 1);
+        }
+    }
+    return ['nik' => $p['nik'], 'nama' => $p['nama'], 'bulan' => $bulan, 'rows' => array_reverse($out),
+            'plus' => r5_round1($plus), 'minus' => r5_round1($minus), 'telatBerjalan' => r5_round1($berjalan),
+            'total' => r5_round1($saldo + $berjalan)];
 }
 
 /** PIC yang akan menerima temuan di area ini (untuk form Input Temuan). */
@@ -949,6 +1009,7 @@ function apiAlihkan($token, $id, $nik, $alasan): array {
         if (mb_strtolower($p['nik']) === mb_strtolower(r5_str($t['pic_nik']))) throw new RuntimeException('PIC tujuan sama dengan PIC sekarang.');
         $now = r5_now();
         $st = r6_jadwal_status($p['operator_id'], $now);
+        r6_pindah_potongan($t, $p['nik'], $p['nama'], $now);
         $upd = ['pic_nik' => $p['nik'], 'pic_nama' => $p['nama'],
             'riwayat' => r6_riwayat($t['riwayat'], 'Dialihkan', $u['nama'], 'Dari ' . r5_str($t['pic_nama']) . ' ke ' . $p['nama'] . ' · ' . r5_str($alasan), $now)];
         if ($t['status'] === R5_OPEN) {
@@ -1707,5 +1768,5 @@ const R5_API = [
     'apiSubmitPerbaikan', 'apiVerifikasi', 'apiBatalkanTemuan', 'apiDashboard', 'apiLeaderboard', 'apiChecklist',
     'apiSaveAudit', 'apiListAudit', 'apiAdminData', 'apiSaveUser', 'apiSaveArea', 'apiSaveChecklist',
     'apiImportUsers', 'apiSaveConfig', 'apiKeberatan', 'apiPutusKeberatan', 'apiKpiPic',
-    'apiPicBertugas', 'apiTerimaTugas', 'apiAlihkan',
+    'apiPicBertugas', 'apiTerimaTugas', 'apiAlihkan', 'apiRiwayatPoinPic',
 ];
