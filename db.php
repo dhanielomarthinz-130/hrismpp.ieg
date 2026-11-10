@@ -350,6 +350,18 @@ function init_db_tables(PDO $pdo, string $driver): void {
         }
         $pdo->prepare("INSERT INTO settings (key_name, value, ket) VALUES ('migr_bagian_forklift', '1', 'Migrasi bagian Operator Forklift')")->execute();
     }
+
+    // Kode jadwal "06" (Jam Masuk 06:00–14:00, dihitung Shift 1) — ditambahkan SEKALI;
+    // bila nanti diubah/dihapus dari Pengaturan tidak muncul kembali.
+    $flagJ06 = $pdo->query("SELECT COUNT(*) FROM settings WHERE key_name = 'migr_kode_j06'")->fetchColumn();
+    if ((int)$flagJ06 === 0) {
+        $chk = $pdo->query("SELECT COUNT(*) FROM kode_jadwal WHERE UPPER(kode) = 'J06' OR (mulai = '06:00' AND selesai = '14:00')");
+        if ((int)$chk->fetchColumn() === 0) {
+            $maxUrut = (int)$pdo->query("SELECT COALESCE(MAX(urutan), 0) FROM kode_jadwal")->fetchColumn();
+            $pdo->prepare("INSERT INTO kode_jadwal (kode, label, nama, mulai, selesai, jam, kerja, shift, warna, urutan) VALUES ('J06', '06', 'Jam Masuk 06', '06:00', '14:00', 8.0, 1, 'S1', '#DDEBF7', ?)")->execute([$maxUrut + 1]);
+        }
+        $pdo->prepare("INSERT INTO settings (key_name, value, ket) VALUES ('migr_kode_j06', '1', 'Migrasi kode jadwal Jam Masuk 06:00-14:00')")->execute();
+    }
 }
 
 /** ID operator berikutnya (OP0001, OP0002, …) — dihitung di PHP agar jalan di SQLite & MySQL. */
@@ -394,7 +406,8 @@ function seed_default_data(PDO $pdo): void {
         ['LS2', 'LS 2', 'Long Shift 2', '12:00', '00:00', 12.0, 1, 'S2', '#FFFF00', 5],
         ['HALF', 'HALF', 'Half Day', '08:00', '12:00', 4.0, 1, 'S1', '#FCE4D6', 6],
         ['OFF', 'OFF', 'Libur', '', '', 0.0, 0, '', '#F4CCCC', 7],
-        ['CUTI', 'CUTI', 'Cuti', '', '', 0.0, 0, '', '#FFF2CC', 8]
+        ['CUTI', 'CUTI', 'Cuti', '', '', 0.0, 0, '', '#FFF2CC', 8],
+        ['J06', '06', 'Jam Masuk 06', '06:00', '14:00', 8.0, 1, 'S1', '#DDEBF7', 9]
     ];
     $stmt = $pdo->prepare("INSERT INTO kode_jadwal (kode, label, nama, mulai, selesai, jam, kerja, shift, warna, urutan) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     foreach ($kodes as $k) {

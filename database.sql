@@ -229,7 +229,8 @@ INSERT INTO `kode_jadwal` (`kode`, `label`, `nama`, `mulai`, `selesai`, `jam`, `
 ('LS2', 'LS 2', 'Long Shift 2', '12:00', '00:00', 12.0, 1, 'S2', '#FFFF00', 5),
 ('HALF', 'HALF', 'Half Day', '08:00', '12:00', 4.0, 1, 'S1', '#FCE4D6', 6),
 ('OFF', 'OFF', 'Libur', '', '', 0.0, 0, '', '#F4CCCC', 7),
-('CUTI', 'CUTI', 'Cuti', '', '', 0.0, 0, '', '#FFF2CC', 8)
+('CUTI', 'CUTI', 'Cuti', '', '', 0.0, 0, '', '#FFF2CC', 8),
+('J06', '06', 'Jam Masuk 06', '06:00', '14:00', 8.0, 1, 'S1', '#DDEBF7', 9)
 ON DUPLICATE KEY UPDATE `kode`=`kode`;
 
 -- Bagian / Divisi
