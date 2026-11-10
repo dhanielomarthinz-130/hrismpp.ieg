@@ -123,6 +123,7 @@ try {
         'settings'        => $admin(fn() => get_settings_admin()),
         'saveSettings'    => $admin(fn() => save_settings($payload, $user)),
         'saveShift'       => $admin(fn() => save_shift($payload, $user)),
+        'deleteShift'     => $admin(fn() => delete_shift($payload, $user)),
         'users'           => $admin(fn() => list_users()),
         'saveUser'        => $admin(fn() => save_user($payload, $user)),
         'deleteUser'      => $admin(fn() => delete_user((string)($payload['username'] ?? ''), $user)),
@@ -203,7 +204,7 @@ try {
         'saveOperator' => ['operator', 'Operator'], 'deleteOperator' => ['operator', 'Operator'],
         'importOperator' => ['operator', 'Operator'], 'fotoOperator' => ['operator', 'Operator'],
         'saveBagian' => ['bagian', 'Bagian & Target'], 'deleteBagian' => ['bagian', 'Bagian & Target'],
-        'saveSettings' => ['pengaturan', 'Pengaturan'], 'saveShift' => ['pengaturan', 'Pengaturan'], 'kodeSimpan' => ['pengaturan', 'Pengaturan'],
+        'saveSettings' => ['pengaturan', 'Pengaturan'], 'saveShift' => ['pengaturan', 'Pengaturan'], 'deleteShift' => ['pengaturan', 'Pengaturan'], 'kodeSimpan' => ['pengaturan', 'Pengaturan'],
         'saveUser' => ['pengaturan', 'Pengaturan'], 'deleteUser' => ['pengaturan', 'Pengaturan'],
         'botToken' => ['pengaturan', 'Pengaturan'], 'waAuto' => ['pengaturan', 'Pengaturan'],
     ];

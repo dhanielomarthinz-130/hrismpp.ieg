@@ -3272,6 +3272,34 @@
         if ($('#botCopy')) $('#botCopy').onclick = async () => toast(await copyText('HRIS_URL=' + b.url + '\nHRIS_TOKEN=' + b.token) ? 'Disalin.' : 'Gagal menyalin.', 'ok');
     }
 
+    // Tambah shift baru (Pengaturan → Shift & jam kirim WA)
+    function shiftAddModal() {
+        openModal({
+            title: 'Tambah shift',
+            body: '<label class="field"><span>Nama shift *</span><input name="nama" placeholder="Contoh: Shift 1 Pagi" required></label>' +
+                '<div class="grid2"><label class="field"><span>Mulai *</span><input type="time" name="mulai" value="06:00"></label>' +
+                '<label class="field"><span>Selesai *</span><input type="time" name="selesai" value="14:00"></label></div>' +
+                '<div class="grid2"><label class="field"><span>Kirim realisasi *</span><input type="time" name="kirim" value="06:30"><small>Jam pesan realisasi dikirim ke grup WA.</small></label>' +
+                '<label class="field"><span>Kirim request</span><input type="time" name="kirimReq"><small>Kosongkan = request dikirim manual.</small></label></div>' +
+                '<p class="small muted" style="margin:0">Kode shift dibuat otomatis. Agar karyawan masuk ke shift ini, atur "Dihitung sebagai" di Kode jadwal.</p>',
+            buttons: [{ label: 'Batal' }, {
+                label: 'Tambah shift', cls: 'primary', onClick: async btn => {
+                    const f = formData($('#modalBody'));
+                    if (!f.nama.trim()) return toast('Nama shift wajib diisi.', 'err');
+                    btn.disabled = true;
+                    try {
+                        await call('saveShift', Object.assign(f, { baru: 1 }));
+                        closeModal();
+                        toast('Shift "' + f.nama.trim() + '" ditambahkan.', 'ok');
+                        await loadMaster(); updateShiftChip();
+                        const y = window.scrollY;
+                        await renderPengaturan();
+                        window.scrollTo(0, y);
+                    } catch (e) { btn.disabled = false; fail(e); }
+                }
+            }]
+        });
+    }
     async function renderPengaturan() {
         const d = await call('settings');
         const s = d.settings;
@@ -3298,14 +3326,16 @@
             '<div class="table-wrap"><table class="tbl kode-tbl"><thead><tr><th>Kode</th><th>Label</th><th>Nama</th><th>Hari kerja</th><th>Mulai</th><th>Selesai</th><th>Jam</th><th>Dihitung sebagai</th><th>Warna</th><th></th></tr></thead><tbody id="kRows"></tbody></table></div>' +
             '<div class="row" style="margin-top:10px"><button type="button" class="btn primary" id="kSave">Simpan kode jadwal</button></div></div>' +
 
-            '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;margin-right:6px">schedule</span>Shift &amp; jam kirim WA</h2></div><p class="small muted" style="margin-top:0">Kirim request kosong = request dikirim manual. Bila jam kirim request ≥ jam mulai shift (mis. Shift 1 jam 20:00), yang dikirim request untuk shift BESOK.</p>' +
+            '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;margin-right:6px">schedule</span>Shift &amp; jam kirim WA</h2><button type="button" class="btn sm primary" id="shAdd"><span class="material-symbols-outlined">add</span> Shift</button></div><p class="small muted" style="margin-top:0">Kirim request kosong = request dikirim manual. Bila jam kirim request ≥ jam mulai shift (mis. Shift 1 jam 20:00), yang dikirim request untuk shift BESOK.</p>' +
             d.shifts.map(x => '<form class="fShift row" data-k="' + x.kode + '" style="margin-bottom:10px;align-items:flex-end">' +
                 '<label class="field grow" style="margin:0"><span>Nama (' + x.kode + ')</span><input name="nama" value="' + esc(x.nama) + '"></label>' +
                 '<label class="field" style="margin:0;flex:1 1 120px"><span>Mulai</span><input type="time" name="mulai" value="' + x.mulai + '"></label>' +
                 '<label class="field" style="margin:0;flex:1 1 120px"><span>Selesai</span><input type="time" name="selesai" value="' + x.selesai + '"></label>' +
                 '<label class="field" style="margin:0;flex:1 1 120px"><span>Kirim realisasi</span><input type="time" name="kirim" value="' + x.kirim + '"></label>' +
                 '<label class="field" style="margin:0;flex:1 1 120px"><span>Kirim request</span><input type="time" name="kirimReq" value="' + (x.kirimReq || '') + '"></label>' +
-                '<button class="btn sm">Simpan</button></form>').join('') +
+                '<button class="btn sm">Simpan</button>' +
+                (x.kode !== 'S1' && x.kode !== 'S2' ? '<button type="button" class="icon-btn sh-del" data-sh-del="' + x.kode + '" aria-label="Hapus ' + esc(x.nama) + '" title="Hapus shift"><span class="material-symbols-outlined">delete</span></button>' : '') +
+                '</form>').join('') +
             '</div>' +
 
             '<div class="card"><div class="card-head"><h2><span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;margin-right:6px">chat</span>WhatsApp gateway</h2><span class="chip ' + (s.wa_auto ? 'ok' : '') + '">Otomatis ' + (s.wa_auto ? 'AKTIF' : 'NONAKTIF') + '</span></div><form id="fWa">' +
@@ -3361,6 +3391,12 @@
         $$('.fShift').forEach(f => f.onsubmit = async e => {
             e.preventDefault();
             try { await call('saveShift', Object.assign(formData(f), { kode: f.dataset.k })); toast('Shift disimpan.', 'ok'); await loadMaster(); updateShiftChip(); } catch (x) { fail(x); }
+        });
+        $('#shAdd').onclick = shiftAddModal;
+        $$('[data-sh-del]').forEach(b => b.onclick = async () => {
+            const k = b.dataset.shDel;
+            if (!await confirmBox('Hapus shift?', shiftName(k) + ' (' + shiftTime(k) + ') akan dihapus. Kode jadwal yang dihitung ke shift ini dikembalikan ke ' + shiftName('S1') + '.', 'Hapus', 'danger')) return;
+            try { await call('deleteShift', { kode: k }); toast('Shift dihapus.', 'ok'); await loadMaster(); updateShiftChip(); renderPengaturan(); } catch (x) { fail(x); }
         });
         const syncProv = () => {
             const p = $('#waProv').value;

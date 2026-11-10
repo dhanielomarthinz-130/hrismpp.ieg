@@ -592,6 +592,31 @@ function save_shift(array $p, array $currentUser): bool {
         throw new InvalidArgumentException('Format jam kirim request harus HH:mm atau dikosongkan.');
     }
 
+    // Shift baru (tombol + Shift di Pengaturan): kode otomatis S1, S2, S3, ... berikutnya
+    if (!empty($p['baru'])) {
+        $nama = trim((string)($p['nama'] ?? ''));
+        if ($nama === '') throw new InvalidArgumentException('Nama shift wajib diisi.');
+        if (db_val("SELECT COUNT(*) FROM shift WHERE LOWER(nama) = ?", [mb_strtolower($nama)], 0) > 0) {
+            throw new InvalidArgumentException("Shift \"$nama\" sudah ada.");
+        }
+        $n = 0;
+        foreach (db_all("SELECT kode FROM shift") as $r) {
+            if (preg_match('/^S(\d+)$/i', (string)$r['kode'], $m)) $n = max($n, (int)$m[1]);
+        }
+        $kode = 'S' . ($n + 1);
+        db_insert('shift', [
+            'kode'      => $kode,
+            'nama'      => mb_substr($nama, 0, 100),
+            'mulai'     => (string)$p['mulai'],
+            'selesai'   => (string)$p['selesai'],
+            'kirim'     => (string)$p['kirim'],
+            'urutan'    => (int)db_val("SELECT COALESCE(MAX(urutan), 0) FROM shift", [], 0) + 1,
+            'kirim_req' => $kirimReq
+        ]);
+        audit_log($currentUser['username'], 'TAMBAH_SHIFT', "$kode $nama {$p['mulai']}-{$p['selesai']}");
+        return true;
+    }
+
     $ex = db_row("SELECT * FROM shift WHERE kode = ?", [$kode]);
     if (!$ex) throw new RuntimeException('Shift tidak ditemukan.');
 
@@ -604,6 +629,24 @@ function save_shift(array $p, array $currentUser): bool {
     ], 'kode = ?', [$kode]);
 
     audit_log($currentUser['username'], 'UBAH_SHIFT', "$kode {$p['mulai']}-{$p['selesai']} kirim {$p['kirim']}");
+    return true;
+}
+
+/** Hapus shift tambahan. Shift 1 & Shift 2 (inti rotasi & target) tidak bisa dihapus; shift yang sudah dipakai juga tidak. */
+function delete_shift(array $p, array $currentUser): bool {
+    $kode = strtoupper(trim((string)($p['kode'] ?? '')));
+    if (in_array($kode, ['S1', 'S2'], true)) throw new InvalidArgumentException('Shift 1 dan Shift 2 tidak bisa dihapus.');
+    $ex = db_row("SELECT * FROM shift WHERE kode = ?", [$kode]);
+    if (!$ex) throw new RuntimeException('Shift tidak ditemukan.');
+    $pakai = (int)db_val("SELECT COUNT(*) FROM absensi WHERE UPPER(shift) = ?", [$kode], 0)
+        + (int)db_val("SELECT COUNT(*) FROM order_mpp WHERE UPPER(shift) = ?", [$kode], 0);
+    if ($pakai > 0) {
+        throw new RuntimeException('Shift "' . $ex['nama'] . '" sudah dipakai di Absensi / Request OS, jadi tidak bisa dihapus. Ubah namanya atau jamnya saja.');
+    }
+    db_delete('shift', 'kode = ?', [$kode]);
+    // Kode jadwal yang dihitung ke shift ini dikembalikan ke Shift 1
+    db_query("UPDATE kode_jadwal SET shift = 'S1' WHERE UPPER(shift) = ?", [$kode]);
+    audit_log($currentUser['username'], 'HAPUS_SHIFT', $kode . ' ' . $ex['nama']);
     return true;
 }
 
