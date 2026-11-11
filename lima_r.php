@@ -1106,6 +1106,8 @@ function apiListTemuan($token, $f): array {
         if ($scope === 'mine' && (mb_strtolower($t['picNik']) !== $me || $t['status'] === R5_BATAL)) return false;
         if ($scope === 'tersedia' && ($t['picNik'] !== '' || !in_array($t['status'], [R5_OPEN, R5_REVISI], true))) return false;
         if ($scope === 'verifikasi' && $t['status'] !== R5_WAIT && $t['status'] !== R5_KEBERATAN) return false;
+        // Halaman Verifikasi: yang menunggu diputuskan + yang sudah diverifikasi/diputuskan
+        if ($scope === 'verifikasiSemua' && $t['status'] !== R5_WAIT && $t['status'] !== R5_KEBERATAN && !$t['tglVerifikasi']) return false;
         if (!empty($f['bulan']) && (!$t['tanggal'] || r5_bulan($t['tanggal']) !== $f['bulan'])) return false;
         if (!empty($f['areaId']) && $t['areaId'] !== $f['areaId']) return false;
         if ($st === 'Terlambat') { if (!($t['terlambat'] && in_array($t['status'], [R5_OPEN, R5_REVISI], true))) return false; }
@@ -1116,7 +1118,17 @@ function apiListTemuan($token, $f): array {
         if ($q !== '' && strpos(r5_norm(implode(' ', [$t['id'], $t['area'], $t['tim'], $t['lokasi'], $t['deskripsi'], $t['pic'], $t['pelapor']])), $q) === false) return false;
         return true;
     });
-    return array_slice(array_values($rows), 0, 500);
+    $rows = array_values($rows);
+    if ($scope === 'verifikasiSemua') {
+        // yang belum diputuskan selalu ikut; riwayat terbaru dulu
+        usort($rows, function ($a, $b) {
+            $pa = in_array($a['status'], [R5_WAIT, R5_KEBERATAN], true) ? 0 : 1;
+            $pb = in_array($b['status'], [R5_WAIT, R5_KEBERATAN], true) ? 0 : 1;
+            return $pa <=> $pb ?: ($b['tglVerifikasi'] ?? 0) <=> ($a['tglVerifikasi'] ?? 0);
+        });
+        return array_slice($rows, 0, 2000);
+    }
+    return array_slice($rows, 0, 500);
 }
 
 function apiGetTemuan($token, $id): array {

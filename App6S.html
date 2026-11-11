@@ -1068,24 +1068,34 @@ VIEWS.kpi = async function () {
 /* ---------- Verifikasi & keberatan: datatable ---------- */
 VIEWS.verif = async function () {
   const v = $('#view'), me = S.user.nik.toLowerCase(), sla = S.boot.config.slaVerif * 36e5;
-  const st = S.vf || (S.vf = { q: '', status: '', area: '', sort: 'kirim', dir: 1, page: 1, per: 20 });
+  const st = S.vf || (S.vf = { q: '', status: '', area: '', pic: '', sort: 'kirim', dir: 1, page: 1, per: 20 });
+  if (st.pic === undefined) st.pic = '';
   v.innerHTML = '<div class="toolbar">' +
     '<input class="inp grow" id="vfQ" placeholder="Cari ID, area, lokasi, PIC, catatan" value="' + esc(st.q) + '">' +
-    '<select class="inp" id="vfSt" style="max-width:210px"><option value="">Semua (perbaikan &amp; keberatan)</option><option value="Menunggu Verifikasi">Menunggu verifikasi</option><option value="Keberatan">Keberatan</option></select>' +
+    '<select class="inp" id="vfSt" style="max-width:210px"><option value="">Semua status</option><option value="belum">Belum diverifikasi</option><option value="Menunggu Verifikasi">· Menunggu verifikasi</option><option value="Keberatan">· Keberatan</option><option value="sudah">Sudah diverifikasi</option><option value="Closed">· Diterima (Closed)</option><option value="Revisi">· Ditolak (Revisi)</option></select>' +
+    '<select class="inp" id="vfPic" style="max-width:200px"><option value="">Semua PIC</option></select>' +
     '<select class="inp" id="vfArea" style="max-width:220px"><option value="">Semua area</option>' + S.boot.areas.map(a => '<option value="' + esc(a.id) + '">' + esc(a.nama) + '</option>').join('') + '</select>' +
     '<button class="icon-btn" id="vfRe" title="Muat ulang" aria-label="Muat ulang">' + ic('refresh') + '</button></div><div id="vfBody"></div>';
   $('#vfSt').value = st.status; $('#vfArea').value = st.area;
   const VB = $('#vfBody');
   let rows = [];
-  const waktu = t => t.status === 'Keberatan' ? t.tglKeberatan : t.tglPerbaikan;
+  const pend = t => t.status === 'Menunggu Verifikasi' || t.status === 'Keberatan';
+  const waktu = t => t.status === 'Keberatan' ? t.tglKeberatan : (t.tglPerbaikan || t.tglKeberatan);
+  const okStatus = t => !st.status || (st.status === 'belum' ? pend(t) : st.status === 'sudah' ? !pend(t) : t.status === st.status);
+  const fillPic = () => {
+    const names = [...new Set(rows.map(t => t.pic).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    if (st.pic && names.indexOf(st.pic) < 0) names.unshift(st.pic);
+    $('#vfPic').innerHTML = '<option value="">Semua PIC</option>' + names.map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>').join('');
+    $('#vfPic').value = st.pic;
+  };
   const key = {
     id: t => t.id, area: t => (t.area + ' ' + t.lokasi).toLowerCase(), pic: t => (t.pic || '').toLowerCase(),
-    kirim: t => waktu(t) || 0, status: t => t.status, tingkat: t => ({ Kritis: 0, Mayor: 1, Minor: 2 }[t.tingkat] ?? 3)
+    kirim: t => waktu(t) || 0, verif: t => pend(t) ? Infinity : (t.tglVerifikasi || 0), status: t => (pend(t) ? 0 : 1) + t.status, tingkat: t => ({ Kritis: 0, Mayor: 1, Minor: 2 }[t.tingkat] ?? 3)
   };
   const draw = () => {
     const q = st.q.toLowerCase();
-    let list = rows.filter(t => (!st.status || t.status === st.status) && (!st.area || t.areaId === st.area) &&
-      (!q || [t.id, t.area, t.lokasi, t.pic, t.deskripsi, t.catatanPerbaikan, t.catatanKeberatan].join(' ').toLowerCase().indexOf(q) >= 0));
+    let list = rows.filter(t => okStatus(t) && (!st.area || t.areaId === st.area) && (!st.pic || t.pic === st.pic) &&
+      (!q || [t.id, t.area, t.lokasi, t.pic, t.verifikator, t.deskripsi, t.catatanPerbaikan, t.catatanKeberatan, t.catatanVerifikasi].join(' ').toLowerCase().indexOf(q) >= 0));
     list.sort((a, b) => { const x = key[st.sort](a), y = key[st.sort](b); return (x > y ? 1 : x < y ? -1 : 0) * st.dir || a.id.localeCompare(b.id); });
     const n = list.length, pages = Math.max(1, Math.ceil(n / st.per));
     st.page = Math.min(st.page, pages);
@@ -1093,11 +1103,11 @@ VIEWS.verif = async function () {
     const lewat = rows.filter(t => t.status === 'Menunggu Verifikasi' && Date.now() - t.tglPerbaikan > sla).length;
     const th = (k, l, cls) => '<th class="sort' + (cls ? ' ' + cls : '') + (st.sort === k ? (st.dir > 0 ? ' asc' : ' desc') : '') + '" data-k="' + k + '">' + l + '</th>';
     VB.innerHTML =
-      '<div class="small muted" style="margin-bottom:8px">' + rows.filter(t => t.status === 'Menunggu Verifikasi').length + ' menunggu verifikasi · ' + rows.filter(t => t.status === 'Keberatan').length + ' keberatan' +
+      '<div class="small muted" style="margin-bottom:8px">' + rows.filter(t => t.status === 'Menunggu Verifikasi').length + ' menunggu verifikasi · ' + rows.filter(t => t.status === 'Keberatan').length + ' keberatan · ' + rows.filter(t => !pend(t)).length + ' sudah diverifikasi' +
       (lewat ? ' · <b style="color:var(--err-t)">' + lewat + ' lewat SLA ' + S.boot.config.slaVerif + ' jam</b>' : '') + '</div>' +
-      (n ? '<div class="tbl-wrap"><table class="tbl dt" style="min-width:980px"><thead><tr>' + th('id', 'ID') + '<th>Foto</th>' + th('area', 'Area &amp; temuan') + th('tingkat', 'Kategori') + th('pic', 'Diproses oleh') + th('kirim', 'Dikirim') + th('status', 'Status') + '<th></th></tr></thead><tbody>' +
+      (n ? '<div class="tbl-wrap"><table class="tbl dt" style="min-width:980px"><thead><tr>' + th('id', 'ID') + '<th>Foto</th>' + th('area', 'Area &amp; temuan') + th('tingkat', 'Kategori') + th('pic', 'Diproses oleh') + th('kirim', 'Dikirim') + th('verif', 'Diverifikasi') + th('status', 'Status') + '<th></th></tr></thead><tbody>' +
         view.map(t => {
-          const own = (t.picNik || '').toLowerCase() === me, w = waktu(t), tunggu = Date.now() - (w || Date.now());
+          const p = pend(t), own = p && (t.picNik || '').toLowerCase() === me, w = waktu(t), tunggu = Date.now() - (w || Date.now());
           const telat = t.status === 'Menunggu Verifikasi' && tunggu > sla;
           return '<tr class="' + (own ? 'own' : '') + '"><td class="cell-main">' + esc(t.id) + '</td>' +
             '<td><div class="ph2">' + imgTag(t.fotoBefore, '', 120) + imgTag(t.fotoAfter, '', 120) + '</div></td>' +
@@ -1105,16 +1115,18 @@ VIEWS.verif = async function () {
               '<div class="cell-sub" title="' + esc(t.status === 'Keberatan' ? t.catatanKeberatan : t.catatanPerbaikan) + '">' + (t.status === 'Keberatan' ? 'Keberatan: ' + esc(t.catatanKeberatan) : t.catatanPerbaikan ? 'Perbaikan: ' + esc(t.catatanPerbaikan) : '') + '</div></td>' +
             '<td>' + rChip(t.r) + ' ' + tingkatChip(t.tingkat) + (t.revisi ? '<div class="cell-sub">revisi ke-' + (t.revisi + 1) + '</div>' : '') + '</td>' +
             '<td>' + esc(t.pic || '-') + (own ? '<div><span class="chip c-warn">Perbaikan Anda</span></div>' : '') + '</td>' +
-            '<td style="white-space:nowrap">' + fDate(w) + '<div class="cell-sub" style="' + (telat ? 'color:var(--err-t);font-weight:700' : '') + '">menunggu ' + durasi(tunggu) + (telat ? ' · lewat SLA' : '') + '</div></td>' +
+            '<td style="white-space:nowrap">' + (w ? fDate(w) : '-') + (p ? '<div class="cell-sub" style="' + (telat ? 'color:var(--err-t);font-weight:700' : '') + '">menunggu ' + durasi(tunggu) + (telat ? ' · lewat SLA' : '') + '</div>' : '') + '</td>' +
+            '<td style="white-space:nowrap">' + (p ? '<span class="muted">Belum</span>' : fDate(t.tglVerifikasi) + '<div class="cell-sub">' + esc(t.verifikator || '-') + '</div>' +
+              (t.catatanVerifikasi ? '<div class="cell-sub" title="' + esc(t.catatanVerifikasi) + '">' + esc(t.catatanVerifikasi) + '</div>' : '')) + '</td>' +
             '<td>' + statusChip(t) + (t.terlambat ? '<div class="cell-sub" style="color:var(--err-t)">dikirim lewat target</div>' : '') + '</td>' +
-            '<td>' + (own && !S.user.super ? '<button class="btn sm" data-open="' + esc(t.id) + '" title="Anda yang memproses — harus diverifikasi auditor lain">Lihat</button>'
+            '<td>' + (!p ? '<button class="btn sm" data-open="' + esc(t.id) + '">Lihat</button>' : own && !S.user.super ? '<button class="btn sm" data-open="' + esc(t.id) + '" title="Anda yang memproses — harus diverifikasi auditor lain">Lihat</button>'
               : '<button class="btn sm primary" data-open="' + esc(t.id) + '">' + (t.status === 'Keberatan' ? 'Putuskan' : 'Periksa') + '</button>') + '</td></tr>';
         }).join('') + '</tbody></table></div>' +
         '<div class="dt-foot"><span>Menampilkan ' + ((st.page - 1) * st.per + 1) + '–' + Math.min(n, st.page * st.per) + ' dari ' + n + '</span>' +
         '<span class="pg"><select class="inp" id="vfPer" style="width:auto;min-height:32px">' + [10, 20, 50, 100].map(x => '<option' + (x === st.per ? ' selected' : '') + '>' + x + '</option>').join('') + '</select>' +
         '<button class="btn sm" id="vfPrev"' + (st.page <= 1 ? ' disabled' : '') + '>‹</button><span style="align-self:center">' + st.page + ' / ' + pages + '</span><button class="btn sm" id="vfNext"' + (st.page >= pages ? ' disabled' : '') + '>›</button></span></div>' +
-        (rows.some(t => (t.picNik || '').toLowerCase() === me) ? '<p class="small muted" style="margin:8px 0 0">Baris bertanda <b>Perbaikan Anda</b> dikerjakan oleh akun Anda sendiri' + (S.user.super ? '. Sebagai super admin Anda tetap bisa memverifikasinya (tercatat di riwayat).' : ', jadi harus diverifikasi auditor lain.') + '</p>' : '')
-      : emptyBox(rows.length ? 'Tidak ada data untuk filter ini.' : 'Tidak ada perbaikan atau keberatan yang perlu diputuskan.'));
+        (rows.some(t => pend(t) && (t.picNik || '').toLowerCase() === me) ? '<p class="small muted" style="margin:8px 0 0">Baris bertanda <b>Perbaikan Anda</b> dikerjakan oleh akun Anda sendiri' + (S.user.super ? '. Sebagai super admin Anda tetap bisa memverifikasinya (tercatat di riwayat).' : ', jadi harus diverifikasi auditor lain.') + '</p>' : '')
+      : emptyBox(rows.length ? 'Tidak ada data untuk filter ini.' : 'Belum ada perbaikan atau keberatan.'));
     $$('th.sort', VB).forEach(h => h.onclick = () => { const k = h.dataset.k; if (st.sort === k) st.dir = -st.dir; else { st.sort = k; st.dir = k === 'kirim' ? 1 : 1; } draw(); });
     $$('[data-open]', VB).forEach(b => b.onclick = () => openDetail(b.dataset.open));
     if ($('#vfPer')) $('#vfPer').onchange = e => { st.per = +e.target.value; st.page = 1; draw(); };
@@ -1123,13 +1135,14 @@ VIEWS.verif = async function () {
   };
   const load = async () => {
     loading(VB);
-    try { rows = await call('apiListTemuan', S.token, { scope: 'verifikasi' }); draw(); }
+    try { rows = await call('apiListTemuan', S.token, { scope: 'verifikasiSemua' }); fillPic(); draw(); }
     catch (e) { VB.innerHTML = emptyBox(e.message); }
   };
   let to;
   $('#vfQ').addEventListener('input', e => { clearTimeout(to); to = setTimeout(() => { st.q = e.target.value; st.page = 1; draw(); }, 200); });
   $('#vfSt').onchange = e => { st.status = e.target.value; st.page = 1; draw(); };
   $('#vfArea').onchange = e => { st.area = e.target.value; st.page = 1; draw(); };
+  $('#vfPic').onchange = e => { st.pic = e.target.value; st.page = 1; draw(); };
   $('#vfRe').onclick = load;
   load();
 };
