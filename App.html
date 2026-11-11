@@ -2949,6 +2949,9 @@
                 (r.codes || []).forEach((c, i) => { if (c && jd[i]) p.jad[jd[i]] = c; });
             });
         }
+        // LS (Long Shift) = lembur: kelebihan jam dari shift normal (jam kode S1, bawaan 8)
+        const jamNormal = (kodes.S1 && kodes.S1.jam) || 8;
+        const lemburLs = kode => /^LS/i.test(kode) && kodes[kode] ? Math.max(0, kodes[kode].jam - jamNormal) : 0;
         // Status efektif per hari. RKA: dari absensi. IEG: absensi (bila diubah) atau turunan Jadwal IEG.
         Object.keys(people).forEach(k => {
             const p = people[k];
@@ -2959,13 +2962,14 @@
                 const jLabel = kode ? (kd ? kd.label : kode) : '';
                 if (list.length) {
                     const x = daDay(list);
+                    if (p.employer === 'IEG' && (x.status === 'H' || x.status === 'T') && !x.lembur) x.lembur = lemburLs(kode);
                     p.eff[t] = Object.assign(x, { src: 'abs', kode: kode, jLabel: jLabel, label: p.employer === 'IEG' && jLabel ? jLabel : x.label, list: list });
                     return;
                 }
                 if (p.employer !== 'IEG' || !kode) return;
                 if (kode === 'CUTI') p.eff[t] = { status: 'C', label: jLabel, lembur: 0, src: 'jad', kode: kode, jLabel: jLabel };
                 else if (kd && !kd.kerja) p.eff[t] = { status: 'OFF', label: jLabel, lembur: 0, src: 'jad', kode: kode, jLabel: jLabel };
-                else p.eff[t] = { status: t <= today ? 'H' : '', label: jLabel, lembur: 0, src: 'jad', kode: kode, jLabel: jLabel };
+                else p.eff[t] = { status: t <= today ? 'H' : '', label: jLabel, lembur: t <= today ? lemburLs(kode) : 0, src: 'jad', kode: kode, jLabel: jLabel };
             });
         });
         const all = Object.keys(people).map(k => people[k]);
@@ -2999,7 +3003,7 @@
         let total = 0, lembur = 0;
         rows.forEach(p => days.forEach(t => { const x = p.eff[t]; if (!x || !x.status) return; total++; if (c[x.status] !== undefined) c[x.status]++; lembur += x.lembur; }));
         const hadir = c.H + c.T, kerja = total - c.OFF;
-        $('#daStats').innerHTML = (ieg ? '<div class="note small" style="margin-bottom:10px">Tab IEG mengikuti <b>Jadwal IEG</b>: hari kerja yang sudah lewat dianggap Hadir, OFF = Libur, CUTI = Cuti.' + (rows.some(daBisaUbah) ? ' Klik sel untuk mengubah menjadi <b>Sakit, Izin, Cuti, Alpa</b>, dll.' : '') + (daJad ? '' : ' <b>Jadwal IEG gagal dimuat.</b>') + '</div>' : '') +
+        $('#daStats').innerHTML = (ieg ? '<div class="note small" style="margin-bottom:10px">Tab IEG mengikuti <b>Jadwal IEG</b>: hari kerja yang sudah lewat dianggap Hadir, LS (Long Shift) = Hadir + lembur, OFF = Libur, CUTI = Cuti.' + (rows.some(daBisaUbah) ? ' Klik sel untuk mengubah menjadi <b>Sakit, Izin, Cuti, Alpa</b>, dll.' : '') + (daJad ? '' : ' <b>Jadwal IEG gagal dimuat.</b>') + '</div>' : '') +
             '<div class="kpis da-kpis">' +
             '<div class="kpi"><div class="lbl">Karyawan ' + esc(f.employer) + '</div><div class="val">' + rows.length + '</div><div class="sub">' + total + ' hari tercatat' + (c.OFF ? ' · libur ' + c.OFF : '') + '</div></div>' +
             '<div class="kpi"><div class="lbl">Hadir</div><div class="val" style="color:var(--ok)">' + hadir + '</div><div class="sub">Telat ' + c.T + (kerja ? ' · ' + Math.round(hadir / kerja * 100) + '%' : '') + '</div></div>' +
@@ -3025,6 +3029,7 @@
                 if (r.src === 'abs') tip = (ieg ? 'Diubah · jadwal ' + (r.jLabel || '-') + '\n' : (r.label === 'LS' ? 'Long Shift · ' : '')) + r.list.map(x => (ieg ? '' : shiftName(x.shift) + ': ') + (STATUS[x.status] || x.status) + (x.lembur ? ' · lembur ' + x.lembur + ' jam' : '') + (x.ket ? ' · ' + x.ket : '') +
                     (x.updatedBy ? ' · oleh ' + x.updatedBy + (x.updatedAt ? ' ' + x.updatedAt.slice(11, 16) : '') : '')).join('\n');
                 else tip = 'Jadwal IEG: ' + r.jLabel + (r.status === 'OFF' ? ' (libur)' : !r.status ? ' (belum waktunya)' : ' · ' + (STATUS[r.status] || r.status));
+                if (ieg && r.lembur && /^LS/i.test(r.kode || '')) tip += ' · Long Shift = lembur ' + r.lembur + ' jam';
                 if (ubah) tip += '\nKlik untuk ubah';
                 if (!r.status) return td + '<span class="da-c fut" title="' + esc(tip) + '"><b>·</b><small>' + esc(r.label) + '</small></span></td>';
                 return td + '<span class="da-c st-' + esc(r.status) + (ieg && r.src === 'abs' ? ' da-ubah' : '') + '" title="' + esc(tip) + '"><b>' + esc(r.status === 'OFF' ? 'L' : r.status) + '</b>' +
