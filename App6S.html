@@ -409,8 +409,26 @@ const MENU = [
   { id: 'poin', t: 'Papan Poin', i: 'trophy' },
   { id: 'kpi', t: 'KPI PIC', i: 'chart' },
   { id: 'admin', t: 'Master Data', i: 'gear', roles: ['Admin'], sec: 'Pengaturan' },
-  { id: 'qr', t: 'QR Area', i: 'qr', roles: ['Admin'] }
+  { id: 'qr', t: 'QR Area', i: 'qr', roles: ['Admin'] },
+  { id: 'atur', t: 'Pengaturan Super Admin', i: 'key', sec: 'Super Admin' }
 ];
+/* Role 6S "Auditor" ditampilkan sebagai Supervisor */
+const roleLabel = r => r === 'Auditor' ? 'Supervisor' : r;
+/* Siapa yang boleh approval perbaikan (sama dengan aturan server r6_cek_verif) */
+function canApprove(t) {
+  if (!t || t.status !== 'Menunggu Verifikasi') return false;
+  if (S.user.super) return true;
+  const me = S.user.nik.toLowerCase(), pic = (t.picNik || '').toLowerCase(), pel = (t.pelaporNik || '').toLowerCase();
+  if (pic === me) return false;
+  const sup = canEdit('verif'), penemu = !!pel && pel === me, cadangan = !pel || pel === pic;
+  const mode = (S.boot.config.verifikator || 0);
+  return mode === 0 ? sup : mode === 1 ? (penemu || (sup && cadangan)) : (sup || penemu);
+}
+function approverText(t) {
+  const mode = S.boot.config.verifikator || 0, pel = (t.pelaporNik || '').toLowerCase();
+  if (mode === 1 && pel && pel !== (t.picNik || '').toLowerCase()) return 'penemu temuan (' + esc(t.pelapor) + ')';
+  return mode === 2 ? 'Supervisor atau penemu temuan (' + esc(t.pelapor) + ')' : 'Supervisor';
+}
 const BNAV = ['dash', 'input', 'tugas', 'poin'];
 // Akses menu diatur super admin di HRIS → Control Akses → Monitoring 6S
 const can = (m) => !!(S.boot && S.boot.access && S.boot.access.menus.indexOf(m.id) >= 0);
@@ -560,7 +578,7 @@ async function boot() {
   if (S.user.foto) ava.innerHTML = '<img src="' + esc(S.user.foto) + '" alt="">';
   else ava.textContent = (S.user.nama || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
   const ar = S.boot.areas.find(a => a.id === S.user.areaId);
-  $('#whoRole').textContent = S.user.role + (S.user.tim ? ' · Tim ' + S.user.tim : '');
+  $('#whoRole').textContent = (S.user.super ? 'Super Admin' : roleLabel(S.user.role)) + (S.user.tim ? ' · Tim ' + S.user.tim : '');
   buildNav();
   setSideMini(document.documentElement.classList.contains('side-mini'));
   applyTheme(document.documentElement.getAttribute('data-theme'));
@@ -622,13 +640,14 @@ function go(id, opt, hist) {
 async function refreshBadges() {
   try {
     if (canDo('tugas')) {
-      const r = await call('apiListTemuan', S.token, { scope: 'mine', status: 'Aktif' });
-      S.badge.tugas = r.filter(t => t.status === 'Open' || t.status === 'Revisi').length;
-      if (modeBebas() && (S.user.pic || S.user.role === 'Admin')) S.badge.tugas += (await call('apiListTemuan', S.token, { scope: 'tersedia' })).length;
+      // Tugas: perlu approval saya + tugas saya yang belum diperbaiki + tersedia diambil
+      const r = await call('apiListTemuan', S.token, { scope: 'tugasSemua' });
+      S.badge.tugas = r.filter(t => { const j = jenisTask(t); return j === 'approve' || (j === 'mine' && (t.status === 'Open' || t.status === 'Revisi')) || (j === 'tersedia' && bisaAmbilTask()); }).length;
     }
     if (canDo('verif')) {
       const v = await call('apiListTemuan', S.token, { scope: 'verifikasi' });
-      S.badge.verif = S.user.super ? v.length : v.filter(t => t.picNik.toLowerCase() !== S.user.nik.toLowerCase()).length;
+      const me = S.user.nik.toLowerCase();
+      S.badge.verif = v.filter(t => t.status === 'Keberatan' ? (canEdit('verif') && (S.user.super || t.picNik.toLowerCase() !== me)) : canApprove(t)).length;
     }
     $$('[data-b]').forEach(b => { const n = S.badge[b.dataset.b] || 0; b.textContent = n > 99 ? '99+' : n; b.hidden = !n; });
   } catch (e) { /* abaikan */ }
@@ -906,7 +925,7 @@ VIEWS.input = function () {
     if (modeBebas()) {
       let pb = c.potong[F.tingkat]; if ($('#iBer').checked) { pb *= c.faktorBerulang; ket.push('berulang ×' + c.faktorBerulang); }
       const a0 = B.areas.find(x => x.id === F.areaId), plus0 = F.tingkat === 'Kritis' ? c.poinTepatKritis : c.poinTepat;
-      $('#iEst').innerHTML = (S.user.pic && c.poinLaporPic ? 'Anda mendapat <b>+' + num(c.poinLaporPic) + '</b> sebagai penemu. ' : '') +
+      $('#iEst').innerHTML = ((S.user.pic || c.laporSemua) && c.poinLaporPic ? 'Anda mendapat <b>+' + num(c.poinLaporPic) + '</b> sebagai penemu. ' : '') +
         'PIC yang mengambil &amp; menyelesaikannya dalam batas standar <b>' + c.deadline[F.tingkat] + ' jam</b> mendapat <b>+' + plus0 + '</b> (bonus +' + c.bonusCepat + ' bila sangat cepat). ' +
         'Skor area ' + esc(a0 ? a0.nama : '') + ' dipotong <b>−' + num(pb) + '</b>' + (ket.length ? ' (' + ket.join(', ') + ')' : '') + '.';
       return;
@@ -921,7 +940,7 @@ VIEWS.input = function () {
     if (mandiri) { p *= c.faktorMandiri; ket.push('lapor mandiri ×' + c.faktorMandiri); }
     const plus = F.tingkat === 'Kritis' ? c.poinTepatKritis : c.poinTepat;
     $('#iEst').innerHTML = (pic ? 'PIC <b>' + esc(pic.nama) + '</b>' : 'PIC area') + ' dipotong <b>−' + num(p) + '</b>' + (ket.length ? ' (' + ket.join(', ') + ')' : '') +
-      (!mandiri && S.user.pic && c.poinLaporPic ? '. Anda mendapat <b>+' + num(c.poinLaporPic) + '</b> karena menemukan temuan di area PIC lain' : '') +
+      ((!mandiri || c.laporAreaSendiri) && (S.user.pic || c.laporSemua) && c.poinLaporPic ? '. Anda mendapat <b>+' + num(c.poinLaporPic) + '</b> sebagai penemu' + (mandiri ? '' : ' (area PIC lain)') : '') +
       '. Bila diperbaiki dalam batas standar <b>' + c.deadline[F.tingkat] + ' jam</b>, PIC mendapat <b>+' + plus + '</b> (bonus +' + c.bonusCepat + ' bila sangat cepat).';
   };
   const seg = (id, key) => $$('#' + id + ' button').forEach(b => b.addEventListener('click', () => {
@@ -965,32 +984,6 @@ function tItem(t) {
     '<div class="d">' + esc(t.deskripsi) + '</div>' +
     '<div class="meta">' + statusChip(t) + rChip(t.r) + tingkatChip(t.tingkat) + (t.berulang ? '<span class="chip nodot c-err">Berulang</span>' : '') + '</div>' +
     '<div class="foot"><span>' + (t.picNik ? ((t.status === 'Open' || t.status === 'Revisi') && t.tglTerima ? 'Diproses: ' : 'PIC: ') + esc(t.pic) : 'Belum diambil') + '</span><span>' + esc(sisa(t)) + '</span></div></div></button>';
-}
-async function renderList(scope, opt) {
-  const B = S.boot;
-  const f = Object.assign({ scope: scope, bulan: scope ? '' : S.bulan, areaId: '', status: scope === 'mine' ? 'Aktif' : '', q: '' }, opt || {});
-  const v = $('#view');
-  const stOpts = scope === 'verifikasi' ? [] : [['', 'Semua status'], ['Aktif', 'Belum selesai'], ['Perbaikan', 'Belum diperbaiki'], ['Terlambat', 'Terlambat'], ['Open', 'Open'], ['Revisi', 'Revisi'], ['Menunggu Verifikasi', 'Menunggu verifikasi'], ['Keberatan', 'Keberatan'], ['Closed', 'Closed'], ['Batal', 'Batal']];
-  v.innerHTML = '<div class="toolbar">' +
-    (scope ? '' : monthInput('lBulan', f.bulan)) +
-    '<select class="inp" id="lArea" style="max-width:220px"><option value="">Semua area</option>' + B.areas.map(a => '<option value="' + esc(a.id) + '"' + (a.id === f.areaId ? ' selected' : '') + '>' + esc(a.nama) + '</option>').join('') + '</select>' +
-    (stOpts.length ? '<select class="inp" id="lStatus" style="max-width:200px">' + stOpts.map(s => '<option value="' + s[0] + '"' + (s[0] === f.status ? ' selected' : '') + '>' + s[1] + '</option>').join('') + '</select>' : '') +
-    '<input class="inp grow" id="lQ" placeholder="Cari ID, lokasi, deskripsi, PIC" value="' + esc(f.q) + '">' +
-    '</div><div id="lBody"></div>';
-  const LB = $('#lBody');
-  const reload = async () => {
-    loading(LB);
-    try {
-      let rows = await call('apiListTemuan', S.token, f);
-      const msg = scope === 'tersedia' ? 'Tidak ada temuan yang menunggu diambil.' : scope === 'mine' ? (modeBebas() ? 'Belum ada temuan yang Anda proses. Ambil dari tab Tersedia.' : 'Tidak ada tugas perbaikan. Mantap!') : scope === 'verifikasi' ? 'Tidak ada perbaikan atau keberatan yang perlu diputuskan.' : 'Tidak ada temuan untuk filter ini.';
-      LB.innerHTML = '<div class="small muted" style="margin-bottom:8px">' + rows.length + ' temuan</div>' + (rows.length ? '<div class="tlist">' + rows.map(tItem).join('') + '</div>' : emptyBox(msg));
-    } catch (e) { LB.innerHTML = emptyBox(e.message); }
-  };
-  if ($('#lBulan')) $('#lBulan').addEventListener('change', e => { f.bulan = e.target.value; reload(); });
-  $('#lArea').addEventListener('change', e => { f.areaId = e.target.value; reload(); });
-  if ($('#lStatus')) $('#lStatus').addEventListener('change', e => { f.status = e.target.value; reload(); });
-  let to; $('#lQ').addEventListener('input', e => { clearTimeout(to); to = setTimeout(() => { f.q = e.target.value; reload(); }, 350); });
-  reload();
 }
 /* ---------- Daftar temuan: datatable ---------- */
 VIEWS.daftar = async function (opt) {
@@ -1079,30 +1072,118 @@ VIEWS.daftar = async function (opt) {
   $('#dfRe').onclick = load;
   load();
 };
-VIEWS.tugas = async opt => {
-  opt = opt || {};
-  const bebas = modeBebas() && (S.user.pic || S.user.role === 'Admin');
-  const tab = bebas ? (opt.tab || S.tugasTab || 'tersedia') : 'mine';
-  S.tugasTab = tab;
-  const o = Object.assign({}, opt); delete o.tab;
-  await renderList(tab, o);
-  if (bebas && S.view === 'tugas') {
-    const bar = document.createElement('div');
-    bar.className = 'tabs'; bar.style.marginBottom = '12px';
-    bar.innerHTML = '<button data-tt="tersedia"' + (tab === 'tersedia' ? ' class="on"' : '') + '>Tersedia untuk diambil</button><button data-tt="mine"' + (tab === 'mine' ? ' class="on"' : '') + '>Sedang saya proses</button>';
-    $('#view').prepend(bar);
-    $$('[data-tt]', bar).forEach(b => b.onclick = () => go('tugas', { tab: b.dataset.tt }));
-  }
+/* ---------- Tugas: semua task dalam satu datatable ---------- */
+const TG_JENIS = {
+  approve: ['Perlu approval Anda', 'c-warn', 0], mine: ['Tugas Anda', 'c-pri', 1], tersedia: ['Tersedia diambil', 'c-info', 2],
+  lain: ['Diproses orang lain', 'c-neu', 3], temuanku: ['Temuan Anda', 'c-neu', 4], pernah: ['Pernah Anda proses', 'c-ok', 5]
+};
+const aktifTask = t => ['Open', 'Revisi', 'Menunggu Verifikasi', 'Keberatan'].indexOf(t.status) >= 0;
+function jenisTask(t) {
+  const me = S.user.nik.toLowerCase(), pic = (t.picNik || '').toLowerCase();
+  if (canApprove(t)) return 'approve';
+  if (pic === me && aktifTask(t)) return 'mine';
+  if (!pic && (t.status === 'Open' || t.status === 'Revisi')) return 'tersedia';
+  if (aktifTask(t)) return 'lain';
+  if (pic === me) return 'pernah';
+  return 'temuanku';
+}
+const bisaAmbilTask = () => canEdit('tugas') && (S.user.pic || S.user.role === 'Admin');
+VIEWS.tugas = async function (opt) {
+  const v = $('#view'), B = S.boot;
+  const st = S.tg || (S.tg = { jenis: '', status: 'aktif', area: '', pic: '', q: '', sort: 'prio', dir: 1, page: 1, per: 20 });
+  if (opt && opt.tab) { st.jenis = opt.tab === 'mine' ? 'mine' : 'tersedia'; st.status = 'aktif'; st.page = 1; }
+  const stOpts = [['', 'Semua status'], ['aktif', 'Belum selesai'], ['perbaikan', '· Belum diperbaiki (Open / Revisi)'], ['Menunggu Verifikasi', '· Menunggu approval'], ['Keberatan', '· Keberatan'], ['Closed', 'Closed'], ['Batal', 'Batal']];
+  v.innerHTML = '<div id="tgKpi"></div><div class="toolbar">' +
+    '<select class="inp" id="tgJenis" style="max-width:200px"><option value="">Semua task</option>' + Object.keys(TG_JENIS).map(k => '<option value="' + k + '">' + TG_JENIS[k][0] + '</option>').join('') + '</select>' +
+    '<select class="inp" id="tgSt" style="max-width:220px">' + stOpts.map(o => '<option value="' + o[0] + '">' + o[1] + '</option>').join('') + '</select>' +
+    '<select class="inp" id="tgArea" style="max-width:200px"><option value="">Semua area</option>' + B.areas.map(a => '<option value="' + esc(a.id) + '">' + esc(a.nama) + '</option>').join('') + '</select>' +
+    '<select class="inp" id="tgPic" style="max-width:190px"><option value="">Semua PIC</option></select>' +
+    '<input class="inp grow" id="tgQ" placeholder="Cari ID, area, lokasi, deskripsi, PIC, penemu" value="' + esc(st.q) + '">' +
+    '<button class="icon-btn" id="tgRe" title="Muat ulang" aria-label="Muat ulang">' + ic('refresh') + '</button></div><div id="tgBody"></div>';
+  $('#tgJenis').value = st.jenis; $('#tgSt').value = st.status; $('#tgArea').value = st.area;
+  const TB = $('#tgBody');
+  let rows = [];
+  const okStatus = t => !st.status || (st.status === 'aktif' ? aktifTask(t) : st.status === 'perbaikan' ? (t.status === 'Open' || t.status === 'Revisi') : t.status === st.status);
+  const key = {
+    prio: t => TG_JENIS[t._j][2] * 1e14 + (t.deadline || 9e13), id: t => t.id, area: t => (t.area + ' ' + t.lokasi).toLowerCase(),
+    tingkat: t => ({ Kritis: 0, Mayor: 1, Minor: 2 }[t.tingkat] ?? 3), pelapor: t => (t.pelapor || '').toLowerCase(),
+    pic: t => (t.pic || '~').toLowerCase(), target: t => t.deadline || Infinity, status: t => t.status
+  };
+  const fillPic = () => {
+    const names = [...new Set(rows.map(t => t.pic).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    if (st.pic && st.pic !== '-' && names.indexOf(st.pic) < 0) names.unshift(st.pic);
+    $('#tgPic').innerHTML = '<option value="">Semua PIC</option><option value="-">(Belum ada PIC)</option>' + names.map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>').join('');
+    $('#tgPic').value = st.pic;
+  };
+  const tombol = t => {
+    const j = t._j, o = (l, cls) => '<button class="btn sm' + (cls ? ' ' + cls : '') + '" data-open="' + esc(t.id) + '">' + l + '</button>';
+    if (j === 'approve') return o('Approval', 'primary');
+    if (j === 'mine' && (t.status === 'Open' || t.status === 'Revisi')) return o(menungguTerima(t) ? 'Terima' : 'Kerjakan', 'primary');
+    if (j === 'tersedia' && bisaAmbilTask()) return o('Ambil', 'primary');
+    return o('Lihat');
+  };
+  const draw = () => {
+    const q = st.q.toLowerCase();
+    const list = rows.filter(t => (!st.jenis || t._j === st.jenis) && okStatus(t) && (!st.area || t.areaId === st.area) &&
+      (!st.pic || (st.pic === '-' ? !t.pic : t.pic === st.pic)) &&
+      (!q || [t.id, t.area, t.tim, t.lokasi, t.deskripsi, t.pic, t.pelapor].join(' ').toLowerCase().indexOf(q) >= 0));
+    list.sort((a, b) => { const x = key[st.sort](a), y = key[st.sort](b); return (x > y ? 1 : x < y ? -1 : 0) * st.dir || a.id.localeCompare(b.id); });
+    const n = list.length, pages = Math.max(1, Math.ceil(n / st.per));
+    st.page = Math.min(st.page, pages);
+    const view = list.slice((st.page - 1) * st.per, st.page * st.per);
+    const cnt = j => rows.filter(t => t._j === j && okStatus(t)).length;
+    const th = (k, l) => '<th class="sort' + (st.sort === k ? (st.dir > 0 ? ' asc' : ' desc') : '') + '" data-k="' + k + '">' + l + '</th>';
+    const ringkas = ['approve', 'mine', 'tersedia', 'lain'].filter(j => cnt(j)).map(j => '<a href="#" data-j="' + j + '">' + cnt(j) + ' ' + TG_JENIS[j][0].toLowerCase() + '</a>');
+    TB.innerHTML =
+      '<div class="small muted" style="margin-bottom:8px">' + n + ' task' + (ringkas.length ? ' · ' + ringkas.join(' · ') : '') + '</div>' +
+      (n ? '<div class="tbl-wrap"><table class="tbl dt" style="min-width:1100px"><thead><tr>' + th('prio', 'Task') + th('id', 'ID') + '<th>Foto</th>' + th('area', 'Area &amp; temuan') + th('tingkat', 'Kategori') + th('pelapor', 'Penemu') + th('pic', 'PIC') + th('target', 'Target') + th('status', 'Status') + '<th></th></tr></thead><tbody>' +
+        view.map(t => {
+          const late = (t.status === 'Open' || t.status === 'Revisi') && t.terlambat, J = TG_JENIS[t._j];
+          return '<tr class="' + (t._j === 'approve' || t._j === 'mine' ? 'own' : '') + '"><td><span class="chip ' + J[1] + '">' + J[0] + '</span></td>' +
+            '<td class="cell-main">' + esc(t.id) + '</td>' +
+            '<td><div class="ph2">' + imgTag(t.fotoBefore, '', 120) + imgTag(t.fotoAfter, '', 120) + '</div></td>' +
+            '<td><div class="cell-main">' + esc(t.area) + (t.lokasi ? ' · ' + esc(t.lokasi) : '') + '</div><div class="cell-sub" title="' + esc(t.deskripsi) + '">' + esc(t.deskripsi) + '</div>' +
+              (t.status === 'Revisi' && t.catatanVerifikasi ? '<div class="cell-sub" style="color:var(--warn-t)" title="' + esc(t.catatanVerifikasi) + '">Ditolak: ' + esc(t.catatanVerifikasi) + '</div>' : '') + '</td>' +
+            '<td>' + rChip(t.r) + ' ' + tingkatChip(t.tingkat) + (t.revisi ? '<div class="cell-sub">revisi ke-' + (t.revisi + 1) + '</div>' : '') + '</td>' +
+            '<td>' + esc(t.pelapor || '-') + '<div class="cell-sub">' + fDate(t.tanggal) + '</div></td>' +
+            '<td>' + (t.pic ? esc(t.pic) : '<span class="muted">Belum diambil</span>') + '</td>' +
+            '<td style="white-space:nowrap">' + (t.deadline ? fDate(t.deadline) : '-') + '<div class="cell-sub" style="' + (late ? 'color:var(--err-t);font-weight:700' : '') + '">' + esc(sisa(t)) + '</div></td>' +
+            '<td>' + statusChip(t) + '</td><td>' + tombol(t) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<div class="dt-foot"><span>Menampilkan ' + ((st.page - 1) * st.per + 1) + '–' + Math.min(n, st.page * st.per) + ' dari ' + n + '</span>' +
+        '<span class="pg"><select class="inp" id="tgPer" style="width:auto;min-height:32px">' + [10, 20, 50, 100].map(x => '<option' + (x === st.per ? ' selected' : '') + '>' + x + '</option>').join('') + '</select>' +
+        '<button class="btn sm" id="tgPrev"' + (st.page <= 1 ? ' disabled' : '') + '>‹</button><span style="align-self:center">' + st.page + ' / ' + pages + '</span><button class="btn sm" id="tgNext"' + (st.page >= pages ? ' disabled' : '') + '>›</button></span></div>'
+      : emptyBox(rows.length ? 'Tidak ada task untuk filter ini.' : 'Belum ada task.'));
+    $$('th.sort', TB).forEach(h => h.onclick = () => { const k = h.dataset.k; if (st.sort === k) st.dir = -st.dir; else { st.sort = k; st.dir = 1; } draw(); });
+    $$('[data-open]', TB).forEach(b => b.onclick = () => openDetail(b.dataset.open));
+    $$('[data-j]', TB).forEach(a => a.onclick = e => { e.preventDefault(); st.jenis = a.dataset.j; $('#tgJenis').value = st.jenis; st.page = 1; draw(); });
+    if ($('#tgPer')) $('#tgPer').onchange = e => { st.per = +e.target.value; st.page = 1; draw(); };
+    if ($('#tgPrev')) $('#tgPrev').onclick = () => { st.page--; draw(); };
+    if ($('#tgNext')) $('#tgNext').onclick = () => { st.page++; draw(); };
+  };
+  const load = async () => {
+    loading(TB);
+    try {
+      rows = await call('apiListTemuan', S.token, { scope: 'tugasSemua' });
+      rows.forEach(t => { t._j = jenisTask(t); });
+      fillPic(); draw();
+    } catch (e) { TB.innerHTML = emptyBox(e.message); }
+  };
+  let to;
+  $('#tgQ').addEventListener('input', e => { clearTimeout(to); to = setTimeout(() => { st.q = e.target.value; st.page = 1; draw(); }, 200); });
+  $('#tgJenis').onchange = e => { st.jenis = e.target.value; st.page = 1; draw(); };
+  $('#tgSt').onchange = e => { st.status = e.target.value; st.page = 1; draw(); };
+  $('#tgArea').onchange = e => { st.area = e.target.value; st.page = 1; draw(); };
+  $('#tgPic').onchange = e => { st.pic = e.target.value; st.page = 1; draw(); };
+  $('#tgRe').onclick = load;
+  load();
   // Kartu KPI pribadi untuk PIC
   if (!S.user.pic) return;
   try {
     const d = await call('apiKpiPic', S.token, S.boot.bulanIni);
     const r = d.rows.find(x => x.nik.toLowerCase() === S.user.nik.toLowerCase());
-    if (!r || S.view !== 'tugas') return;
-    const box = document.createElement('div');
-    box.className = 'card'; box.style.marginBottom = '12px';
-    box.innerHTML = '<h3>KPI saya<span class="sub">' + fBulan(d.bulan) + ' · target ' + d.target + '</span></h3>' + kpiStrip(r, d.target);
-    $('#view').prepend(box);
+    if (!r || S.view !== 'tugas' || !$('#tgKpi')) return;
+    $('#tgKpi').innerHTML = '<div class="card" style="margin-bottom:12px"><h3>KPI saya<span class="sub">' + fBulan(d.bulan) + ' · target ' + d.target + '</span></h3>' + kpiStrip(r, d.target) + '</div>';
   } catch (e) { /* abaikan */ }
 };
 function kpiChip(r, target) {
@@ -1214,7 +1295,7 @@ VIEWS.verif = async function () {
             '<td style="white-space:nowrap">' + (p ? '<span class="muted">Belum</span>' : fDate(t.tglVerifikasi) + '<div class="cell-sub">' + esc(t.verifikator || '-') + '</div>' +
               (t.catatanVerifikasi ? '<div class="cell-sub" title="' + esc(t.catatanVerifikasi) + '">' + esc(t.catatanVerifikasi) + '</div>' : '')) + '</td>' +
             '<td>' + statusChip(t) + (t.terlambat ? '<div class="cell-sub" style="color:var(--err-t)">dikirim lewat target</div>' : '') + '</td>' +
-            '<td>' + (!p ? '<button class="btn sm" data-open="' + esc(t.id) + '">Lihat</button>' : own && !S.user.super ? '<button class="btn sm" data-open="' + esc(t.id) + '" title="Anda yang memproses — harus diverifikasi auditor lain">Lihat</button>'
+            '<td>' + (!p || (t.status === 'Menunggu Verifikasi' && !canApprove(t) && !own) || (t.status === 'Keberatan' && !canEdit('verif')) ? '<button class="btn sm" data-open="' + esc(t.id) + '"' + (p && !own ? ' title="Approval oleh ' + esc(approverText(t).replace(/&[^;]+;/g, '')) + '"' : '') + '>Lihat</button>' : own && !S.user.super ? '<button class="btn sm" data-open="' + esc(t.id) + '" title="Anda yang memproses — harus diverifikasi auditor lain">Lihat</button>'
               : '<button class="btn sm primary" data-open="' + esc(t.id) + '">' + (t.status === 'Keberatan' ? 'Putuskan' : 'Periksa') + '</button>') + '</td></tr>';
         }).join('') + '</tbody></table></div>' +
         '<div class="dt-foot"><span>Menampilkan ' + ((st.page - 1) * st.per + 1) + '–' + Math.min(n, st.page * st.per) + ' dari ' + n + '</span>' +
@@ -1327,10 +1408,13 @@ function renderDetail(t) {
         '<div class="grid g2"><button class="btn" id="kNo">Tolak, lanjut perbaikan</button><button class="btn danger" id="kYes">Terima, batalkan temuan</button></div>' +
         '<p class="small muted" style="margin:8px 0 0">Diterima: temuan batal dan semua poinnya dikembalikan. Ditolak: kembali ke PIC, batas waktu diperpanjang sebesar lama peninjauan.</p>') : '<div class="small muted">Menunggu keputusan auditor.</div>') + '</div>';
   }
-  // Aksi Auditor
-  if (canEdit('verif') && t.status === 'Menunggu Verifikasi') {
-    h += '<div class="card" style="margin-top:12px;background:var(--surface-2)"><h3>Verifikasi perbaikan</h3>' +
-      (isPic && !S.user.super ? '<div class="note warn">Anda PIC temuan ini, jadi verifikasi harus dilakukan auditor lain.</div>' :
+  // Approval perbaikan (Supervisor dan/atau penemu, diatur Super Admin)
+  if (t.status === 'Menunggu Verifikasi' && !canApprove(t) && (canEdit('verif') || (t.pelaporNik || '').toLowerCase() === me || isPic)) {
+    h += '<div class="note' + (isPic ? ' warn' : '') + '" style="margin-top:12px">' + (isPic ? 'Anda yang memperbaiki temuan ini, jadi approval dilakukan oleh ' : 'Menunggu approval oleh ') + approverText(t) + '.</div>';
+  }
+  if (canApprove(t)) {
+    h += '<div class="card" style="margin-top:12px;background:var(--surface-2)"><h3>Approval perbaikan</h3>' +
+      (false ? '' :
         (isPic ? '<div class="note" style="margin-bottom:10px">Anda yang mengerjakan perbaikan ini. Sebagai super admin Anda tetap bisa memverifikasi; tindakan ini tercatat di riwayat.</div>' : '') +
         '<div class="field"><label for="vCat">Catatan (wajib bila ditolak)</label><textarea class="inp" id="vCat"></textarea></div>' +
         '<div class="grid g2"><button class="btn danger" id="vNo">Tolak, perbaiki lagi</button><button class="btn ok" id="vYes">Setujui &amp; tutup</button></div>') + '</div>';
@@ -1546,7 +1630,7 @@ VIEWS.poin = async function () {
   v.innerHTML = '<div class="toolbar">' + monthInput('pBulan', S.bulan) + '<span class="grow"></span><input class="inp" id="pQ" placeholder="Cari nama / username" style="max-width:240px"></div>' +
     '<div class="tabs" id="pTabs"><button class="on" data-t="user">Peringkat user</button><button data-t="log">Riwayat poin</button></div><div id="pBody"></div>' +
     '<div class="note small" style="margin-top:12px"><b>Cara hitung poin user:</b> ' +
-    '<b>+' + num(c.poinLaporPic) + '</b> setiap menemukan temuan' + (modeBebas() ? '' : ' di area PIC lain') + ' · ' +
+    (c.poinLaporPic ? '<b>+' + num(c.poinLaporPic) + '</b> setiap menemukan temuan' + (modeBebas() || c.laporAreaSendiri ? '' : ' di area PIC lain') + (c.laporSemua ? ' (semua yang input)' : ' (Leader / PIC)') + ' · ' : '') +
     '<b>+' + c.poinTepat + '</b> perbaikan disetujui dalam batas standar (Kritis +' + c.poinTepatKritis + ', bonus cepat +' + c.bonusCepat + '; setengahnya bila lewat standar tapi sesuai target) · ' +
     '<b>−' + c.potongTelat + '</b> per hari terlambat (temuan yang sedang lewat target ikut dipotong per hari berjalan) · <b>−' + c.potongRevisi + '</b> setiap revisi' +
     (modeBebas() ? '' : ' · temuan di area yang dipegang dipotong ' + S.boot.tingkat.map(x => x + ' −' + c.potong[x]).join(', ') + ' · tidak merespon tugas −1') +
@@ -1619,7 +1703,7 @@ VIEWS.admin = async function () {
     if (tab === 'user') {
       h = '<div class="toolbar"><input class="inp grow" id="uQ" placeholder="Cari nama / username / tim"><button class="btn" id="uImp">' + ic('list') + 'Atur tim dari Excel</button><a class="btn primary" href="' + esc(HOME_URL) + 'pengaturan">' + ic('plus') + 'Tambah akun di HRIS</a></div>' +
         '<div class="tbl-wrap"><table class="tbl" id="uTbl" style="min-width:1040px"><tr><th>Username</th><th>Nama</th><th>Role 6S</th><th>PIC</th><th>Area tanggung jawab</th><th>Jadwal hari ini</th><th>Tim</th><th>Status</th><th></th></tr>' +
-        D.users.map((u, i) => '<tr data-q="' + esc((u.nik + ' ' + u.nama + ' ' + (u.tim || '')).toLowerCase()) + '"><td>' + esc(u.nik) + '</td><td>' + esc(u.nama) + '</td><td>' + esc(u.role) + (u.custom ? '' : ' <span class="small muted">(ikut HRIS)</span>') + '</td><td>' + (u.pic ? '<span class="chip c-pri">PIC</span>' : (u.role === 'PIC' && u.employer && u.employer !== 'IEG' ? '<span class="small muted">' + esc(u.employer) + '</span>' : '-')) + '</td><td>' + (u.pic ? ((u.areaPic || []).length ? esc(u.areaPic.map(areaName).join(', ')) : '<span class="small" style="color:var(--warn-t)">Belum diatur</span>') : '-') + '</td>' +
+        D.users.map((u, i) => '<tr data-q="' + esc((u.nik + ' ' + u.nama + ' ' + (u.tim || '')).toLowerCase()) + '"><td>' + esc(u.nik) + '</td><td>' + esc(u.nama) + '</td><td>' + esc(roleLabel(u.role)) + (u.custom ? '' : ' <span class="small muted">(ikut HRIS)</span>') + '</td><td>' + (u.pic ? '<span class="chip c-pri">PIC</span>' : (u.role === 'PIC' && u.employer && u.employer !== 'IEG' ? '<span class="small muted">' + esc(u.employer) + '</span>' : '-')) + '</td><td>' + (u.pic ? ((u.areaPic || []).length ? esc(u.areaPic.map(areaName).join(', ')) : '<span class="small" style="color:var(--warn-t)">Belum diatur</span>') : '-') + '</td>' +
         '<td>' + (u.jadwal ? jadChip(u.jadwal.status) + '<div class="small muted">' + esc(u.jadwal.label) + '</div>' : '-') + '</td><td>' + esc(u.tim || '-') + '</td><td>' + (u.aktif ? '<span class="chip c-ok">Aktif</span>' : '<span class="chip c-neu">Nonaktif</span>') + '</td><td><button class="btn sm" data-u="' + i + '">Ubah</button></td></tr>').join('') + '</table></div>' +
         '<div class="note small" style="margin:12px 0"><b>PIC otomatis per shift:</b> atur area di <b>HRIS → Operator</b> (Area gudang 6S) atau centang <b>Area tanggung jawab</b> di sini (tombol Ubah). Saat ada temuan, sistem memilih PIC area yang <b>sedang bertugas</b> menurut jadwal shift HRIS (melewati yang libur / tidak masuk), lalu PIC menerima tugas &amp; menentukan target. Agar jadwal terbaca, akun Leader harus <b>ditautkan ke karyawan IEG</b> di HRIS → Pengaturan → Pengguna.</div>' +
         '<p class="small muted"><b>PIC perbaikan hanya Leader / PIC IEG</b> (role Leader / PIC di HRIS, atau role 6S PIC); user yang tertaut ke operator RKA tidak bisa menjadi PIC. KPI dihitung per PIC. Semua pengguna dengan role PIC, Auditor, atau Admin bisa membuat temuan di area tim mana pun. Tim pengguna menentukan apakah laporannya dihitung lapor mandiri atau temuan dari tim lain.</p>' +
@@ -1686,7 +1770,7 @@ VIEWS.admin = async function () {
     openModal('Atur pengguna 6S',
       '<div class="grid g2"><div class="field"><label>Username</label><input class="inp" value="' + esc(u.nik) + '" disabled></div>' +
       '<div class="field"><label>Nama</label><input class="inp" value="' + esc(u.nama) + '" disabled></div></div>' +
-      '<div class="grid g2"><div class="field"><label for="fRole">Role 6S</label><select class="inp" id="fRole"><option value="">' + esc(ikut) + '</option>' + S.boot.roles.map(r => '<option' + (u.custom && u.role === r ? ' selected' : '') + '>' + r + '</option>').join('') + '</select></div>' +
+      '<div class="grid g2"><div class="field"><label for="fRole">Role 6S</label><select class="inp" id="fRole"><option value="">' + esc(ikut) + '</option>' + S.boot.roles.map(r => '<option value="' + r + '"' + (u.custom && u.role === r ? ' selected' : '') + '>' + roleLabel(r) + '</option>').join('') + '</select></div>' +
       '<div class="field"><label for="fArea">Tim / area utama</label><select class="inp" id="fArea"><option value="">— tidak ada —</option>' + D.areas.map(a => '<option value="' + esc(a.id) + '"' + (u.areaId === a.id ? ' selected' : '') + '>' + esc(a.tim === a.nama ? a.nama : a.tim + ' — ' + a.nama) + '</option>').join('') + '</select></div></div>' +
       (u.pic ? '<div class="field"><label>Area tanggung jawab (PIC per shift)</label><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px">' +
         D.areas.map(a => '<label class="chk"><input type="checkbox" data-fa="' + esc(a.id) + '"' + ((u.areaPic || []).indexOf(a.id) >= 0 ? ' checked' : '') + '><span>' + esc(a.nama) + '</span></label>').join('') + '</div>' +
@@ -1731,6 +1815,102 @@ VIEWS.admin = async function () {
 /* =====================================================================
  *  VIEW: QR AREA
  * ===================================================================== */
+/* =====================================================================
+ *  VIEW: PENGATURAN SUPER ADMIN — approval, aturan nilai, control akses
+ * ===================================================================== */
+VIEWS.atur = async function () {
+  const v = $('#view');
+  if (!S.user.super) { v.innerHTML = emptyBox('Menu ini khusus Super Admin.'); return; }
+  loading(v);
+  let D;
+  try { D = await call('apiAturData', S.token); } catch (e) { v.innerHTML = emptyBox(e.message); return; }
+  const A = D.akses, roles = A.roles, cfg = A.config;
+  const opsi = k => D.opsi.find(o => o.key === k);
+  const selOpsi = o => '<div class="field"><label for="op_' + o.key + '">' + esc(o.judul) + '</label><select class="inp" id="op_' + o.key + '" data-opsi="' + o.key + '">' +
+    o.pilihan.map(p => '<option value="' + p.v + '"' + (p.v === o.value ? ' selected' : '') + '>' + esc(p.label) + '</option>').join('') + '</select></div>';
+  // Akses efektif per role: daftar menu & yang hanya lihat
+  const roleMenus = r => cfg.roles[r] ? cfg.roles[r] : A.menus.filter(m => m.roles.indexOf(r) >= 0).map(m => m.id);
+  const roleRo = r => cfg.ro.roles[r] || [];
+  const lvl = (menus, ro, id) => menus.indexOf(id) < 0 ? '' : ro.indexOf(id) >= 0 ? 'lihat' : 'edit';
+  const selLvl = (attr, m, val, viewer) => '<select class="inp" ' + attr + ' style="min-height:32px;padding:0 28px 0 8px">' +
+    '<option value="">Tidak</option><option value="lihat"' + (val === 'lihat' ? ' selected' : '') + '>Lihat</option>' +
+    (m.viewOnly || viewer ? '' : '<option value="edit"' + (val === 'edit' ? ' selected' : '') + '>Edit</option>') + '</select>';
+  const users = {}; Object.keys(cfg.users).forEach(u => { users[u] = { menus: cfg.users[u].slice(), ro: (cfg.ro.users[u] || []).slice() }; });
+  const uName = u => { const x = A.users.find(y => y.username.toLowerCase() === u); return x ? x.nama + ' (' + x.username + ')' : u; };
+  const uRole = u => { const x = A.users.find(y => y.username.toLowerCase() === u); return x ? x.role : 'Viewer'; };
+
+  v.innerHTML =
+    '<div class="note" style="margin-bottom:12px">Menu ini hanya terlihat oleh <b>Super Admin</b>. Perubahan berlaku untuk temuan & poin berikutnya; poin yang sudah tercatat tidak dihitung ulang.</div>' +
+    // 1. Approval
+    '<div class="card" style="margin-bottom:12px"><h3>Approval perbaikan</h3>' +
+    '<div class="grid g2">' + selOpsi(opsi('VERIFIKATOR')) + selOpsi(opsi('TUGAS_OTOMATIS')) + '</div>' +
+    '<p class="small muted" style="margin:0"><b>Supervisor</b> = role 6S Supervisor (Auditor) yang punya akses edit menu Verifikasi. <b>Penemu temuan</b> = user yang input temuan tersebut; bila penemu sendiri yang memperbaiki, approval kembali ke Supervisor. Super Admin selalu bisa approval. Keberatan tetap diputuskan Supervisor.</p></div>' +
+    // 2. Aturan nilai
+    '<div class="card" style="margin-bottom:12px"><h3>Aturan nilai<span class="sub">aktifkan / nonaktifkan dan atur besarnya</span></h3>' +
+    '<div class="grid g2">' + selOpsi(opsi('POIN_LAPOR_SEMUA')) + selOpsi(opsi('POIN_LAPOR_AREA_SENDIRI')) + '</div>' +
+    D.grup.map(g => '<h4 style="margin:14px 0 6px">' + esc(g.nama) + '</h4><div class="tbl-wrap"><table class="tbl" style="min-width:640px"><thead><tr><th style="width:80px">Aktif</th><th>Aturan</th><th>Nilai</th></tr></thead><tbody>' +
+      g.aturan.map(a => '<tr><td><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" data-aktif="' + a.id + '"' + (a.aktif ? ' checked' : '') + ' style="width:18px;height:18px"> <span class="small" data-lbl="' + a.id + '">' + (a.aktif ? 'Aktif' : 'Nonaktif') + '</span></label></td>' +
+        '<td><b>' + esc(a.judul) + '</b><div class="cell-sub" style="max-width:none;white-space:normal">' + esc(a.ket) + '</div></td>' +
+        '<td>' + a.keys.map(k => '<div style="display:flex;align-items:center;gap:6px;margin:2px 0"><input class="inp tnum" type="number" step="0.1" min="0" data-nilai="' + k.key + '" data-grp="' + a.id + '" value="' + k.value + '" style="width:90px;min-height:32px"' + (a.aktif ? '' : ' disabled') + ' title="' + esc(k.ket) + '"><span class="small muted">' + esc(k.key) + '</span></div>').join('') + '</td></tr>').join('') +
+      '</tbody></table></div>').join('') +
+    '<button class="btn primary" id="atSave" style="margin-top:12px">' + ic('check') + 'Simpan approval &amp; aturan nilai</button></div>' +
+    // 3. Control akses
+    '<div class="card"><h3>Control akses menu<span class="sub">per role, dan pengecualian per user</span></h3>' +
+    '<div class="tbl-wrap"><table class="tbl" style="min-width:640px"><thead><tr><th>Menu</th>' + roles.map(r => '<th>' + esc(roleLabel(r)) + '</th>').join('') + '</tr></thead><tbody>' +
+    A.menus.map(m => '<tr><td><b>' + esc(m.label) + '</b>' + (m.viewOnly ? '<div class="cell-sub">hanya lihat</div>' : '') + '</td>' +
+      roles.map(r => '<td>' + selLvl('data-rm="' + m.id + '" data-r="' + r + '"', m, lvl(roleMenus(r), roleRo(r), m.id), r === 'Viewer') + '</td>').join('') + '</tr>').join('') +
+    '</tbody></table></div>' +
+    '<h4 style="margin:16px 0 6px">Pengecualian per user</h4><p class="small muted" style="margin:0 0 8px">User di sini memakai akses khusus, menggantikan akses role-nya.</p>' +
+    '<div class="toolbar"><select class="inp grow" id="auPick"><option value="">— Pilih user untuk diberi akses khusus —</option>' +
+    A.users.map(u => '<option value="' + esc(u.username.toLowerCase()) + '">' + esc(u.nama) + ' · ' + esc(roleLabel(u.role)) + '</option>').join('') + '</select>' +
+    '<button class="btn" id="auAdd">Tambah</button></div><div id="auList"></div>' +
+    '<button class="btn primary" id="akSave" style="margin-top:12px">' + ic('check') + 'Simpan control akses</button></div>';
+
+  const drawUsers = () => {
+    const ks = Object.keys(users);
+    $('#auList').innerHTML = ks.length ? '<div class="tbl-wrap"><table class="tbl" style="min-width:720px"><thead><tr><th>User</th>' + A.menus.map(m => '<th>' + esc(m.label.split(' (')[0]) + '</th>').join('') + '<th></th></tr></thead><tbody>' +
+      ks.map(u => '<tr><td><b>' + esc(uName(u)) + '</b><div class="cell-sub">' + esc(roleLabel(uRole(u))) + '</div></td>' +
+        A.menus.map(m => '<td>' + selLvl('data-um="' + m.id + '" data-u="' + esc(u) + '"', m, lvl(users[u].menus, users[u].ro, m.id), uRole(u) === 'Viewer') + '</td>').join('') +
+        '<td><button class="btn sm" data-udel="' + esc(u) + '">Hapus</button></td></tr>').join('') + '</tbody></table></div>'
+      : '<div class="small muted">Belum ada pengecualian user.</div>';
+    $$('[data-um]').forEach(s => s.onchange = () => {
+      const o = users[s.dataset.u], id = s.dataset.um;
+      o.menus = o.menus.filter(x => x !== id); o.ro = o.ro.filter(x => x !== id);
+      if (s.value) o.menus.push(id); if (s.value === 'lihat') o.ro.push(id);
+    });
+    $$('[data-udel]').forEach(b => b.onclick = () => { delete users[b.dataset.udel]; drawUsers(); });
+  };
+  drawUsers();
+  $('#auAdd').onclick = () => {
+    const u = $('#auPick').value;
+    if (!u) return toast('Pilih user dulu.', true);
+    if (!users[u]) { const r = uRole(u); users[u] = { menus: roleMenus(r).slice(), ro: roleRo(r).slice() }; }
+    drawUsers();
+  };
+  $$('[data-aktif]').forEach(c => c.onchange = () => {
+    $$('[data-grp="' + c.dataset.aktif + '"]').forEach(i => { i.disabled = !c.checked; });
+    $('[data-lbl="' + c.dataset.aktif + '"]').textContent = c.checked ? 'Aktif' : 'Nonaktif';
+  });
+  $('#atSave').onclick = async () => {
+    const d = { aktif: {}, nilai: {}, opsi: {} };
+    $$('[data-aktif]').forEach(c => { d.aktif[c.dataset.aktif] = c.checked; });
+    $$('[data-nilai]').forEach(i => { d.nilai[i.dataset.nilai] = i.value; });
+    $$('[data-opsi]').forEach(s => { d.opsi[s.dataset.opsi] = +s.value; });
+    const b = $('#atSave'); b.disabled = true;
+    try { await call('apiAturSimpan', S.token, d); S.boot = await call('apiBootstrap', S.token); toast('Approval & aturan nilai disimpan'); refreshBadges(); }
+    catch (e) { toast(e.message, true); }
+    b.disabled = false;
+  };
+  $('#akSave').onclick = async () => {
+    const p = { roles: {}, users: {}, ro: { roles: {}, users: {} } };
+    roles.forEach(r => { p.roles[r] = []; p.ro.roles[r] = []; });
+    $$('[data-rm]').forEach(s => { if (s.value) p.roles[s.dataset.r].push(s.dataset.rm); if (s.value === 'lihat') p.ro.roles[s.dataset.r].push(s.dataset.rm); });
+    Object.keys(users).forEach(u => { p.users[u] = users[u].menus; p.ro.users[u] = users[u].ro; });
+    const b = $('#akSave'); b.disabled = true;
+    try { await call('apiAksesSimpan', S.token, p); toast('Control akses disimpan'); VIEWS.atur(); }
+    catch (e) { toast(e.message, true); b.disabled = false; }
+  };
+};
 VIEWS.qr = function () {
   const v = $('#view');
   v.innerHTML = '<div class="toolbar no-print"><span class="grow small muted">Tempel QR di setiap area. Saat dipindai dengan PDT/HP, form temuan langsung terisi area tersebut.</span><button class="btn primary" onclick="window.print()">' + ic('print') + 'Cetak</button></div>' +

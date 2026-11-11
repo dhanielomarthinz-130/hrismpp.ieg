@@ -50,7 +50,11 @@ const R5_MENUS = [
     'kpi'    => ['KPI PIC', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
     'admin'  => ['Master Data (+ batalkan temuan)', ['Admin'], false],
     'qr'     => ['QR Area', ['Admin'], true],
+    // Khusus super admin (tidak bisa diberikan lewat control akses)
+    'atur'   => ['Pengaturan Super Admin', [], false],
 ];
+/** Menu yang hanya untuk super admin. */
+const R6_MENU_SUPER = ['atur'];
 const R5_FOTO_DIM = 1280;   // foto temuan disimpan WebP (ringan), sisi terpanjang maks 1280px
 
 const R5_DEFAULT_CONFIG = [
@@ -83,6 +87,38 @@ const R5_DEFAULT_CONFIG = [
     ['POIN_LAPOR_PIC', 2, 'Poin untuk PIC yang menemukan temuan di area PIC lain (dikembalikan bila temuan batal)'],
     ['TUGAS_OTOMATIS', 0, 'Pembagian tugas: 0 = PIC mana pun mengambil sendiri dari Tugas tersedia (satu temuan satu PIC), 1 = otomatis ke PIC area yang bertugas sesuai shift'],
     ['FAKTOR_POTONG_PIC', 1, 'Pengali potongan temuan untuk PIC yang bertanggung jawab atas area (1 = sama dengan potongan tim, 0 = PIC tidak dipotong)'],
+    ['VERIFIKATOR', 0, 'Approval perbaikan: 0 = Supervisor, 1 = penemu temuan, 2 = Supervisor atau penemu'],
+    ['POIN_LAPOR_SEMUA', 1, 'Penemu yang mendapat poin: 0 = hanya Leader / PIC, 1 = semua pengguna yang input temuan'],
+    ['POIN_LAPOR_AREA_SENDIRI', 1, 'Mode tugas otomatis: penemu tetap mendapat poin walau temuan di area tanggung jawabnya sendiri (1 = ya, 0 = tidak)'],
+];
+
+/**
+ * Aturan nilai yang bisa diaktifkan / dinonaktifkan super admin (menu Pengaturan Super Admin).
+ * id => [judul, penjelasan, [key config => nilai saat nonaktif]]. Status disimpan di r5_config 'AKTIF_<id>' (1/0).
+ */
+const R6_ATURAN = [
+    'Temuan' => [
+        'LAPOR'      => ['Penemu temuan dapat poin', 'Yang input temuan mendapat poin (dikembalikan bila temuan batal).', ['POIN_LAPOR_PIC' => 0]],
+        'POTONG'     => ['Temuan memotong skor', 'Skor tim area (dan PIC area pada mode otomatis) dipotong sesuai tingkat temuan.', ['POTONG_MINOR' => 0, 'POTONG_MAYOR' => 0, 'POTONG_KRITIS' => 0]],
+        'POTONG_PIC' => ['Potongan untuk PIC area', 'Mode tugas otomatis: PIC penanggung jawab area ikut dipotong.', ['FAKTOR_POTONG_PIC' => 0]],
+        'BERULANG'   => ['Pengali temuan berulang', 'Potongan dikalikan bila temuan berulang di lokasi & kategori yang sama.', ['FAKTOR_BERULANG' => 1]],
+        'MANDIRI'    => ['Keringanan lapor mandiri', 'Potongan dikurangi bila tim area melaporkan temuannya sendiri.', ['FAKTOR_MANDIRI' => 1]],
+        'TIM_PELAPOR' => ['Poin tim pelapor', 'Tim pelapor mendapat poin bila temuannya di area tim lain disetujui.', ['POIN_TIM_PELAPOR' => 0]],
+    ],
+    'Perbaikan' => [
+        'TEPAT'      => ['Poin perbaikan tepat waktu', 'PIC & tim mendapat poin bila perbaikan disetujui dalam batas.', ['POIN_TEPAT' => 0, 'POIN_TEPAT_KRITIS' => 0]],
+        'CEPAT'      => ['Bonus perbaikan cepat', 'Tambahan bila selesai sebelum separuh batas waktu.', ['BONUS_CEPAT' => 0]],
+        'TELAT'      => ['Potongan terlambat', 'Dipotong per hari keterlambatan perbaikan.', ['POTONG_TELAT_PER_HARI' => 0]],
+        'REVISI'     => ['Potongan revisi', 'Dipotong setiap kali perbaikan ditolak.', ['POTONG_REVISI' => 0]],
+        'RESPON'     => ['Potongan tidak merespon', 'Mode tugas otomatis: dipotong bila tugas tidak diterima sampai batas respon.', ['POTONG_TIDAK_RESPON' => 0]],
+    ],
+];
+/** Opsi pilihan (bukan angka bebas) di menu Pengaturan Super Admin: key => [judul, [nilai => label]]. */
+const R6_OPSI = [
+    'VERIFIKATOR'      => ['Siapa yang melakukan approval perbaikan', [0 => 'Supervisor', 1 => 'Penemu temuan', 2 => 'Supervisor atau penemu']],
+    'POIN_LAPOR_SEMUA' => ['Penemu yang mendapat poin', [1 => 'Semua pengguna yang input temuan', 0 => 'Hanya Leader / PIC']],
+    'POIN_LAPOR_AREA_SENDIRI' => ['Temuan di area tanggung jawab sendiri (mode otomatis)', [1 => 'Penemu tetap dapat poin', 0 => 'Tanpa poin penemu']],
+    'TUGAS_OTOMATIS'   => ['Pembagian tugas perbaikan', [0 => 'Ambil bebas (PIC mana pun mengambil)', 1 => 'Otomatis ke PIC area sesuai shift']],
 ];
 
 const R5_AREAS_SEED = [
@@ -560,6 +596,12 @@ function r5_cfg(): array {
     return $c;
 }
 function r5_num(string $k, float $d): float {
+    static $off = null;
+    if ($off === null) {
+        $off = [];
+        foreach (R6_ATURAN as $grp) foreach ($grp as $id => $a) foreach ($a[2] as $key => $v) $off[$key] = [$id, (float)$v];
+    }
+    if (isset($off[$k]) && (string)(r5_cfg()['AKTIF_' . $off[$k][0]] ?? '1') === '0') return $off[$k][1];
     $raw = r5_cfg()[$k] ?? '';
     if ($raw === '' || $raw === null || !is_numeric($raw)) return $d;
     return (float)$raw;
@@ -657,6 +699,7 @@ function r5_access_for(array $u): array {
     if (array_key_exists($k, $cfg['users'])) { $menus = $cfg['users'][$k]; $ro = $cfg['ro']['users'][$k] ?? []; }
     elseif (array_key_exists($u['role'], $cfg['roles'])) { $menus = $cfg['roles'][$u['role']]; $ro = $cfg['ro']['roles'][$u['role']] ?? []; }
     else { $menus = r5_default_menus($u['role']); $ro = []; }
+    $menus = array_values(array_diff($menus, R6_MENU_SUPER));
     // Menu hanya-lihat & role Viewer tidak pernah bisa mengedit
     foreach ($menus as $m) if ((R5_MENUS[$m][2] || $u['role'] === 'Viewer') && !in_array($m, $ro, true)) $ro[] = $m;
     return ['menus' => array_values($menus), 'ro' => array_values(array_intersect($ro, $menus))];
@@ -672,14 +715,14 @@ function r5_need(array $u, string $menu, bool $edit): void {
 /** Data untuk halaman Control Akses (HRIS, super admin). */
 function r5_access_meta(): array {
     $menus = [];
-    foreach (R5_MENUS as $id => $m) $menus[] = ['id' => $id, 'label' => $m[0], 'roles' => $m[1], 'viewOnly' => $m[2]];
+    foreach (R5_MENUS as $id => $m) if (!in_array($id, R6_MENU_SUPER, true)) $menus[] = ['id' => $id, 'label' => $m[0], 'roles' => $m[1], 'viewOnly' => $m[2]];
     return ['config' => r5_access_config(), 'menus' => $menus, 'roles' => R5_ROLES,
             'users' => array_map(fn($u) => ['username' => $u['nik'], 'nama' => $u['nama'], 'role' => $u['role']], r5_users_all())];
 }
 
 function r5_access_save(array $p, array $hrisUser): array {
     require_super($hrisUser);
-    $ids = array_keys(R5_MENUS);
+    $ids = array_values(array_diff(array_keys(R5_MENUS), R6_MENU_SUPER));
     $known = array_map(fn($u) => mb_strtolower($u['nik']), r5_users_all());
     $cfg = ['roles' => [], 'users' => [], 'ro' => ['roles' => [], 'users' => []]];
     foreach ((array)($p['roles'] ?? []) as $r => $l) if (in_array($r, R5_ROLES, true)) $cfg['roles'][$r] = array_values(array_intersect($ids, (array)$l));
@@ -764,6 +807,8 @@ function apiBootstrap($token): array {
             'slaRespon' => r5_num('SLA_RESPON_JAM', 4), 'targetMaks' => r5_num('TARGET_MAKS_JAM', 168),
             'poinLaporPic' => r5_num('POIN_LAPOR_PIC', 2), 'faktorPotongPic' => r5_num('FAKTOR_POTONG_PIC', 1),
             'tugasOtomatis' => r6_otomatis(),
+            'verifikator' => r6_verif_mode(),
+            'laporSemua' => r5_num('POIN_LAPOR_SEMUA', 1) >= 1, 'laporAreaSendiri' => r5_num('POIN_LAPOR_AREA_SENDIRI', 1) >= 1,
         ],
         'access' => r5_access_for($u),
         'bulanIni' => r5_bulan(r5_now()),
@@ -917,9 +962,11 @@ function apiCreateTemuan($token, $d): array {
                     'Temuan ' . implode(', ', $ket) . ($timPelapor !== '' && !$mandiri ? ' · dilaporkan tim ' . $timPelapor : ''), $now);
             }
             $bonusLapor = r5_num('POIN_LAPOR_PIC', 2);
+            // Penemu yang berhak poin: semua pengguna yang input, atau hanya Leader / PIC (diatur super admin)
+            $berhakLapor = $bonusLapor > 0 && (r5_num('POIN_LAPOR_SEMUA', 1) >= 1 || !empty($u['pic']));
             if (!$otomatis) {
-                // Ambil bebas: tidak ada PIC area; penemu (Leader / PIC) mendapat poin
-                if ($bonusLapor > 0 && !empty($u['pic'])) r5_log_poin('PIC', $u['nik'], $u['nama'], $bonusLapor, $id, 'Menemukan temuan di ' . $area['nama'], $now);
+                // Ambil bebas: tidak ada PIC area; penemu mendapat poin
+                if ($berhakLapor) r5_log_poin('PIC', $u['nik'], $u['nama'], $bonusLapor, $id, 'Menemukan temuan di ' . $area['nama'], $now);
                 return r5_tout(r5_find_temuan($id), $tm);
             }
             // Poin per PIC: PIC penanggung jawab area dipotong, PIC penemu dari area lain mendapat poin
@@ -933,8 +980,8 @@ function apiCreateTemuan($token, $d): array {
                 r5_log_poin('PIC', $pic['nik'], $pic['nama'], $potPic, $id,
                     'Temuan ' . $ting . ($berulang ? ' berulang' : '') . ' di ' . $area['nama'] . ($mandiriPic ? ' (lapor mandiri)' : ' · ditemukan ' . $u['nama']), $now);
             }
-            if (!$mandiriPic && $bonusLapor > 0 && !empty($u['pic'])) {
-                r5_log_poin('PIC', $u['nik'], $u['nama'], $bonusLapor, $id, 'Menemukan temuan di ' . $area['nama'] . ' (PIC ' . $pic['nama'] . ')', $now);
+            if ($berhakLapor && (!$mandiriPic || r5_num('POIN_LAPOR_AREA_SENDIRI', 1) >= 1)) {
+                r5_log_poin('PIC', $u['nik'], $u['nama'], $bonusLapor, $id, 'Menemukan temuan di ' . $area['nama'] . ($mandiriPic ? ' (area sendiri)' : ' (PIC ' . $pic['nama'] . ')'), $now);
             }
             return r5_tout(r5_find_temuan($id), $tm);
         });
@@ -1108,6 +1155,9 @@ function apiListTemuan($token, $f): array {
         if ($scope === 'verifikasi' && $t['status'] !== R5_WAIT && $t['status'] !== R5_KEBERATAN) return false;
         // Halaman Verifikasi: yang menunggu diputuskan + yang sudah diverifikasi/diputuskan
         if ($scope === 'verifikasiSemua' && $t['status'] !== R5_WAIT && $t['status'] !== R5_KEBERATAN && !$t['tglVerifikasi']) return false;
+        // Halaman Tugas: semua task aktif + yang pernah saya proses / saya temukan
+        if ($scope === 'tugasSemua' && !in_array($t['status'], [R5_OPEN, R5_REVISI, R5_WAIT, R5_KEBERATAN], true)
+            && mb_strtolower($t['picNik']) !== $me && mb_strtolower($t['pelaporNik']) !== $me) return false;
         if (!empty($f['bulan']) && (!$t['tanggal'] || r5_bulan($t['tanggal']) !== $f['bulan'])) return false;
         if (!empty($f['areaId']) && $t['areaId'] !== $f['areaId']) return false;
         if ($st === 'Terlambat') { if (!($t['terlambat'] && in_array($t['status'], [R5_OPEN, R5_REVISI], true))) return false; }
@@ -1194,14 +1244,36 @@ function r5_poin_pic(array $t): array {
     return ['poin' => -$hari * r5_num('POTONG_TELAT_PER_HARI', 1), 'ket' => 'Perbaikan terlambat ' . $hari . ' hari'];
 }
 
+/** Mode approval perbaikan: 0 = Supervisor, 1 = penemu temuan, 2 = Supervisor atau penemu. */
+function r6_verif_mode(): int { return max(0, min(2, (int)r5_num('VERIFIKATOR', 0))); }
+
+/** Pastikan $u boleh melakukan approval perbaikan temuan $t (baris DB). */
+function r6_cek_verif(array $u, array $t): void {
+    if (!empty($u['super'])) return;
+    $me = mb_strtolower($u['nik']);
+    $pic = mb_strtolower(r5_str($t['pic_nik']));
+    $pel = mb_strtolower(r5_str($t['pelapor_nik']));
+    if ($pic === $me) throw new RuntimeException('Anda tidak bisa melakukan approval atas perbaikan Anda sendiri.');
+    $a = r5_access_for($u);
+    $sup = in_array('verif', $a['menus'], true) && !in_array('verif', $a['ro'], true);
+    $penemu = $pel !== '' && $pel === $me;
+    // Penemu tidak bisa approval bila ia sendiri yang memperbaiki / tidak ada penemu: kembali ke Supervisor
+    $cadangan = $pel === '' || $pel === $pic;
+    $mode = r6_verif_mode();
+    $ok = $mode === 0 ? $sup : ($mode === 1 ? ($penemu || ($sup && $cadangan)) : ($sup || $penemu));
+    if ($ok) return;
+    if ($mode === 1) throw new RuntimeException('Approval perbaikan ini dilakukan oleh penemu temuan (' . r5_str($t['pelapor_nama']) . ').');
+    throw new RuntimeException($mode === 0 ? 'Approval perbaikan hanya oleh Supervisor.' : 'Approval perbaikan oleh Supervisor atau penemu temuan.');
+}
+
 function apiVerifikasi($token, $id, $setuju, $catatan): array {
-    $u = r5_auth($token, 'verif', true);
+    $u = r5_auth($token);
     return db_transaction(function () use ($u, $id, $setuju, $catatan) {
         $t = r5_find_temuan($id);
         if (!$t) throw new RuntimeException('Temuan tidak ditemukan.');
         if ($t['status'] !== R5_WAIT) throw new RuntimeException('Temuan tidak sedang menunggu verifikasi.');
+        r6_cek_verif($u, $t);
         $sendiri = mb_strtolower(r5_str($t['pic_nik'])) === mb_strtolower($u['nik']);
-        if ($sendiri && empty($u['super'])) throw new RuntimeException('Anda tidak bisa memverifikasi perbaikan Anda sendiri.');
         $now = r5_now();
         if ($sendiri) db_update('r5_temuan', ['riwayat' => r6_riwayat($t['riwayat'], 'Verifikasi pekerjaan sendiri', $u['nama'], 'Super admin memverifikasi perbaikan yang ia kerjakan sendiri', $now)], 'id = ?', [$t['id']]);
         if ($setuju) {
@@ -1744,7 +1816,7 @@ function apiAdminData($token): array {
             'pics' => array_keys(array_filter($apm, fn($l) => in_array($a['area_id'], $l, true))),
             'tanpaAkun' => $tanpaAkun[$a['area_id']] ?? []], db_all("SELECT * FROM r5_area ORDER BY area_id")),
         'config' => array_map(fn($c) => ['key' => $c['key_name'], 'value' => r5_str($c['value']), 'ket' => r5_str($c['ket'])],
-            db_all("SELECT * FROM r5_config ORDER BY key_name")),
+            array_values(array_filter(db_all("SELECT * FROM r5_config ORDER BY key_name"), fn($c) => strpos($c['key_name'], 'AKTIF_') !== 0 && !isset(R6_OPSI[$c['key_name']])))),
         'checklist' => $chk,
     ];
 }
@@ -1900,6 +1972,79 @@ function apiSaveConfig($token, $list): bool {
     return true;
 }
 
+/* =====================================================================
+ *  PENGATURAN SUPER ADMIN — aturan nilai (aktif/nonaktif + angka), approval, control akses
+ * ===================================================================== */
+function r6_super($token): array {
+    $u = r5_auth($token);
+    if (empty($u['super'])) throw new RuntimeException('Menu ini khusus Super Admin.');
+    return $u;
+}
+
+/** Simpan satu nilai config (buat barisnya bila belum ada). */
+function r6_cfg_set(string $k, string $v, string $ket = ''): void {
+    if (db_val("SELECT COUNT(*) FROM r5_config WHERE key_name = ?", [$k])) db_update('r5_config', ['value' => $v], 'key_name = ?', [$k]);
+    else db_insert('r5_config', ['key_name' => $k, 'value' => $v, 'ket' => $ket]);
+}
+
+function apiAturData($token): array {
+    r6_super($token);
+    $cfg = r5_cfg();
+    $ket = [];
+    foreach (R5_DEFAULT_CONFIG as $c) $ket[$c[0]] = [$c[1], $c[2]];
+    foreach (db_all("SELECT key_name, ket FROM r5_config") as $r) if (r5_str($r['ket']) !== '') $ket[$r['key_name']][1] = r5_str($r['ket']);
+    $nilai = fn($k) => isset($cfg[$k]) && is_numeric($cfg[$k]) ? (float)$cfg[$k] : (float)($ket[$k][0] ?? 0);
+    $grup = [];
+    foreach (R6_ATURAN as $g => $items) {
+        $rows = [];
+        foreach ($items as $id => $a) {
+            $keys = [];
+            foreach ($a[2] as $k => $off) $keys[] = ['key' => $k, 'value' => $nilai($k), 'ket' => $ket[$k][1] ?? ''];
+            $rows[] = ['id' => $id, 'judul' => $a[0], 'ket' => $a[1], 'aktif' => (string)($cfg['AKTIF_' . $id] ?? '1') !== '0', 'keys' => $keys];
+        }
+        $grup[] = ['nama' => $g, 'aturan' => $rows];
+    }
+    $opsi = [];
+    foreach (R6_OPSI as $k => $o) {
+        $pil = [];
+        foreach ($o[1] as $v => $l) $pil[] = ['v' => $v, 'label' => $l];
+        $opsi[] = ['key' => $k, 'judul' => $o[0], 'value' => (int)$nilai($k), 'pilihan' => $pil];
+    }
+    return ['grup' => $grup, 'opsi' => $opsi, 'akses' => r5_access_meta()];
+}
+
+function apiAturSimpan($token, $d): bool {
+    $u = r6_super($token);
+    $d = is_array($d) ? $d : [];
+    $boleh = [];
+    foreach (R6_ATURAN as $items) foreach ($items as $id => $a) $boleh[$id] = array_keys($a[2]);
+    $ket = [];
+    foreach (R5_DEFAULT_CONFIG as $c) $ket[$c[0]] = $c[2];
+    db_transaction(function () use ($d, $boleh, $ket) {
+        foreach ((array)($d['aktif'] ?? []) as $id => $on) {
+            if (!isset($boleh[$id])) continue;
+            r6_cfg_set('AKTIF_' . $id, $on ? '1' : '0', 'Aturan nilai ' . $id . ' aktif (1) / nonaktif (0)');
+        }
+        $keys = array_merge(...array_values($boleh));
+        foreach ((array)($d['nilai'] ?? []) as $k => $v) {
+            if (!in_array($k, $keys, true)) continue;
+            if (!is_numeric($v) || (float)$v < 0) throw new RuntimeException('Nilai ' . $k . ' harus angka ≥ 0.');
+            r6_cfg_set($k, (string)(float)$v, $ket[$k] ?? '');
+        }
+        foreach ((array)($d['opsi'] ?? []) as $k => $v) {
+            if (!isset(R6_OPSI[$k]) || !array_key_exists((int)$v, R6_OPSI[$k][1])) continue;
+            r6_cfg_set($k, (string)(int)$v, $ket[$k] ?? '');
+        }
+    });
+    audit_log($u['nik'], 'PENGATURAN_6S', 'Aturan nilai & approval 6S diubah');
+    return true;
+}
+
+function apiAksesSimpan($token, $p): array {
+    $u = r6_super($token);
+    return r5_access_save(is_array($p) ? $p : [], ['username' => $u['nik'], 'super' => true]);
+}
+
 /** Daftar fungsi yang boleh dipanggil dari frontend (api6s.php). */
 const R5_API = [
     'apiBootstrap', 'apiFoto', 'apiCreateTemuan', 'apiListTemuan', 'apiGetTemuan',
@@ -1907,4 +2052,5 @@ const R5_API = [
     'apiSaveAudit', 'apiListAudit', 'apiAdminData', 'apiSaveUser', 'apiSaveArea', 'apiSaveChecklist',
     'apiImportUsers', 'apiSaveConfig', 'apiKeberatan', 'apiPutusKeberatan', 'apiKpiPic',
     'apiPicBertugas', 'apiTerimaTugas', 'apiAlihkan', 'apiRiwayatPoinPic', 'apiLepasTugas',
+    'apiAturData', 'apiAturSimpan', 'apiAksesSimpan',
 ];

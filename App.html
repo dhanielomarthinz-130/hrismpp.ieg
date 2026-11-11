@@ -1394,7 +1394,7 @@
             $('#wkBody').innerHTML = '<div class="card empty"><div class="big"><span class="material-symbols-outlined">group_off</span></div><p>Tidak ada karyawan ' + (jOnlyIeg ? 'IEG ' : '') + 'untuk filter ini.</p>' + (isAdmin() ? '<button class="btn primary" onclick="go(\'operator\')">Kelola operator</button>' : '') + '</div>';
             updateSaveBar(); return;
         }
-        let h = '<div class="table-wrap wk-wrap"><table class="wk"><thead><tr><th class="c-no">No</th><th class="c-nama">Nama Karyawan</th><th class="c-bag">Divisi</th><th class="c-nik wide-only">NIK</th><th class="c-role wide-only">Role &amp; Job Desc</th>' +
+        let h = '<div class="table-wrap wk-wrap"><table class="wk"><thead><tr><th class="c-no">No</th><th class="c-nama">Nama Karyawan</th><th class="c-bag">Divisi</th><th class="c-role wide-only">Role &amp; Job Desc</th>' +
             J.dates.map(x => '<th class="c-day' + (x.isToday ? ' today' : '') + '" data-day-d="' + x.d + '"' + (editable ? ' title="Klik untuk input per tanggal ini" style="cursor:pointer"' : '') + '><span>' + x.hari.slice(0, 3) + '</span><b>' + x.tgl + '</b></th>').join('') +
             '<th class="c-jam" title="Total jam minggu ini (termasuk lembur)">Jam</th><th class="c-hari" title="Hari kerja / pola">Hari</th></tr></thead><tbody>';
         let no = 0;
@@ -1409,7 +1409,6 @@
                 '<td class="c-nama"><div class="wk-nm"><span class="op-ava' + (opRec ? ' clickable" data-view-foto="' + r.id + '" role="button" tabindex="0" title="Lihat foto' : '') + '">' + avatarHtml(r.nama, opRec ? opRec.foto : '') + '</span>' +
                 '<div class="wk-nm-txt"><b>' + esc(r.nama) + '</b><small>' + esc((GRUP_LABEL[r.grup] || r.grup) + ' · ' + r.pola + ' hari' + (r.employer ? ' · ' + r.employer : '')) + '</small></div></div></td>' +
                 '<td class="c-bag"><span class="badge-bag' + (editable ? ' clickable' : '') + '" data-op-bag="' + esc(r.bagian) + '" title="' + (editable ? 'Klik untuk input divisi ini' : '') + '">' + esc(bagName(r.bagian)) + '</span></td>' +
-                '<td class="c-nik wide-only">' + esc(r.nik) + '</td>' +
                 '<td class="c-role wide-only">' + esc(r.role) + '</td>' +
                 ev.codes.map((k, i) => {
                     const kk = kodeOf(k), changed = (r.id + '|' + J.dates[i].d) in J.pending;
@@ -1425,17 +1424,17 @@
         work.forEach(k => {
             const c = count(x => x === k.kode);
             if (!c.some(Boolean)) return;
-            h += '<tr><td colspan="3" class="c-foot">' + esc(k.label) + '</td><td class="wide-only" colspan="2"></td>' + c.map(n => '<td>' + (n || '') + '</td>').join('') + '<td colspan="2"></td></tr>';
+            h += '<tr><td colspan="3" class="c-foot">' + esc(k.label) + '</td><td class="wide-only"></td>' + c.map(n => '<td>' + (n || '') + '</td>').join('') + '<td colspan="2"></td></tr>';
         });
         (S.master.shifts || []).map(x => x.kode).forEach(sh => {
             const c = count(x => { const kk = kodeOf(x); return kk && kk.kerja && kk.shift === sh; });
             if (sh !== 'S1' && sh !== 'S2' && !c.some(Boolean)) return;
             const t = J.targets[sh] || 0;
-            h += '<tr class="tot"><td colspan="3" class="c-foot">Total ' + esc(shiftName(sh)) + (t ? ' <small>/ ' + t + '</small>' : '') + '</td><td class="wide-only" colspan="2"></td>' +
+            h += '<tr class="tot"><td colspan="3" class="c-foot">Total ' + esc(shiftName(sh)) + (t ? ' <small>/ ' + t + '</small>' : '') + '</td><td class="wide-only"></td>' +
                 c.map(n => '<td style="color:' + (t && n < t ? 'var(--err)' : 'inherit') + '">' + n + '</td>').join('') + '<td colspan="2"></td></tr>';
         });
         const off = count(x => { const kk = kodeOf(x); return kk && !kk.kerja; });
-        h += '<tr><td colspan="3" class="c-foot">Libur / Cuti</td><td class="wide-only" colspan="2"></td>' + off.map(n => '<td class="muted">' + n + '</td>').join('') + '<td colspan="2"></td></tr>';
+        h += '<tr><td colspan="3" class="c-foot">Libur / Cuti</td><td class="wide-only"></td>' + off.map(n => '<td class="muted">' + n + '</td>').join('') + '<td colspan="2"></td></tr>';
         h += '</tfoot></table></div>' +
             '<div class="legend">' + J.kodes.map(k => '<span class="cell" style="background:' + k.warna + ';color:' + textColor(k.warna) + '">' + esc(k.label) + '</span><span class="muted small">' + (k.kerja ? k.mulai + '–' + k.selesai + ' (' + k.jam + 'j)' : esc(k.nama)) + '</span>').join(' ') + '</div>';
         $('#wkBody').innerHTML = h;
@@ -2970,7 +2969,7 @@
             $('#daBody').innerHTML = '<div class="card empty"><div class="big"><span class="material-symbols-outlined">group_off</span></div><p>Tidak ada karyawan ' + esc(f.employer) + ' untuk filter ini.</p></div>';
             return;
         }
-        let h = '<div class="table-wrap wk-wrap"><table class="wk da-wk"><thead><tr><th class="c-no">No</th><th class="c-nama">Nama Karyawan</th><th class="c-bag">Divisi</th><th class="c-nik wide-only">NIK</th>' +
+        let h = '<div class="table-wrap wk-wrap"><table class="wk da-wk"><thead><tr><th class="c-no">No</th><th class="c-nama">Nama Karyawan</th><th class="c-bag">Divisi</th>' +
             days.map(t => '<th class="c-day' + (t === today ? ' today' : '') + '"><span>' + HARI3[dow(t)] + '</span><b>' + (+t.slice(8)) + '</b></th>').join('') +
             '<th class="c-jam" title="Jumlah hari hadir (termasuk telat)">Hadir</th><th class="c-hari" title="Total lembur (jam)">Lembur</th></tr></thead><tbody>';
         rows.forEach((p, idx) => {
@@ -2990,12 +2989,12 @@
                 '<td class="c-nama"><div class="wk-nm"><span class="op-ava clickable" data-view-foto="' + esc(p.id) + '" role="button" tabindex="0" title="Lihat foto">' + avatarHtml(p.nama, p.foto) + '</span>' +
                 '<div class="wk-nm-txt"><b>' + esc(p.nama) + '</b><small>' + esc((p.role ? p.role + ' · ' : '') + p.employer) + '</small></div></div></td>' +
                 '<td class="c-bag"><span class="badge-bag">' + esc(bagName(p.bagian)) + '</span></td>' +
-                '<td class="c-nik wide-only">' + esc(p.nik) + '</td>' + cells +
+                cells +
                 '<td class="c-jam' + (nh ? ' good' : '') + '">' + nh + '</td><td class="c-hari">' + (nl ? Math.round(nl * 10) / 10 : '—') + '</td></tr>';
         });
         h += '</tbody><tfoot>';
         const per = pred => days.map(t => rows.filter(p => (p.cells[t] || []).some(pred)).length);
-        const foot = (label, arr, cls) => '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td colspan="3" class="c-foot">' + label + '</td><td class="wide-only"></td>' +
+        const foot = (label, arr, cls) => '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td colspan="3" class="c-foot">' + label + '</td>' +
             arr.map(n => '<td>' + (n || '') + '</td>').join('') + '<td colspan="2"></td></tr>';
         h += foot('Hadir / Telat', per(r => r.status === 'H' || r.status === 'T'), 'tot');
         h += foot('Sakit / Izin / Cuti', per(r => r.status === 'S' || r.status === 'I' || r.status === 'C'));
