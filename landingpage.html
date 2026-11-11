@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Program 6S — PT Inovasi Eka Gemilang</title>
-<meta name="description" content="Program Budaya Kerja 6S PT Inovasi Eka Gemilang: temukan, foto, perbaiki, kumpulkan poin dan menangkan hadiah ratusan ribu Rupiah.">
+<title>HRIS &amp; Program 6S — PT Inovasi Eka Gemilang</title>
+<meta name="description" content="HRIS Inventory &amp; Monitoring 6S PT Inovasi Eka Gemilang. Program Budaya Kerja 6S: temukan, foto, perbaiki, kumpulkan poin dan menangkan hadiah ratusan ribu Rupiah.">
 <meta name="theme-color" content="#4F46E5">
 <link rel="icon" href="assets/image/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -138,6 +138,30 @@ section[id]{scroll-margin-top:84px}
 .tile svg{width:22px;height:22px}
 .tile.gold{background:var(--gold-soft);color:var(--gold)}.tile.ok{background:var(--ok-soft);color:var(--ok)}.tile.bad{background:var(--bad-soft);color:var(--bad)}
 
+
+/* Aplikasi: HRIS & Monitoring 6S */
+.apps{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+.app{padding:clamp(22px,3vw,34px);display:flex;flex-direction:column;gap:16px;position:relative;overflow:hidden;--ac:#4F46E5;--ac-soft:#EEF0FF}
+.app-6s{--ac:#0E8F9F;--ac-soft:#E2F6F7}
+[data-theme="evening"] .app{--ac:#A5B4FC;--ac-soft:#24224F}[data-theme="evening"] .app-6s{--ac:#5EEAD4;--ac-soft:#10302F}
+.app::before{content:"";position:absolute;inset:0 0 auto 0;height:4px;background:var(--ac);z-index:2}
+.app::after{content:"";position:absolute;right:-90px;top:-90px;width:240px;height:240px;border-radius:50%;background:var(--ac-soft);opacity:.7;pointer-events:none}
+.app>*{position:relative;z-index:1}
+.app-head{display:flex;align-items:center;gap:14px}
+.app-ic{width:56px;height:56px;border-radius:16px;display:grid;place-items:center;background:var(--ac-soft);color:var(--ac);flex:none}
+.app-ic svg{width:28px;height:28px}
+.app-tag{display:block;font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--ac)}
+.app h3{font-size:clamp(22px,2.4vw,28px)}
+.app-desc{color:var(--muted);font-size:15.5px}
+.app-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;flex:1}
+.app-list li{position:relative;padding-left:30px;font-size:14.5px;color:var(--text)}
+.app-list li b{color:var(--ink)}
+.app-list li::before{content:"";position:absolute;left:0;top:2px;width:20px;height:20px;border-radius:7px;background:var(--ac-soft) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center/12px no-repeat}
+.btn-app{align-self:flex-start;background:var(--ac);color:#fff;margin-top:4px;box-shadow:0 10px 22px -14px var(--ac)}
+[data-theme="evening"] .btn-app{color:#0B0A1F}
+.btn-app:hover{transform:translateY(-1px);color:#fff;filter:brightness(1.05)}
+[data-theme="evening"] .btn-app:hover{color:#0B0A1F}
+
 /* 6 pilar */
 .pillars{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
 .pillar{padding:24px;display:flex;flex-direction:column;gap:12px;position:relative;overflow:hidden}
@@ -230,6 +254,7 @@ section[id]{scroll-margin-top:84px}
   .portrait{margin:8px auto 0}
   .steps{grid-template-columns:repeat(2,1fr)}.step::after{display:none}
   .pillars{grid-template-columns:repeat(2,1fr)}
+  .apps{grid-template-columns:1fr}
   .areas{position:static}
 }
 @media (max-width:760px){
@@ -251,6 +276,7 @@ section[id]{scroll-margin-top:84px}
   <div class="wrap">
     <a href="#top" class="logo-box" aria-label="PT Inovasi Eka Gemilang — ke atas"><span class="logo" role="img" aria-label="Logo Inovasi Eka Gemilang"></span></a>
     <nav class="nav" aria-label="Navigasi utama">
+      <a href="#aplikasi">Aplikasi</a>
       <a href="#pilar">Apa itu 6S</a>
       <a href="#cara">Cara Kerja</a>
       <a href="#harian">6S Harian</a>
@@ -321,6 +347,51 @@ section[id]{scroll-margin-top:84px}
 
 <!-- POSTER: gambar banner program (assets/image/banner-6s.jpg|png|webp), ditampilkan otomatis oleh landing.php bila file ada -->
 <!--POSTER--><!--/POSTER-->
+
+<!-- APLIKASI: HRIS & Monitoring 6S (satu akun untuk keduanya) -->
+<section class="sec" id="aplikasi" style="padding-top:36px">
+  <div class="wrap">
+    <div class="head center rv">
+      <span class="eyebrow">Satu akun, dua aplikasi</span>
+      <h2>HRIS Inventory &amp; Monitoring 6S</h2>
+      <p>Login sekali dengan akun karyawan IEG — kelola tenaga kerja gudang di HRIS dan jalankan budaya kerja 6S di Monitoring 6S.</p>
+    </div>
+    <div class="apps">
+      <article class="card app app-hris rv">
+        <div class="app-head">
+          <span class="app-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg></span>
+          <div><span class="app-tag">Tenaga kerja</span><h3>HRIS Inventory</h3></div>
+        </div>
+        <p class="app-desc">Absensi, jadwal, dan kebutuhan man power gudang dalam satu tempat — dari Leader sampai Supervisor.</p>
+        <ul class="app-list">
+          <li><b>Absensi shift</b> &amp; data absensi mingguan (hadir, sakit, izin, cuti, alpa, lembur)</li>
+          <li><b>Jadwal Employee &amp; Jadwal IEG</b> per minggu, termasuk Long Shift</li>
+          <li><b>Request OS</b> man power dengan approval Supervisor &amp; kirim WhatsApp</li>
+          <li><b>Dashboard &amp; Rekap MPP</b> per bagian dan target</li>
+          <li>Master operator, bagian &amp; target, serta control akses</li>
+        </ul>
+        <a href="login?app=hris" class="btn btn-app">Masuk HRIS
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></a>
+      </article>
+      <article class="card app app-6s rv">
+        <div class="app-head">
+          <span class="app-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg></span>
+          <div><span class="app-tag">Budaya kerja</span><h3>Monitoring 6S</h3></div>
+        </div>
+        <p class="app-desc">Temuan, perbaikan, dan task 6S harian berbasis foto — semua tercatat sebagai poin.</p>
+        <ul class="app-list">
+          <li><b>Input temuan</b> dengan foto before / after &amp; target perbaikan</li>
+          <li><b>6S Harian</b> Shift 1 &amp; 2: foto &amp; tindakan untuk tiap S</li>
+          <li><b>Approval</b> perbaikan oleh Supervisor atau penemu</li>
+          <li><b>Papan poin &amp; KPI PIC</b> untuk menentukan pemenang hadiah</li>
+          <li>Audit 6S, QR area, dan dashboard per tim</li>
+        </ul>
+        <a href="login?app=6s" class="btn btn-app">Masuk Monitoring 6S
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></a>
+      </article>
+    </div>
+  </div>
+</section>
 
 <!-- 6 PILAR -->
 <section class="sec" id="pilar">
@@ -445,13 +516,13 @@ section[id]{scroll-margin-top:84px}
   <div class="wrap">
     <div class="cta rv">
       <div class="txt">
-        <h2>Buka aplikasi &amp; mulai 6S hari ini!</h2>
-        <p>Login dengan akun karyawan IEG, pilih area, lalu kerjakan task 6S shift Anda atau upload temuan pertama. Setiap aksi kecil membawa tim lebih dekat ke hadiah.</p>
+        <h2>Masuk &amp; mulai hari ini!</h2>
+        <p>Login dengan akun karyawan IEG: isi absensi &amp; jadwal di HRIS, lalu kerjakan task 6S shift Anda atau upload temuan pertama. Setiap aksi kecil membawa tim lebih dekat ke hadiah.</p>
       </div>
       <div class="act">
         <a href="login?app=6s" id="linkAplikasi" class="btn btn-white btn-lg">Buka Aplikasi 6S
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></a>
-        <a href="login" class="btn btn-outline-white btn-lg">Login HRIS</a>
+        <a href="login?app=hris" class="btn btn-outline-white btn-lg">Masuk HRIS</a>
       </div>
     </div>
   </div>
@@ -462,7 +533,7 @@ section[id]{scroll-margin-top:84px}
 <footer class="ftr">
   <div class="wrap">
     <span class="logo-box"><span class="logo" style="height:28px" role="img" aria-label="Logo Inovasi Eka Gemilang"></span></span>
-    <nav aria-label="Tautan bawah"><a href="#pilar">Apa itu 6S</a><a href="#harian">6S Harian</a><a href="#hadiah">Hadiah</a><a href="login">Login</a></nav>
+    <nav aria-label="Tautan bawah"><a href="#aplikasi">HRIS &amp; 6S</a><a href="#pilar">Apa itu 6S</a><a href="#harian">6S Harian</a><a href="#hadiah">Hadiah</a><a href="login">Login</a></nav>
     <p class="powered">Powered by <b>M. Solihin</b></p>
   </div>
 </footer>

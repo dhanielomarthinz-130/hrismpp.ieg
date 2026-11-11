@@ -107,6 +107,7 @@ if ($don) {
 if ($lq) {
     $html = str_replace('href="login"', 'href="login?' . $e(http_build_query($lq)) . '"', $html);
     $html = str_replace('href="login?app=6s"', 'href="login?' . $e(http_build_query(['app' => '6s'] + $lq)) . '"', $html);
+    $html = str_replace('href="login?app=hris"', 'href="login?' . $e(http_build_query(['app' => 'hris'] + $lq)) . '"', $html);
 }
 $html = preg_replace('/<head>/i', '<head>' . "\n" . '<base href="' . $e($base) . '">', $html, 1);
 echo $html;
