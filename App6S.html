@@ -537,6 +537,7 @@ function showLogin(msg) {
   const q = new URLSearchParams({ app: '6s' });
   if (msg) q.set('msg', msg);
   if (AREA_PARAM) q.set('area', AREA_PARAM);
+  try { if (location.hash.length > 1) sessionStorage.setItem('6s_view', location.hash.slice(1)); } catch (e) { }
   location.replace(LOGIN_URL + '?' + q.toString());
 }
 async function logout(expired) {
@@ -552,7 +553,7 @@ async function boot() {
   S.boot = await call('apiBootstrap', S.token);
   S.user = S.boot.user; S.bulan = S.boot.bulanIni;
   $('#shell').hidden = false;
-  if (AREA_PARAM) history.replaceState(null, '', location.pathname);
+  if (AREA_PARAM) history.replaceState(null, '', location.pathname + location.hash);
   $('#whoName').textContent = S.user.nama;
   $('#goHris').href = HOME_URL;
   const ava = $('#whoAva');
@@ -563,7 +564,10 @@ async function boot() {
   buildNav();
   setSideMini(document.documentElement.classList.contains('side-mini'));
   applyTheme(document.documentElement.getAttribute('data-theme'));
-  go(AREA_PARAM && canDo('input') ? 'input' : 'dash');
+  let awal = location.hash.slice(1);
+  try { awal = awal || sessionStorage.getItem('6s_view') || ''; sessionStorage.removeItem('6s_view'); } catch (e) { }
+  go(AREA_PARAM && canDo('input') ? 'input' : (MENU.some(m => m.id === awal) ? awal : 'dash'), {}, 'replace');
+  window.addEventListener('popstate', () => { const id = location.hash.slice(1) || 'dash'; if (id !== S.view) go(id, {}, 'none'); });
   refreshBadges();
 }
 
@@ -596,12 +600,17 @@ function setSideMini(on) {
 }
 function drawer(open) { $('#side').classList.toggle('open', open); $('#scrim').classList.toggle('show', open); }
 const VIEWS = {};
-function go(id, opt) {
+function go(id, opt, hist) {
   const m = MENU.find(x => x.id === id);
   if (!m || !can(m)) {
     const first = MENU.find(can);
     if (!first) { $('#title').textContent = 'Monitoring 6S'; $('#view').innerHTML = emptyBox('Belum ada menu 6S yang diizinkan untuk akun Anda. Hubungi Super Admin.'); return; }
     id = first.id;
+  }
+  // URL ikut menu (mis. /6s#daftar) agar bisa di-bookmark & tombol Back berfungsi
+  if (hist !== 'none' && id !== 'hris') {
+    const url = location.pathname + location.search + '#' + id;
+    if (hist === 'replace' || location.hash === '#' + id) history.replaceState(null, '', url); else history.pushState(null, '', url);
   }
   S.view = id;
   $$('[data-v]').forEach(a => a.classList.toggle('active', a.dataset.v === id));
@@ -983,7 +992,93 @@ async function renderList(scope, opt) {
   let to; $('#lQ').addEventListener('input', e => { clearTimeout(to); to = setTimeout(() => { f.q = e.target.value; reload(); }, 350); });
   reload();
 }
-VIEWS.daftar = opt => renderList('', opt);
+/* ---------- Daftar temuan: datatable ---------- */
+VIEWS.daftar = async function (opt) {
+  const v = $('#view'), B = S.boot;
+  const st = S.df || (S.df = { bulan: S.bulan, status: '', area: '', pic: '', q: '', sort: 'tanggal', dir: -1, page: 1, per: 20 });
+  if (opt && Object.keys(opt).length) {
+    if ('bulan' in opt) st.bulan = opt.bulan;
+    if ('status' in opt) st.status = opt.status;
+    if ('areaId' in opt) st.area = opt.areaId;
+    st.page = 1;
+  }
+  const stOpts = [['', 'Semua status'], ['Aktif', 'Belum selesai'], ['Perbaikan', 'Belum diperbaiki'], ['Terlambat', 'Terlambat'], ['Open', 'Open'], ['Revisi', 'Revisi'], ['Menunggu Verifikasi', 'Menunggu verifikasi'], ['Keberatan', 'Keberatan'], ['Closed', 'Closed'], ['Batal', 'Batal']];
+  v.innerHTML = '<div class="toolbar">' + monthInput('dfBulan', st.bulan) +
+    (st.bulan ? '<button class="btn sm" id="dfAll" title="Tampilkan semua bulan">Semua bulan</button>' : '') +
+    '<select class="inp" id="dfSt" style="max-width:190px">' + stOpts.map(o => '<option value="' + o[0] + '">' + o[1] + '</option>').join('') + '</select>' +
+    '<select class="inp" id="dfArea" style="max-width:200px"><option value="">Semua area</option>' + B.areas.map(a => '<option value="' + esc(a.id) + '">' + esc(a.nama) + '</option>').join('') + '</select>' +
+    '<select class="inp" id="dfPic" style="max-width:190px"><option value="">Semua PIC</option></select>' +
+    '<input class="inp grow" id="dfQ" placeholder="Cari ID, lokasi, deskripsi, PIC, pelapor" value="' + esc(st.q) + '">' +
+    '<button class="icon-btn" id="dfRe" title="Muat ulang" aria-label="Muat ulang">' + ic('refresh') + '</button></div><div id="dfBody"></div>';
+  $('#dfSt').value = st.status; $('#dfArea').value = st.area;
+  const DB = $('#dfBody');
+  let rows = [];
+  const aktif = t => t.status === 'Open' || t.status === 'Revisi';
+  const key = {
+    id: t => t.id, tanggal: t => t.tanggal || 0, area: t => (t.area + ' ' + t.lokasi).toLowerCase(),
+    tingkat: t => ({ Kritis: 0, Mayor: 1, Minor: 2 }[t.tingkat] ?? 3), pelapor: t => (t.pelapor || '').toLowerCase(),
+    pic: t => (t.pic || '~').toLowerCase(), target: t => t.deadline || Infinity, status: t => t.status
+  };
+  const fillPic = () => {
+    const names = [...new Set(rows.map(t => t.pic).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    if (st.pic && st.pic !== '-' && names.indexOf(st.pic) < 0) names.unshift(st.pic);
+    $('#dfPic').innerHTML = '<option value="">Semua PIC</option><option value="-">(Belum ada PIC)</option>' + names.map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>').join('');
+    $('#dfPic').value = st.pic;
+  };
+  const draw = () => {
+    const q = st.q.toLowerCase();
+    const list = rows.filter(t => (!st.area || t.areaId === st.area) && (!st.pic || (st.pic === '-' ? !t.pic : t.pic === st.pic)) &&
+      (!q || [t.id, t.area, t.tim, t.lokasi, t.deskripsi, t.pic, t.pelapor].join(' ').toLowerCase().indexOf(q) >= 0));
+    list.sort((a, b) => { const x = key[st.sort](a), y = key[st.sort](b); return (x > y ? 1 : x < y ? -1 : 0) * st.dir || b.id.localeCompare(a.id); });
+    const n = list.length, pages = Math.max(1, Math.ceil(n / st.per));
+    st.page = Math.min(st.page, pages);
+    const view = list.slice((st.page - 1) * st.per, st.page * st.per);
+    const cnt = f => list.filter(f).length, telat = cnt(t => aktif(t) && t.terlambat);
+    const th = (k, l) => '<th class="sort' + (st.sort === k ? (st.dir > 0 ? ' asc' : ' desc') : '') + '" data-k="' + k + '">' + l + '</th>';
+    DB.innerHTML =
+      '<div class="small muted" style="margin-bottom:8px">' + n + ' temuan · ' + (st.bulan ? fBulan(st.bulan) : 'semua bulan') +
+      ' · ' + cnt(aktif) + ' belum diperbaiki · ' + cnt(t => t.status === 'Menunggu Verifikasi' || t.status === 'Keberatan') + ' menunggu keputusan · ' + cnt(t => t.status === 'Closed') + ' closed' +
+      (telat ? ' · <b style="color:var(--err-t)">' + telat + ' lewat target</b>' : '') +
+      (rows.length >= 2000 ? ' · <b>hanya 2000 data terbaru — persempit filter bulan/status</b>' : '') + '</div>' +
+      (n ? '<div class="tbl-wrap"><table class="tbl dt" style="min-width:1080px"><thead><tr>' + th('id', 'ID') + '<th>Foto</th>' + th('tanggal', 'Tanggal') + th('area', 'Area &amp; temuan') + th('tingkat', 'Kategori') + th('pelapor', 'Pelapor') + th('pic', 'PIC') + th('target', 'Target') + th('status', 'Status') + '<th></th></tr></thead><tbody>' +
+        view.map(t => {
+          const late = aktif(t) && t.terlambat;
+          return '<tr><td class="cell-main">' + esc(t.id) + '</td>' +
+            '<td><div class="ph2">' + imgTag(t.fotoBefore, '', 120) + imgTag(t.fotoAfter, '', 120) + '</div></td>' +
+            '<td style="white-space:nowrap">' + fDate(t.tanggal) + '</td>' +
+            '<td><div class="cell-main">' + esc(t.area) + (t.lokasi ? ' · ' + esc(t.lokasi) : '') + '</div><div class="cell-sub" title="' + esc(t.deskripsi) + '">' + esc(t.deskripsi) + '</div></td>' +
+            '<td>' + rChip(t.r) + ' ' + tingkatChip(t.tingkat) + (t.berulang ? '<div><span class="chip nodot c-err">Berulang</span></div>' : '') + (t.revisi ? '<div class="cell-sub">revisi ke-' + (t.revisi + 1) + '</div>' : '') + '</td>' +
+            '<td>' + esc(t.pelapor || '-') + (t.mandiri ? '<div class="cell-sub">lapor mandiri</div>' : '') + '</td>' +
+            '<td>' + (t.pic ? esc(t.pic) : '<span class="muted">Belum diambil</span>') + '</td>' +
+            '<td style="white-space:nowrap">' + (t.deadline ? fDate(t.deadline) : '-') + '<div class="cell-sub" style="' + (late ? 'color:var(--err-t);font-weight:700' : '') + '">' + esc(sisa(t)) + '</div></td>' +
+            '<td>' + statusChip(t) + '</td>' +
+            '<td><button class="btn sm" data-open="' + esc(t.id) + '">Lihat</button></td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<div class="dt-foot"><span>Menampilkan ' + ((st.page - 1) * st.per + 1) + '–' + Math.min(n, st.page * st.per) + ' dari ' + n + '</span>' +
+        '<span class="pg"><select class="inp" id="dfPer" style="width:auto;min-height:32px">' + [10, 20, 50, 100].map(x => '<option' + (x === st.per ? ' selected' : '') + '>' + x + '</option>').join('') + '</select>' +
+        '<button class="btn sm" id="dfPrev"' + (st.page <= 1 ? ' disabled' : '') + '>‹</button><span style="align-self:center">' + st.page + ' / ' + pages + '</span><button class="btn sm" id="dfNext"' + (st.page >= pages ? ' disabled' : '') + '>›</button></span></div>'
+      : emptyBox(rows.length ? 'Tidak ada temuan untuk filter ini.' : 'Tidak ada temuan untuk bulan / status ini.'));
+    $$('th.sort', DB).forEach(h => h.onclick = () => { const k = h.dataset.k; if (st.sort === k) st.dir = -st.dir; else { st.sort = k; st.dir = k === 'tanggal' ? -1 : 1; } draw(); });
+    $$('[data-open]', DB).forEach(b => b.onclick = () => openDetail(b.dataset.open));
+    if ($('#dfPer')) $('#dfPer').onchange = e => { st.per = +e.target.value; st.page = 1; draw(); };
+    if ($('#dfPrev')) $('#dfPrev').onclick = () => { st.page--; draw(); };
+    if ($('#dfNext')) $('#dfNext').onclick = () => { st.page++; draw(); };
+  };
+  const load = async () => {
+    loading(DB);
+    try { rows = await call('apiListTemuan', S.token, { bulan: st.bulan, status: st.status }); fillPic(); draw(); }
+    catch (e) { DB.innerHTML = emptyBox(e.message); }
+  };
+  let to;
+  $('#dfQ').addEventListener('input', e => { clearTimeout(to); to = setTimeout(() => { st.q = e.target.value; st.page = 1; draw(); }, 200); });
+  $('#dfBulan').addEventListener('change', e => { st.bulan = e.target.value; st.page = 1; VIEWS.daftar(); });
+  if ($('#dfAll')) $('#dfAll').onclick = () => { st.bulan = ''; st.page = 1; VIEWS.daftar(); };
+  $('#dfSt').onchange = e => { st.status = e.target.value; st.page = 1; load(); };
+  $('#dfArea').onchange = e => { st.area = e.target.value; st.page = 1; draw(); };
+  $('#dfPic').onchange = e => { st.pic = e.target.value; st.page = 1; draw(); };
+  $('#dfRe').onclick = load;
+  load();
+};
 VIEWS.tugas = async opt => {
   opt = opt || {};
   const bebas = modeBebas() && (S.user.pic || S.user.role === 'Admin');

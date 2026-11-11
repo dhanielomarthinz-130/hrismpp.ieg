@@ -1128,7 +1128,7 @@ function apiListTemuan($token, $f): array {
         });
         return array_slice($rows, 0, 2000);
     }
-    return array_slice($rows, 0, 500);
+    return array_slice($rows, 0, 2000);
 }
 
 function apiGetTemuan($token, $id): array {
