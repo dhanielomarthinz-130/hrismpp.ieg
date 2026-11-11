@@ -646,3 +646,44 @@ function absensi_list_export(array $p, array $currentUser): array {
     return csv_download_('data-absensi_' . $d['from'] . '_sd_' . $d['to'] . '.csv',
         ['No', 'Tanggal', 'Shift', 'Nama', 'NIK', 'Divisi', 'Employer', 'Status', 'Lembur (jam)', 'Catatan', 'Diabsen oleh', 'Waktu absen'], $out);
 }
+
+/**
+ * Data Absensi tab IEG: status harian karyawan IEG mengikuti Jadwal IEG,
+ * dan bisa diubah per hari (Sakit / Izin / Cuti / Alpa / Hadir / Telat). Status '' = kembali ikut jadwal.
+ * Disimpan di tabel absensi (shift = shift dari jadwal hari itu, bawaan S1); jadwal tidak diubah.
+ */
+function set_absen_ieg(array $p, array $currentUser): array {
+    $tanggal = trim((string)($p['tanggal'] ?? ''));
+    $id = trim((string)($p['operatorId'] ?? ''));
+    assert_editable_date($currentUser, $tanggal);
+    $op = null;
+    foreach (operators_() as $o) if ((string)$o['id'] === $id) { $op = $o; break; }
+    if (!$op) throw new InvalidArgumentException('Karyawan tidak ditemukan.');
+    if (normalize_employer($op['employer'] ?? '') !== 'IEG') throw new RuntimeException('Hanya untuk karyawan IEG.');
+    if (!can_edit_bagian($currentUser, $op['bagian'])) throw new RuntimeException('Anda tidak berhak mengubah absensi bagian ' . $op['bagian'] . '.');
+    $status = strtoupper(trim((string)($p['status'] ?? '')));
+    if ($status !== '' && !isset(STATUS_MAP[$status])) throw new InvalidArgumentException("Status tidak valid: $status");
+    $ket = mb_substr(trim((string)($p['ket'] ?? '')), 0, 200);
+
+    // Shift mengikuti jadwal hari itu (kode jadwal -> shift), bawaan S1
+    $shift = 'S1';
+    $j = db_row("SELECT shift FROM jadwal WHERE tanggal = ? AND operator_id = ?", [$tanggal, $id]);
+    if ($j) {
+        $kode = strtoupper((string)$j['shift']);
+        $k = db_row("SELECT shift FROM kode_jadwal WHERE UPPER(kode) = ?", [$kode]);
+        $sh = strtoupper((string)($k['shift'] ?? ''));
+        if ($sh === '' && db_val("SELECT COUNT(*) FROM shift WHERE UPPER(kode) = ?", [$kode])) $sh = $kode;
+        if ($sh !== '') $shift = $sh;
+    }
+    db_transaction(function () use ($tanggal, $id, $status, $ket, $shift, $currentUser) {
+        // Satu status per hari untuk tab IEG: catatan shift lain di hari yang sama dihapus
+        db_delete('absensi', 'tanggal = ? AND operator_id = ?', [$tanggal, $id]);
+        if ($status === '') return;
+        db_insert('absensi', [
+            'tanggal' => $tanggal, 'shift' => $shift, 'operator_id' => $id, 'status' => $status,
+            'lembur' => 0, 'ket' => $ket, 'updated_at' => date('Y-m-d H:i:s'), 'updated_by' => $currentUser['username'],
+        ]);
+    });
+    audit_log($currentUser['username'], 'ABSEN_IEG', "$tanggal {$op['nama']} " . ($status === '' ? 'ikut jadwal' : $status));
+    return ['ok' => true, 'status' => $status, 'shift' => $shift];
+}

@@ -2913,22 +2913,60 @@
     }
     async function loadDataAbsen() {
         const f = S.da;
-        try { daData = await call('absensiList', { from: f.tanggal, to: addDays(f.tanggal, 6) }); } catch (e) { return fail(e); }
+        try {
+            const r = await Promise.all([
+                call('absensiList', { from: f.tanggal, to: addDays(f.tanggal, 6) }),
+                // Tab IEG: status harian mengikuti Jadwal IEG
+                call('minggu', { tanggal: f.tanggal, onlyIeg: 1 }).catch(() => null)
+            ]);
+            daData = r[0]; daJad = r[1];
+        } catch (e) { return fail(e); }
         if (S.page !== 'data_absen') return;
         drawDataAbsen();
     }
+    let daJad = null;
     // Grid mingguan seperti Jadwal: semua karyawan (aktif / yang punya absensi) x 7 hari
     function daGrid() {
-        const f = S.da, d = daData;
+        const f = S.da, d = daData, today = S.master.today;
         const days = [0, 1, 2, 3, 4, 5, 6].map(i => addDays(f.tanggal, i));
         const people = {};
         (S.master.operators || []).forEach(o => {
             if (!o.aktif || /vacant/i.test(o.nama)) return;
-            people[o.id] = { id: o.id, nama: o.nama, nik: o.nik || '', bagian: o.bagian, employer: String(o.employer || 'RKA').toUpperCase() === 'IEG' ? 'IEG' : 'RKA', foto: o.foto || '', role: o.role || '', cells: {} };
+            people[o.id] = { id: o.id, nama: o.nama, nik: o.nik || '', bagian: o.bagian, employer: String(o.employer || 'RKA').toUpperCase() === 'IEG' ? 'IEG' : 'RKA', foto: o.foto || '', role: o.role || '', cells: {}, jad: {} };
         });
         d.rows.forEach(r => {
-            const p = people[r.operatorId] = people[r.operatorId] || { id: r.operatorId, nama: r.nama, nik: r.nik, bagian: r.bagian, employer: r.employer === 'IEG' ? 'IEG' : 'RKA', foto: r.foto, role: '', cells: {} };
+            const p = people[r.operatorId] = people[r.operatorId] || { id: r.operatorId, nama: r.nama, nik: r.nik, bagian: r.bagian, employer: r.employer === 'IEG' ? 'IEG' : 'RKA', foto: r.foto, role: '', cells: {}, jad: {} };
             (p.cells[r.tanggal] = p.cells[r.tanggal] || []).push(r);
+        });
+        // Jadwal IEG minggu ini
+        const kodes = {};
+        if (daJad) {
+            (daJad.kodes || []).forEach(k => { kodes[k.kode] = k; });
+            const jd = (daJad.dates || []).map(x => x.d);
+            (daJad.rows || []).forEach(r => {
+                if (/vacant/i.test(r.nama)) return;
+                const p = people[r.id] = people[r.id] || { id: r.id, nama: r.nama, nik: r.nik || '', bagian: r.bagian, employer: 'IEG', foto: '', role: r.role || '', cells: {}, jad: {} };
+                (r.codes || []).forEach((c, i) => { if (c && jd[i]) p.jad[jd[i]] = c; });
+            });
+        }
+        // Status efektif per hari. RKA: dari absensi. IEG: absensi (bila diubah) atau turunan Jadwal IEG.
+        Object.keys(people).forEach(k => {
+            const p = people[k];
+            p.eff = {};
+            days.forEach(t => {
+                const list = p.cells[t] || [];
+                const kode = p.jad[t] || '', kd = kodes[kode];
+                const jLabel = kode ? (kd ? kd.label : kode) : '';
+                if (list.length) {
+                    const x = daDay(list);
+                    p.eff[t] = Object.assign(x, { src: 'abs', kode: kode, jLabel: jLabel, label: p.employer === 'IEG' && jLabel ? jLabel : x.label, list: list });
+                    return;
+                }
+                if (p.employer !== 'IEG' || !kode) return;
+                if (kode === 'CUTI') p.eff[t] = { status: 'C', label: jLabel, lembur: 0, src: 'jad', kode: kode, jLabel: jLabel };
+                else if (kd && !kd.kerja) p.eff[t] = { status: 'OFF', label: jLabel, lembur: 0, src: 'jad', kode: kode, jLabel: jLabel };
+                else p.eff[t] = { status: t <= today ? 'H' : '', label: jLabel, lembur: 0, src: 'jad', kode: kode, jLabel: jLabel };
+            });
         });
         const all = Object.keys(people).map(k => people[k]);
         const q = (f.q || '').toLowerCase();
@@ -2947,21 +2985,24 @@
         const sh = list.map(x => x.shift).filter((v, i, a) => a.indexOf(v) === i);
         return { status: best.status, label: sh.length > 1 ? 'LS' : (sh[0] || ''), lembur: list.reduce((n, x) => n + (x.lembur || 0), 0) };
     }
+    // Tab IEG: boleh ubah status (Sakit / Izin / Cuti / Alpa ...) — server tetap memeriksa hak & tanggal
+    const daBisaUbah = p => p.employer === 'IEG' && menuEdit('absensi') && canEdit(p.bagian);
     function drawDataAbsen() {
-        const f = S.da, today = S.master.today;
+        const f = S.da, today = S.master.today, ieg = f.employer === 'IEG';
         const g = daGrid(), days = g.days, rows = g.rows;
         ['IEG', 'RKA'].forEach(e => { const n = $('#daN' + e); if (n) n.textContent = g.counts[e]; });
         const d0 = days[0], d6 = days[6];
         $('#pageSub').textContent = 'Employee ' + f.employer + ' · Minggu ' + (+d0.slice(8)) + ' ' + BULAN[+d0.slice(5, 7) - 1] + ' – ' + (+d6.slice(8)) + ' ' + BULAN[+d6.slice(5, 7) - 1] + ' ' + d6.slice(0, 4);
         // Ringkasan minggu ini (sesuai tab & filter)
         // Satu karyawan dihitung satu kali per hari (Long Shift = absen di 2 shift tetap 1 hari)
-        const c = { H: 0, T: 0, S: 0, I: 0, A: 0, C: 0 };
+        const c = { H: 0, T: 0, S: 0, I: 0, A: 0, C: 0, OFF: 0 };
         let total = 0, lembur = 0;
-        rows.forEach(p => Object.keys(p.cells).forEach(t => { const x = daDay(p.cells[t]); total++; if (c[x.status] !== undefined) c[x.status]++; lembur += x.lembur; }));
-        const hadir = c.H + c.T;
-        $('#daStats').innerHTML = '<div class="kpis da-kpis">' +
-            '<div class="kpi"><div class="lbl">Karyawan ' + esc(f.employer) + '</div><div class="val">' + rows.length + '</div><div class="sub">' + total + ' hari tercatat</div></div>' +
-            '<div class="kpi"><div class="lbl">Hadir</div><div class="val" style="color:var(--ok)">' + hadir + '</div><div class="sub">Telat ' + c.T + (total ? ' · ' + Math.round(hadir / total * 100) + '%' : '') + '</div></div>' +
+        rows.forEach(p => days.forEach(t => { const x = p.eff[t]; if (!x || !x.status) return; total++; if (c[x.status] !== undefined) c[x.status]++; lembur += x.lembur; }));
+        const hadir = c.H + c.T, kerja = total - c.OFF;
+        $('#daStats').innerHTML = (ieg ? '<div class="note small" style="margin-bottom:10px">Tab IEG mengikuti <b>Jadwal IEG</b>: hari kerja yang sudah lewat dianggap Hadir, OFF = Libur, CUTI = Cuti.' + (rows.some(daBisaUbah) ? ' Klik sel untuk mengubah menjadi <b>Sakit, Izin, Cuti, Alpa</b>, dll.' : '') + (daJad ? '' : ' <b>Jadwal IEG gagal dimuat.</b>') + '</div>' : '') +
+            '<div class="kpis da-kpis">' +
+            '<div class="kpi"><div class="lbl">Karyawan ' + esc(f.employer) + '</div><div class="val">' + rows.length + '</div><div class="sub">' + total + ' hari tercatat' + (c.OFF ? ' · libur ' + c.OFF : '') + '</div></div>' +
+            '<div class="kpi"><div class="lbl">Hadir</div><div class="val" style="color:var(--ok)">' + hadir + '</div><div class="sub">Telat ' + c.T + (kerja ? ' · ' + Math.round(hadir / kerja * 100) + '%' : '') + '</div></div>' +
             '<div class="kpi"><div class="lbl">Sakit / Izin / Cuti</div><div class="val" style="color:var(--warn)">' + (c.S + c.I + c.C) + '</div><div class="sub">S ' + c.S + ' · I ' + c.I + ' · C ' + c.C + '</div></div>' +
             '<div class="kpi"><div class="lbl">Alpa</div><div class="val" style="color:' + (c.A ? 'var(--err)' : 'inherit') + '">' + c.A + '</div><div class="sub">Lembur ' + (Math.round(lembur * 10) / 10) + ' jam</div></div>' +
             '</div>';
@@ -2974,15 +3015,19 @@
             '<th class="c-jam" title="Jumlah hari hadir (termasuk telat)">Hadir</th><th class="c-hari" title="Total lembur (jam)">Lembur</th></tr></thead><tbody>';
         rows.forEach((p, idx) => {
             let nh = 0, nl = 0;
+            const ubah = daBisaUbah(p);
             const cells = days.map(t => {
-                const list = p.cells[t] || [];
-                if (!list.length) return '<td class="c-day' + (t === today ? ' today' : '') + '"><span class="da-c' + (t > today ? ' fut' : '') + '" title="' + (t > today ? 'Belum waktunya' : 'Belum diabsen') + '">·</span></td>';
-                const r = daDay(list);
+                const r = p.eff[t], td = '<td class="c-day' + (t === today ? ' today' : '') + '"' + (ubah ? ' data-da-ed="' + esc(p.id) + '|' + t + '" style="cursor:pointer"' : '') + '>';
+                if (!r) return td + '<span class="da-c' + (t > today ? ' fut' : '') + '" title="' + (ieg ? 'Belum ada jadwal' : t > today ? 'Belum waktunya' : 'Belum diabsen') + '">·</span></td>';
                 if (r.status === 'H' || r.status === 'T') nh++;
                 nl += r.lembur;
-                const tip = (r.label === 'LS' ? 'Long Shift · ' : '') + list.map(x => shiftName(x.shift) + ': ' + (STATUS[x.status] || x.status) + (x.lembur ? ' · lembur ' + x.lembur + ' jam' : '') + (x.ket ? ' · ' + x.ket : '') +
+                let tip;
+                if (r.src === 'abs') tip = (ieg ? 'Diubah · jadwal ' + (r.jLabel || '-') + '\n' : (r.label === 'LS' ? 'Long Shift · ' : '')) + r.list.map(x => (ieg ? '' : shiftName(x.shift) + ': ') + (STATUS[x.status] || x.status) + (x.lembur ? ' · lembur ' + x.lembur + ' jam' : '') + (x.ket ? ' · ' + x.ket : '') +
                     (x.updatedBy ? ' · oleh ' + x.updatedBy + (x.updatedAt ? ' ' + x.updatedAt.slice(11, 16) : '') : '')).join('\n');
-                return '<td class="c-day' + (t === today ? ' today' : '') + '"><span class="da-c st-' + esc(r.status) + '" title="' + esc(tip) + '"><b>' + esc(r.status) + '</b>' +
+                else tip = 'Jadwal IEG: ' + r.jLabel + (r.status === 'OFF' ? ' (libur)' : !r.status ? ' (belum waktunya)' : ' · ' + (STATUS[r.status] || r.status));
+                if (ubah) tip += '\nKlik untuk ubah';
+                if (!r.status) return td + '<span class="da-c fut" title="' + esc(tip) + '"><b>·</b><small>' + esc(r.label) + '</small></span></td>';
+                return td + '<span class="da-c st-' + esc(r.status) + (ieg && r.src === 'abs' ? ' da-ubah' : '') + '" title="' + esc(tip) + '"><b>' + esc(r.status === 'OFF' ? 'L' : r.status) + '</b>' +
                     '<small>' + esc(r.label) + '</small>' + (r.lembur ? '<i class="da-ot" aria-label="lembur"></i>' : '') + '</span></td>';
             }).join('');
             h += '<tr><td class="c-no">' + (idx + 1) + '</td>' +
@@ -2993,21 +3038,57 @@
                 '<td class="c-jam' + (nh ? ' good' : '') + '">' + nh + '</td><td class="c-hari">' + (nl ? Math.round(nl * 10) / 10 : '—') + '</td></tr>';
         });
         h += '</tbody><tfoot>';
-        const per = pred => days.map(t => rows.filter(p => (p.cells[t] || []).some(pred)).length);
+        const per = pred => days.map(t => rows.filter(p => p.eff[t] && pred(p.eff[t])).length);
         const foot = (label, arr, cls) => '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td colspan="3" class="c-foot">' + label + '</td>' +
             arr.map(n => '<td>' + (n || '') + '</td>').join('') + '<td colspan="2"></td></tr>';
         h += foot('Hadir / Telat', per(r => r.status === 'H' || r.status === 'T'), 'tot');
         h += foot('Sakit / Izin / Cuti', per(r => r.status === 'S' || r.status === 'I' || r.status === 'C'));
         h += foot('Alpa', per(r => r.status === 'A'));
-        h += foot('Belum diabsen', days.map(t => t > today ? 0 : rows.filter(p => !(p.cells[t] || []).length).length));
+        if (ieg) h += foot('Libur (OFF)', per(r => r.status === 'OFF'));
+        h += foot(ieg ? 'Belum ada jadwal' : 'Belum diabsen', days.map(t => !ieg && t > today ? 0 : rows.filter(p => !p.eff[t]).length));
         h += '</tfoot></table></div>' +
             '<div class="legend da-legend">' + Object.keys(STATUS).map(k => '<span class="da-lg"><span class="da-c st-' + k + '"><b>' + k + '</b></span>' + STATUS[k] + '</span>').join('') +
-            '<span class="da-lg"><span class="da-c">·</span>Belum diabsen</span><span class="da-lg"><span class="da-c st-H"><b>H</b><i class="da-ot"></i></span>Ada lembur</span></div>';
+            (ieg ? '<span class="da-lg"><span class="da-c st-OFF"><b>L</b></span>Libur (OFF)</span><span class="da-lg"><span class="da-c st-S da-ubah"><b>S</b></span>Diubah dari jadwal</span>' : '') +
+            '<span class="da-lg"><span class="da-c">·</span>' + (ieg ? 'Belum ada jadwal' : 'Belum diabsen') + '</span><span class="da-lg"><span class="da-c st-H"><b>H</b><i class="da-ot"></i></span>Ada lembur</span></div>';
         $('#daBody').innerHTML = h;
         $$('#daBody [data-view-foto]').forEach(b => {
             const open = () => { const o = (S.master.operators || []).find(x => x.id === b.dataset.viewFoto); if (o) fotoViewModal(o); };
             b.onclick = open;
             b.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+        });
+        $$('#daBody [data-da-ed]').forEach(td => td.onclick = () => {
+            const [id, t] = td.dataset.daEd.split('|');
+            const p = rows.find(x => String(x.id) === id);
+            if (p) daUbahModal(p, t);
+        });
+    }
+    // Ubah status harian karyawan IEG (default mengikuti Jadwal IEG)
+    function daUbahModal(p, t) {
+        const r = p.eff[t] || null, cur = r && r.src === 'abs' ? r.status : '';
+        const ketLama = r && r.src === 'abs' && r.list[0] ? r.list[0].ket || '' : '';
+        let pilih = cur;
+        const opsi = [['', 'Ikut jadwal'], ['S', 'Sakit'], ['I', 'Izin'], ['C', 'Cuti'], ['A', 'Alpa'], ['H', 'Hadir'], ['T', 'Telat']];
+        openModal({
+            title: 'Absensi ' + p.nama,
+            body: '<p class="small muted" style="margin-top:0">' + esc(fmtTgl(t)) + ' · Jadwal IEG: <b>' + esc(r && r.jLabel ? r.jLabel : 'belum ada') + '</b>' +
+                (r && r.src === 'abs' ? ' · sekarang <b>' + esc(STATUS[r.status] || r.status) + '</b>' : '') + '</p>' +
+                '<div class="field"><span>Status</span><div class="seg" id="duSt">' + opsi.map(o => '<button type="button" data-du="' + o[0] + '" class="' + (pilih === o[0] ? 'on' : '') + '">' + o[1] + '</button>').join('') + '</div></div>' +
+                '<label class="field"><span>Keterangan</span><input id="duKet" maxlength="200" value="' + esc(ketLama) + '" placeholder="mis. surat dokter, cuti tahunan"></label>' +
+                '<p class="small muted" style="margin:0">"Ikut jadwal" menghapus perubahan, status kembali sesuai Jadwal IEG. Jadwal IEG sendiri tidak diubah.</p>',
+            onOpen: body => {
+                $$('[data-du]', body).forEach(b => b.onclick = () => { pilih = b.dataset.du; $$('[data-du]', body).forEach(x => x.classList.toggle('on', x === b)); });
+            },
+            buttons: [{ label: 'Batal' }, {
+                label: 'Simpan', cls: 'primary', onClick: async btn => {
+                    btn.disabled = true;
+                    try {
+                        await call('setAbsenIeg', { tanggal: t, operatorId: p.id, status: pilih, ket: $('#duKet').value.trim() });
+                        closeModal();
+                        toast(pilih ? 'Disimpan: ' + STATUS[pilih] : 'Kembali ikut jadwal', 'ok');
+                        loadDataAbsen();
+                    } catch (e) { btn.disabled = false; fail(e); }
+                }
+            }]
         });
     }
 

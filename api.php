@@ -100,6 +100,7 @@ try {
         'fillVacant'      => fn() => fill_vacant_slot($payload, $user),
         'absensiList'     => fn() => absensi_list($payload, $user),
         'absensiListXls'  => fn() => absensi_list_export($payload, $user),
+        'setAbsenIeg'     => fn() => set_absen_ieg($payload, $user),
 
         // Jadwal Employee
         'jadwal'          => fn() => jadwal_minggu($payload, $user),
@@ -200,6 +201,7 @@ try {
     $writeMenu = [
         'setAbsensi' => ['absensi', 'Absensi Shift'], 'addToShift' => ['absensi', 'Absensi Shift'],
         'removeFromShift' => ['absensi', 'Absensi Shift'], 'fillVacant' => ['absensi', 'Absensi Shift'],
+        'setAbsenIeg' => ['absensi', 'Absensi Shift'],
         'mingguSimpan' => $jadMenu, 'mingguIsi' => $jadMenu, 'mingguSalin' => $jadMenu,
         'mingguKunci' => ['jadwal', 'Jadwal Employee'], 'setJadwal' => ['jadwal', 'Jadwal Employee'], 'mingguImport' => ['jadwal', 'Jadwal Employee'],
         'orderSave' => ['request_os', 'Request OS'], 'orderSend' => ['request_os', 'Request OS'],
