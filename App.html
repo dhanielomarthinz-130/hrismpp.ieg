@@ -3040,7 +3040,7 @@
                 '<div class="wk-nm-txt"><b>' + esc(p.nama) + '</b><small>' + esc((p.role ? p.role + ' · ' : '') + p.employer) + '</small></div></div></td>' +
                 '<td class="c-bag"><span class="badge-bag">' + esc(bagName(p.bagian)) + '</span></td>' +
                 cells +
-                '<td class="c-jam' + (nh ? ' good' : '') + '">' + nh + '</td><td class="c-hari">' + (nl ? Math.round(nl * 10) / 10 : '—') + '</td></tr>';
+                '<td class="c-jam' + (nh ? ' good' : '') + '">' + nh + '</td><td class="c-hari">' + (nl ? Math.round(nl * 10) / 10 + ' jam' : '—') + '</td></tr>';
         });
         h += '</tbody><tfoot>';
         const per = pred => days.map(t => rows.filter(p => p.eff[t] && pred(p.eff[t])).length);
