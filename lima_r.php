@@ -45,6 +45,7 @@ const R5_MENUS = [
     'tugas'  => ['Tugas Saya (perbaikan & keberatan)', ['Admin', 'Auditor', 'PIC'], false],
     'daftar' => ['Daftar Temuan', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
     'verif'  => ['Verifikasi & Keberatan', ['Admin', 'Auditor'], false],
+    'harian' => ['6S Harian (checklist tiap shift)', ['Admin', 'Auditor', 'PIC'], false],
     'audit'  => ['Audit 6S', ['Admin', 'Auditor'], false],
     'poin'   => ['Papan Poin', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
     'kpi'    => ['KPI PIC', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
@@ -89,6 +90,8 @@ const R5_DEFAULT_CONFIG = [
     ['FAKTOR_POTONG_PIC', 1, 'Pengali potongan temuan untuk PIC yang bertanggung jawab atas area (1 = sama dengan potongan tim, 0 = PIC tidak dipotong)'],
     ['VERIFIKATOR', 0, 'Approval perbaikan: 0 = Supervisor, 1 = penemu temuan, 2 = Supervisor atau penemu'],
     ['POIN_LAPOR_SEMUA', 1, 'Penemu yang mendapat poin: 0 = hanya Leader / PIC, 1 = semua pengguna yang input temuan'],
+    ['POIN_6S_HARIAN', 1, 'Poin untuk PIC yang menyelesaikan checklist 6S harian sebelum shift berakhir'],
+    ['POTONG_6S_HARIAN', 1, 'Potongan untuk PIC area terjadwal bila checklist 6S harian shift-nya terlewat'],
     ['POIN_LAPOR_AREA_SENDIRI', 1, 'Mode tugas otomatis: penemu tetap mendapat poin walau temuan di area tanggung jawabnya sendiri (1 = ya, 0 = tidak)'],
 ];
 
@@ -111,6 +114,10 @@ const R6_ATURAN = [
         'TELAT'      => ['Potongan terlambat', 'Dipotong per hari keterlambatan perbaikan.', ['POTONG_TELAT_PER_HARI' => 0]],
         'REVISI'     => ['Potongan revisi', 'Dipotong setiap kali perbaikan ditolak.', ['POTONG_REVISI' => 0]],
         'RESPON'     => ['Potongan tidak merespon', 'Mode tugas otomatis: dipotong bila tugas tidak diterima sampai batas respon.', ['POTONG_TIDAK_RESPON' => 0]],
+    ],
+    '6S Harian' => [
+        'HARIAN'       => ['Poin 6S harian selesai', 'PIC yang mengirim checklist 6S harian sebelum shift berakhir mendapat poin.', ['POIN_6S_HARIAN' => 0]],
+        'HARIAN_LEWAT' => ['Potongan 6S harian terlewat', 'PIC area yang terjadwal dipotong bila checklist shift-nya tidak dikerjakan.', ['POTONG_6S_HARIAN' => 0]],
     ],
 ];
 /** Opsi pilihan (bukan angka bebas) di menu Pengaturan Super Admin: key => [judul, [nilai => label]]. */
@@ -224,6 +231,12 @@ function r5_init(): void {
         if (!in_array($c, $cols, true)) $pdo->exec("ALTER TABLE r5_temuan ADD COLUMN $c $def");
     }
     // Leader / PIC yang bertanggung jawab atas area (bergantian per shift sesuai jadwal HRIS)
+    $pdo->exec("CREATE TABLE IF NOT EXISTS r6_harian (
+        id VARCHAR(40) PRIMARY KEY, tanggal VARCHAR(10) NOT NULL, shift VARCHAR(10) NOT NULL, area_id VARCHAR(12) NOT NULL,
+        nama_area VARCHAR(120) NULL, status VARCHAR(20) NOT NULL, pics TEXT NULL, batas $big NULL,
+        oleh_nik VARCHAR(40) NULL, oleh_nama VARCHAR(120) NULL, waktu $big NULL, skor DOUBLE NULL,
+        ok_n INT NOT NULL DEFAULT 0, ng_n INT NOT NULL DEFAULT 0, foto_area VARCHAR(80) NULL, catatan TEXT NULL,
+        poin DOUBLE NOT NULL DEFAULT 0, detail TEXT NULL)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS r6_area_pic (
         area_id VARCHAR(12) NOT NULL, nik VARCHAR(40) NOT NULL, PRIMARY KEY (area_id, nik))");
     $pdo->exec("CREATE TABLE IF NOT EXISTS r5_poin (
@@ -679,7 +692,9 @@ function r5_access_config(): array {
     $raw = json_decode((string)db_val("SELECT value FROM settings WHERE key_name = 'menu_access_5r'", [], ''), true);
     $ids = array_keys(R5_MENUS);
     $clean = fn($l) => array_values(array_intersect($ids, is_array($l) ? $l : []));
-    $out = ['roles' => [], 'users' => [], 'ro' => ['roles' => [], 'users' => []]];
+    $out = ['roles' => [], 'users' => [], 'ro' => ['roles' => [], 'users' => []],
+            // Menu yang sudah dikenal saat control akses terakhir disimpan; menu yang lebih baru memakai akses bawaan
+            'known' => isset($raw['known']) && is_array($raw['known']) ? $clean($raw['known']) : array_values(array_diff($ids, ['harian', 'atur']))];
     foreach ((array)($raw['roles'] ?? []) as $r => $l) if (in_array($r, R5_ROLES, true)) $out['roles'][$r] = $clean($l);
     foreach ((array)($raw['users'] ?? []) as $u => $l) $out['users'][mb_strtolower((string)$u)] = $clean($l);
     foreach ((array)($raw['ro']['roles'] ?? []) as $r => $l) if (in_array($r, R5_ROLES, true)) $out['ro']['roles'][$r] = $clean($l);
@@ -699,6 +714,7 @@ function r5_access_for(array $u): array {
     if (array_key_exists($k, $cfg['users'])) { $menus = $cfg['users'][$k]; $ro = $cfg['ro']['users'][$k] ?? []; }
     elseif (array_key_exists($u['role'], $cfg['roles'])) { $menus = $cfg['roles'][$u['role']]; $ro = $cfg['ro']['roles'][$u['role']] ?? []; }
     else { $menus = r5_default_menus($u['role']); $ro = []; }
+    foreach (r5_default_menus($u['role']) as $m) if (!in_array($m, $cfg['known'], true) && !in_array($m, $menus, true)) $menus[] = $m;
     $menus = array_values(array_diff($menus, R6_MENU_SUPER));
     // Menu hanya-lihat & role Viewer tidak pernah bisa mengedit
     foreach ($menus as $m) if ((R5_MENUS[$m][2] || $u['role'] === 'Viewer') && !in_array($m, $ro, true)) $ro[] = $m;
@@ -724,7 +740,7 @@ function r5_access_save(array $p, array $hrisUser): array {
     require_super($hrisUser);
     $ids = array_values(array_diff(array_keys(R5_MENUS), R6_MENU_SUPER));
     $known = array_map(fn($u) => mb_strtolower($u['nik']), r5_users_all());
-    $cfg = ['roles' => [], 'users' => [], 'ro' => ['roles' => [], 'users' => []]];
+    $cfg = ['roles' => [], 'users' => [], 'ro' => ['roles' => [], 'users' => []], 'known' => $ids];
     foreach ((array)($p['roles'] ?? []) as $r => $l) if (in_array($r, R5_ROLES, true)) $cfg['roles'][$r] = array_values(array_intersect($ids, (array)$l));
     foreach ((array)($p['users'] ?? []) as $u => $l) {
         $u = mb_strtolower(trim((string)$u));
@@ -897,8 +913,11 @@ function r5_log_poin(string $jenis, string $refId, string $nama, float $poin, st
 }
 
 function apiCreateTemuan($token, $d): array {
-    $u = r5_auth($token, 'input', true);
-    $d = is_array($d) ? $d : [];
+    return r6_buat_temuan(r5_auth($token, 'input', true), is_array($d) ? $d : []);
+}
+
+/** Buat temuan atas nama $u. $d['fotoId'] = foto yang sudah tersimpan (mis. dari 6S harian). */
+function r6_buat_temuan(array $u, array $d): array {
     $area = r5_find_area($d['areaId'] ?? '');
     if (!$area) throw new RuntimeException('Area tidak ditemukan.');
     $kat = (string)($d['kategoriR'] ?? '');
@@ -906,7 +925,7 @@ function apiCreateTemuan($token, $d): array {
     if (!in_array($kat, R5_LIST, true)) throw new RuntimeException('Pilih kategori 6S.');
     if (!in_array($ting, R5_TINGKAT, true)) throw new RuntimeException('Pilih tingkat temuan.');
     if (r5_str($d['deskripsi'] ?? '') === '') throw new RuntimeException('Deskripsi temuan wajib diisi.');
-    if (empty($d['foto'])) throw new RuntimeException('Foto sebelum (bukti temuan) wajib diunggah.');
+    if (empty($d['foto']) && empty($d['fotoId'])) throw new RuntimeException('Foto sebelum (bukti temuan) wajib diunggah.');
     $now0 = r5_now();
     $otomatis = r6_otomatis();
     $pic = null; $tugas = ['ket' => '', 'mulai' => null];
@@ -926,7 +945,7 @@ function apiCreateTemuan($token, $d): array {
     }
     }
 
-    $fotoId = foto_save((string)$d['foto'], R5_FOTO_DIM, true);
+    $fotoId = !empty($d['fotoId']) ? (string)$d['fotoId'] : foto_save((string)$d['foto'], R5_FOTO_DIM, true);
     try {
         return db_transaction(function () use ($u, $d, $area, $kat, $ting, $pic, $fotoId, $tugas, $otomatis) {
             $now = r5_now();
@@ -954,7 +973,8 @@ function apiCreateTemuan($token, $d): array {
                 'deadline_standar' => $deadline, 'tgl_terima' => null, 'batas_respon' => r6_batas_respon($tugas['mulai'], $now),
                 'respon_lewat' => 'N', 'riwayat' => $pic
                     ? r6_riwayat(null, 'Ditugaskan', $u['nama'], 'Ke ' . $pic['nama'] . ' · ' . $tugas['ket'], $now)
-                    : r6_riwayat(null, 'Menunggu diambil', 'Sistem', 'Masuk Tugas tersedia · Leader / PIC mana pun bisa mengambil & memprosesnya', $now),
+                    : r6_riwayat(!empty($d['harian']) ? r6_riwayat(null, 'Dari 6S harian', $u['nama'], 'Item checklist Tidak OK dijadikan temuan', $now) : null,
+                        'Menunggu diambil', 'Sistem', 'Masuk Tugas tersedia · Leader / PIC mana pun bisa mengambil & memprosesnya', $now),
             ];
             db_insert('r5_temuan', $row);
             if ($potong != 0) {
@@ -986,7 +1006,7 @@ function apiCreateTemuan($token, $d): array {
             return r5_tout(r5_find_temuan($id), $tm);
         });
     } catch (Throwable $e) {
-        foto_delete_file($fotoId);
+        if (empty($d['fotoId'])) foto_delete_file($fotoId);
         throw $e;
     }
 }
@@ -1690,7 +1710,7 @@ function apiLeaderboard($token, $bulan): array {
     }, r5_leader_pic($bulan, $poin, $all));
     // Papan poin per user (username): semua Leader / PIC + siapa pun yang punya poin PIC bulan ini
     $papan = [];
-    $row = fn($nik, $nama) => ['nik' => $nik, 'nama' => $nama, 'poin' => 0.0, 'lapor' => 0.0, 'perbaikan' => 0.0, 'potongan' => 0.0,
+    $row = fn($nik, $nama) => ['nik' => $nik, 'nama' => $nama, 'poin' => 0.0, 'lapor' => 0.0, 'perbaikan' => 0.0, 'harian' => 0.0, 'potongan' => 0.0,
         'ditemukan' => 0, 'diproses' => 0, 'selesai' => 0, 'tepat' => 0, 'telat' => 0, 'revisi' => 0, 'overdue' => 0];
     foreach (r5_users_all() as $x) if ($x['pic']) $papan[mb_strtolower($x['nik'])] = $row($x['nik'], $x['nama']);
     foreach (r5_leader_pic($bulan, $poin, $all) as $p) {
@@ -1705,6 +1725,7 @@ function apiLeaderboard($token, $bulan): array {
         $k = mb_strtolower($p['ref_id']); if (!isset($papan[$k])) continue;
         $v = (float)$p['poin']; $ket = r5_str($p['ket']);
         if (strpos($ket, 'Menemukan') === 0) $papan[$k]['lapor'] += $v;
+        elseif (strpos($ket, '6S harian') === 0) $papan[$k]['harian'] += $v;
         elseif (strpos($ket, 'Perbaikan tepat') === 0) $papan[$k]['perbaikan'] += $v;
         else $papan[$k]['potongan'] += $v;   // terlambat, revisi, tidak merespon, temuan di area sendiri, pembatalan
     }
@@ -1716,7 +1737,7 @@ function apiLeaderboard($token, $bulan): array {
         if ($t['status'] === R5_CLOSED && $t['tglVerifikasi'] && r5_bulan($t['tglVerifikasi']) === $bulan) $papan[$pk]['selesai']++;
     }
     $papan = array_values(array_map(function ($r) {
-        foreach (['poin', 'lapor', 'perbaikan', 'potongan'] as $f) $r[$f] = r5_round1($r[$f]);
+        foreach (['poin', 'lapor', 'perbaikan', 'harian', 'potongan'] as $f) $r[$f] = r5_round1($r[$f]);
         return $r;
     }, $papan));
     usort($papan, fn($a, $b) => ($b['poin'] <=> $a['poin']) ?: ($b['selesai'] <=> $a['selesai']) ?: ($b['ditemukan'] <=> $a['ditemukan']) ?: strcmp($a['nama'], $b['nama']));
@@ -1973,6 +1994,225 @@ function apiSaveConfig($token, $list): bool {
 }
 
 /* =====================================================================
+ *  6S HARIAN — checklist 6S rutin setiap shift (Shift 1 & 2) di setiap area aktif.
+ *  Pelaksana: PIC area yang terjadwal di shift itu (jadwal HRIS). Item OK / Tidak OK + foto;
+ *  item Tidak OK bisa langsung dijadikan temuan. Selesai sebelum shift berakhir = poin,
+ *  terlewat = potongan untuk PIC terjadwal (diatur Super Admin).
+ * ===================================================================== */
+
+/** Shift yang wajib checklist 6S harian. */
+const R6_HARIAN_SHIFT = ['S1', 'S2'];
+
+/** Jam shift (tabel shift HRIS) untuk tanggal $tgl: kode => [nama, mulai ms, selesai ms]. */
+function r6_harian_shifts(string $tgl): array {
+    $tz = new DateTimeZone(R6_TZ);
+    $out = [];
+    foreach (db_all("SELECT kode, nama, mulai, selesai FROM shift ORDER BY urutan, kode") as $s) {
+        if (!preg_match('/^\d{2}:\d{2}$/', (string)$s['mulai']) || !preg_match('/^\d{2}:\d{2}$/', (string)$s['selesai'])) continue;
+        $a = (new DateTime($tgl . ' ' . $s['mulai'], $tz))->getTimestamp() * 1000;
+        $b = (new DateTime($tgl . ' ' . $s['selesai'], $tz))->getTimestamp() * 1000;
+        if ($b <= $a) $b += 86400000;
+        $k = strtoupper((string)$s['kode']);
+        if (!in_array($k, R6_HARIAN_SHIFT, true)) continue;
+        $out[$k] = ['kode' => $k, 'nama' => r5_str($s['nama']) ?: $k, 'jam' => $s['mulai'] . '–' . $s['selesai'], 'mulai' => $a, 'selesai' => $b];
+    }
+    return $out;
+}
+
+/** Konteks PIC per tanggal: shift tiap operator (jadwal kerja, tidak absen S/I/A/C) + peta area PIC. */
+function r6_harian_ctx(string $tgl): array {
+    $jad = [];
+    foreach (db_all("SELECT j.operator_id, UPPER(COALESCE(k.shift, '')) AS sh, k.kerja FROM jadwal j LEFT JOIN kode_jadwal k ON UPPER(k.kode) = UPPER(j.shift)
+                     WHERE j.tanggal = ?", [$tgl]) as $r) {
+        if ((int)$r['kerja'] === 1 && $r['sh'] !== '') $jad[(string)$r['operator_id']] = $r['sh'];
+    }
+    foreach (db_all("SELECT operator_id FROM absensi WHERE tanggal = ? AND status IN ('S','I','A','C')", [$tgl]) as $r) unset($jad[(string)$r['operator_id']]);
+    $pool = [];
+    foreach (r5_users_all() as $u) if ($u['pic']) $pool[mb_strtolower($u['nik'])] = $u;
+    return ['jad' => $jad, 'pool' => $pool, 'apm' => r6_area_pic_map()];
+}
+
+/** PIC area yang terjadwal di shift $shift (bisa lebih dari satu; salah satu cukup mengerjakan). */
+function r6_harian_pic(array $ctx, string $areaId, string $shift): array {
+    $out = [];
+    foreach ($ctx['apm'] as $nik => $areas) {
+        if (!in_array($areaId, $areas, true) || !isset($ctx['pool'][$nik])) continue;
+        $u = $ctx['pool'][$nik];
+        if (($ctx['jad'][(string)$u['operator_id']] ?? '') === $shift) $out[] = ['nik' => $u['nik'], 'nama' => $u['nama']];
+    }
+    return $out;
+}
+
+function r6_harian_id(string $tgl, string $shift, string $areaId): string {
+    return 'H' . str_replace('-', '', $tgl) . '-' . $shift . '-' . $areaId;
+}
+
+/** Tanggal mulai fitur (agar hari sebelum fitur ada tidak dihitung terlewat). */
+function r6_harian_mulai(): string {
+    $v = (string)db_val("SELECT value FROM settings WHERE key_name = 'r6_harian_mulai'", [], '');
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $v)) return $v;
+    $v = r5_fmt(r5_now(), 'Y-m-d');
+    db_insert('settings', ['key_name' => 'r6_harian_mulai', 'value' => $v, 'ket' => 'Tanggal mulai 6S Harian']);
+    return $v;
+}
+
+/** Catat slot yang shift-nya sudah berakhir tanpa checklist sebagai Terlewat (+ potongan PIC terjadwal). */
+function r6_harian_sync(): void {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    $now = r5_now();
+    $mulai = r6_harian_mulai();
+    $areas = db_all("SELECT area_id, nama FROM r5_area WHERE aktif <> 'N' ORDER BY area_id");
+    if (!$areas) return;
+    $pot = r5_num('POTONG_6S_HARIAN', 1);
+    for ($i = 7; $i >= 0; $i--) {
+        $tgl = r5_fmt($now - $i * 86400000, 'Y-m-d');
+        if ($tgl < $mulai) continue;
+        $shifts = array_filter(r6_harian_shifts($tgl), fn($s) => $s['selesai'] <= $now);
+        if (!$shifts) continue;
+        $ada = array_flip(array_column(db_all("SELECT id FROM r6_harian WHERE tanggal = ?", [$tgl]), 'id'));
+        $ctx = null;
+        foreach ($shifts as $sh) foreach ($areas as $a) {
+            $id = r6_harian_id($tgl, $sh['kode'], $a['area_id']);
+            if (isset($ada[$id])) continue;
+            $ctx = $ctx ?? r6_harian_ctx($tgl);
+            $pics = r6_harian_pic($ctx, $a['area_id'], $sh['kode']);
+            try {
+                db_transaction(function () use ($id, $tgl, $sh, $a, $pics, $pot, $now) {
+                    db_insert('r6_harian', ['id' => $id, 'tanggal' => $tgl, 'shift' => $sh['kode'], 'area_id' => $a['area_id'], 'nama_area' => $a['nama'],
+                        'status' => 'Terlewat', 'pics' => json_encode($pics, JSON_UNESCAPED_UNICODE), 'batas' => $sh['selesai'], 'poin' => $pics && $pot > 0 ? -$pot : 0]);
+                    if ($pot > 0) foreach ($pics as $p) {
+                        r5_log_poin('PIC', $p['nik'], $p['nama'], -$pot, '', '6S harian terlewat · ' . $a['nama'] . ' · ' . $sh['nama'] . ' ' . $tgl, $sh['selesai']);
+                    }
+                });
+            } catch (Throwable $e) { /* slot sudah dibuat proses lain */ }
+        }
+    }
+}
+
+function r6_harian_out(?array $r): ?array {
+    if (!$r) return null;
+    return ['id' => $r['id'], 'status' => $r['status'], 'oleh' => r5_str($r['oleh_nama']), 'olehNik' => r5_str($r['oleh_nik']),
+            'waktu' => r5_ms($r['waktu']), 'skor' => $r['skor'] === null ? null : (float)$r['skor'], 'ok' => (int)$r['ok_n'], 'ng' => (int)$r['ng_n'],
+            'fotoArea' => r5_str($r['foto_area']), 'catatan' => r5_str($r['catatan']), 'poin' => (float)$r['poin'],
+            'pics' => json_decode((string)$r['pics'], true) ?: [], 'detail' => json_decode((string)$r['detail'], true) ?: []];
+}
+
+/** Boleh mengerjakan slot: PIC terjadwal; tanpa PIC terjadwal = Leader / PIC mana pun; Admin & super admin selalu. */
+function r6_harian_boleh(array $u, array $pics): bool {
+    if (!empty($u['super']) || $u['role'] === 'Admin') return true;
+    if (!$pics) return !empty($u['pic']);
+    foreach ($pics as $p) if (mb_strtolower($p['nik']) === mb_strtolower($u['nik'])) return true;
+    return false;
+}
+
+function apiHarianList($token, $tgl): array {
+    $u = r5_auth($token, 'harian');
+    r6_harian_sync();
+    $now = r5_now();
+    $tgl = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$tgl) ? (string)$tgl : r5_fmt($now, 'Y-m-d');
+    $shifts = r6_harian_shifts($tgl);
+    $ctx = r6_harian_ctx($tgl);
+    $rec = [];
+    foreach (db_all("SELECT * FROM r6_harian WHERE tanggal = ?", [$tgl]) as $r) $rec[$r['id']] = $r;
+    $slots = [];
+    foreach (db_all("SELECT area_id, nama FROM r5_area WHERE aktif <> 'N' ORDER BY area_id") as $a) {
+        foreach ($shifts as $sh) {
+            $id = r6_harian_id($tgl, $sh['kode'], $a['area_id']);
+            $r = r6_harian_out($rec[$id] ?? null);
+            $pics = $r && $r['pics'] ? $r['pics'] : r6_harian_pic($ctx, $a['area_id'], $sh['kode']);
+            $status = $r ? $r['status'] : ($now < $sh['mulai'] - 1800000 ? 'Nanti' : ($now < $sh['selesai'] ? 'Belum' : 'Terlewat'));
+            $slots[] = ['id' => $id, 'tanggal' => $tgl, 'shift' => $sh['kode'], 'shiftNama' => $sh['nama'], 'jam' => $sh['jam'],
+                'mulai' => $sh['mulai'], 'selesai' => $sh['selesai'], 'areaId' => $a['area_id'], 'area' => $a['nama'],
+                'status' => $status, 'pics' => $pics, 'rec' => $r,
+                'bisa' => $status === 'Belum' && r6_harian_boleh($u, $pics)];
+        }
+    }
+    // Kepatuhan 7 hari terakhir (slot yang sudah lewat)
+    $dari = r5_fmt($now - 6 * 86400000, 'Y-m-d');
+    $rek = ['selesai' => 0, 'terlewat' => 0];
+    foreach (db_all("SELECT status, COUNT(*) n FROM r6_harian WHERE tanggal BETWEEN ? AND ? GROUP BY status", [$dari, r5_fmt($now, 'Y-m-d')]) as $r) {
+        if ($r['status'] === 'Selesai') $rek['selesai'] = (int)$r['n']; elseif ($r['status'] === 'Terlewat') $rek['terlewat'] = (int)$r['n'];
+    }
+    return ['tanggal' => $tgl, 'hariIni' => r5_fmt($now, 'Y-m-d'), 'slots' => $slots, 'rekap7' => $rek,
+            'poin' => r5_num('POIN_6S_HARIAN', 1), 'potong' => r5_num('POTONG_6S_HARIAN', 1)];
+}
+
+function apiHarianChecklist($token, $areaId): array {
+    r5_auth($token, 'harian');
+    return r5_checklist_rows(r5_str($areaId));
+}
+
+function apiHarianKirim($token, $d): array {
+    $u = r5_auth($token, 'harian', true);
+    $d = is_array($d) ? $d : [];
+    $now = r5_now();
+    $tgl = (string)($d['tanggal'] ?? '');
+    $shKode = strtoupper(r5_str($d['shift'] ?? ''));
+    $area = r5_find_area($d['areaId'] ?? '');
+    if (!$area || $area['aktif'] === 'N') throw new RuntimeException('Area tidak ditemukan.');
+    $sh = r6_harian_shifts(preg_match('/^\d{4}-\d{2}-\d{2}$/', $tgl) ? $tgl : '1970-01-01')[$shKode] ?? null;
+    if (!$sh) throw new RuntimeException('Shift tidak valid.');
+    if ($now < $sh['mulai'] - 1800000) throw new RuntimeException($sh['nama'] . ' belum mulai (' . $sh['jam'] . ').');
+    if ($now >= $sh['selesai']) throw new RuntimeException($sh['nama'] . ' sudah berakhir — checklist tercatat terlewat.');
+    $id = r6_harian_id($tgl, $shKode, $area['area_id']);
+    $ex = db_row("SELECT * FROM r6_harian WHERE id = ?", [$id]);
+    if ($ex) throw new RuntimeException('Checklist ini sudah dikerjakan oleh ' . r5_str($ex['oleh_nama']) . '.');
+    $pics = r6_harian_pic(r6_harian_ctx($tgl), $area['area_id'], $shKode);
+    if (!r6_harian_boleh($u, $pics)) throw new RuntimeException('Checklist ini untuk PIC area yang bertugas di ' . $sh['nama'] . ': ' . implode(', ', array_column($pics, 'nama')) . '.');
+    if (empty($d['fotoArea'])) throw new RuntimeException('Foto kondisi area wajib diunggah.');
+    $daftar = r5_checklist_rows($area['area_id']);
+    $items = array_values((array)($d['items'] ?? []));
+    if (count($items) !== count($daftar)) throw new RuntimeException('Checklist berubah, muat ulang halaman.');
+    foreach ($items as $i => $it) {
+        if (!isset($it['ok']) || !is_bool($it['ok'])) throw new RuntimeException('Isi semua item: OK atau Tidak OK.');
+        if (!$it['ok'] && empty($it['foto'])) throw new RuntimeException('Item Tidak OK wajib difoto: ' . $daftar[$i]['item']);
+        if (!$it['ok'] && !empty($it['temuan']) && !in_array($it['tingkat'] ?? '', R5_TINGKAT, true)) throw new RuntimeException('Pilih tingkat temuan untuk: ' . $daftar[$i]['item']);
+    }
+    // Simpan foto dulu (gagal = foto dihapus lagi)
+    $saved = [];
+    try {
+        $fotoArea = foto_save((string)$d['fotoArea'], R5_FOTO_DIM, true); $saved[] = $fotoArea;
+        $detail = [];
+        foreach ($items as $i => $it) {
+            $f = !$it['ok'] ? foto_save((string)$it['foto'], R5_FOTO_DIM, true) : '';
+            if ($f !== '') $saved[] = $f;
+            $detail[] = ['r' => $daftar[$i]['r'], 'item' => $daftar[$i]['item'], 'ok' => $it['ok'], 'foto' => $f,
+                         'catatan' => mb_substr(r5_str($it['catatan'] ?? ''), 0, 300),
+                         'temuan' => !$it['ok'] && !empty($it['temuan']), 'tingkat' => r5_str($it['tingkat'] ?? ''), 'temuanId' => ''];
+        }
+        $okN = count(array_filter($detail, fn($x) => $x['ok']));
+        $skor = $detail ? r5_round1($okN / count($detail) * 100) : 100.0;
+        $poin = r5_num('POIN_6S_HARIAN', 1);
+        db_transaction(function () use ($id, $tgl, $shKode, $sh, $area, $pics, $u, $now, $skor, $okN, $detail, $fotoArea, $d, $poin) {
+            db_insert('r6_harian', ['id' => $id, 'tanggal' => $tgl, 'shift' => $shKode, 'area_id' => $area['area_id'], 'nama_area' => $area['nama'],
+                'status' => 'Selesai', 'pics' => json_encode($pics, JSON_UNESCAPED_UNICODE), 'batas' => $sh['selesai'],
+                'oleh_nik' => $u['nik'], 'oleh_nama' => $u['nama'], 'waktu' => $now, 'skor' => $skor, 'ok_n' => $okN, 'ng_n' => count($detail) - $okN,
+                'foto_area' => $fotoArea, 'catatan' => mb_substr(r5_str($d['catatan'] ?? ''), 0, 500), 'poin' => $poin > 0 ? $poin : 0,
+                'detail' => json_encode($detail, JSON_UNESCAPED_UNICODE)]);
+            if ($poin > 0) r5_log_poin('PIC', $u['nik'], $u['nama'], $poin, '', '6S harian selesai · ' . $area['nama'] . ' · ' . $sh['nama'] . ' ' . $tgl, $now);
+        });
+    } catch (Throwable $e) {
+        foreach ($saved as $f) foto_delete_file($f);
+        throw $e;
+    }
+    // Item Tidak OK yang dipilih "jadikan temuan" -> temuan baru (foto item dipakai sebagai foto sebelum)
+    $dibuat = []; $gagal = [];
+    foreach ($detail as $i => $x) {
+        if (!$x['temuan']) continue;
+        try {
+            $t = r6_buat_temuan($u, ['areaId' => $area['area_id'], 'kategoriR' => $x['r'], 'tingkat' => $x['tingkat'],
+                'deskripsi' => $x['item'] . ($x['catatan'] !== '' ? ' — ' . $x['catatan'] : ''), 'lokasi' => '6S harian ' . $sh['nama'],
+                'fotoId' => $x['foto'], 'harian' => true]);
+            $detail[$i]['temuanId'] = $t['id']; $dibuat[] = $t['id'];
+        } catch (Throwable $e) { $gagal[] = $x['item'] . ': ' . $e->getMessage(); }
+    }
+    if ($dibuat) db_update('r6_harian', ['detail' => json_encode($detail, JSON_UNESCAPED_UNICODE)], 'id = ?', [$id]);
+    return ['rec' => r6_harian_out(db_row("SELECT * FROM r6_harian WHERE id = ?", [$id])), 'temuan' => $dibuat, 'gagal' => $gagal];
+}
+
+/* =====================================================================
  *  PENGATURAN SUPER ADMIN — aturan nilai (aktif/nonaktif + angka), approval, control akses
  * ===================================================================== */
 function r6_super($token): array {
@@ -2052,5 +2292,5 @@ const R5_API = [
     'apiSaveAudit', 'apiListAudit', 'apiAdminData', 'apiSaveUser', 'apiSaveArea', 'apiSaveChecklist',
     'apiImportUsers', 'apiSaveConfig', 'apiKeberatan', 'apiPutusKeberatan', 'apiKpiPic',
     'apiPicBertugas', 'apiTerimaTugas', 'apiAlihkan', 'apiRiwayatPoinPic', 'apiLepasTugas',
-    'apiAturData', 'apiAturSimpan', 'apiAksesSimpan',
+    'apiAturData', 'apiAturSimpan', 'apiAksesSimpan', 'apiHarianList', 'apiHarianChecklist', 'apiHarianKirim',
 ];

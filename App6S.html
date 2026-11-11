@@ -366,7 +366,7 @@ const LOGIN_URL = <?!= JSON.stringify(loginUrl) ?>;
 const HRIS_ROLE = { ADMIN: 'Admin', SUPERVISOR: 'Supervisor', LEADER: 'Leader', VIEWER: 'Viewer' };
 const HOME_URL = LOGIN_URL.replace(/login$/, '');
 
-const S = { token: null, user: null, boot: null, view: 'dash', bulan: null, badge: { tugas: 0, verif: 0 } };
+const S = { token: null, user: null, boot: null, view: 'dash', bulan: null, badge: { tugas: 0, verif: 0, harian: 0 } };
 const $ = (s, el) => (el || document).querySelector(s);
 const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
 
@@ -403,6 +403,7 @@ const MENU = [
   { id: 'dash', t: 'Dashboard', i: 'dash', sec: 'Monitoring' },
   { id: 'input', t: 'Input Temuan', i: 'plus', roles: ['Admin', 'Auditor', 'PIC'] },
   { id: 'tugas', t: 'Tugas Saya', i: 'task', roles: ['Admin', 'Auditor', 'PIC'], badge: 'tugas' },
+  { id: 'harian', t: '6S Harian', i: 'clip', roles: ['Admin', 'Auditor', 'PIC'], badge: 'harian' },
   { id: 'daftar', t: 'Daftar Temuan', i: 'list' },
   { id: 'verif', t: 'Verifikasi', i: 'shield', roles: ['Admin', 'Auditor'], badge: 'verif' },
   { id: 'audit', t: 'Audit 6S', i: 'clip', roles: ['Admin', 'Auditor'] },
@@ -648,6 +649,11 @@ async function refreshBadges() {
       const v = await call('apiListTemuan', S.token, { scope: 'verifikasi' });
       const me = S.user.nik.toLowerCase();
       S.badge.verif = v.filter(t => t.status === 'Keberatan' ? (canEdit('verif') && (S.user.super || t.picNik.toLowerCase() !== me)) : canApprove(t)).length;
+    }
+    if (canDo('harian')) {
+      // 6S harian shift berjalan yang bisa saya kerjakan
+      const h = await call('apiHarianList', S.token, '');
+      S.badge.harian = h.slots.filter(x => x.bisa).length;
     }
     $$('[data-b]').forEach(b => { const n = S.badge[b.dataset.b] || 0; b.textContent = n > 99 ? '99+' : n; b.hidden = !n; });
   } catch (e) { /* abaikan */ }
@@ -1632,6 +1638,7 @@ VIEWS.poin = async function () {
     '<div class="note small" style="margin-top:12px"><b>Cara hitung poin user:</b> ' +
     (c.poinLaporPic ? '<b>+' + num(c.poinLaporPic) + '</b> setiap menemukan temuan' + (modeBebas() || c.laporAreaSendiri ? '' : ' di area PIC lain') + (c.laporSemua ? ' (semua yang input)' : ' (Leader / PIC)') + ' · ' : '') +
     '<b>+' + c.poinTepat + '</b> perbaikan disetujui dalam batas standar (Kritis +' + c.poinTepatKritis + ', bonus cepat +' + c.bonusCepat + '; setengahnya bila lewat standar tapi sesuai target) · ' +
+    '6S harian per shift: selesai tepat waktu menambah, terlewat memotong (lihat menu 6S Harian) · ' +
     '<b>−' + c.potongTelat + '</b> per hari terlambat (temuan yang sedang lewat target ikut dipotong per hari berjalan) · <b>−' + c.potongRevisi + '</b> setiap revisi' +
     (modeBebas() ? '' : ' · temuan di area yang dipegang dipotong ' + S.boot.tingkat.map(x => x + ' −' + c.potong[x]).join(', ') + ' · tidak merespon tugas −1') +
     '. Temuan yang dibatalkan mengembalikan semua poinnya. Klik nama untuk melihat riwayat poin user tersebut.</div>';
@@ -1648,12 +1655,12 @@ VIEWS.poin = async function () {
       const list = data.papan.filter(cocok);
       const mx = Math.max(1, ...data.papan.map(p => Math.abs(p.poin)));
       const nol = data.papan.filter(p => !p.poin && !p.ditemukan && !p.diproses && !p.selesai).length;
-      h = list.length ? '<div class="tbl-wrap"><table class="tbl pic-tbl" style="min-width:980px"><tr><th>#</th><th>User</th><th class="num">Total poin</th><th class="num">Dari menemukan</th><th class="num">Dari perbaikan</th><th class="num">Potongan</th>' +
+      h = list.length ? '<div class="tbl-wrap"><table class="tbl pic-tbl" style="min-width:980px"><tr><th>#</th><th>User</th><th class="num">Total poin</th><th class="num">Dari menemukan</th><th class="num">Dari perbaikan</th><th class="num">6S harian</th><th class="num">Potongan</th>' +
         '<th class="num">Ditemukan</th><th class="num">Sedang diproses</th><th class="num">Diselesaikan</th><th class="num">Lewat target</th></tr>' +
         list.map(p => { const i = data.papan.indexOf(p); return '<tr><td><span class="rank ' + (i < 3 && p.poin > 0 ? 'r' + (i + 1) : '') + '">' + (i + 1) + '</span></td>' +
           '<td>' + nm(p.nik, p.nama) + '<div class="pic-meta">' + esc(p.nik) + '</div></td>' +
           '<td class="num"><div class="pbar"><b>' + signed(p.poin) + '</b><i><span class="' + (p.poin < 0 ? 'neg' : '') + '" style="width:' + (Math.abs(p.poin) / mx * 100) + '%"></span></i></div></td>' +
-          '<td class="num">' + (p.lapor ? signed(p.lapor) : '0') + '</td><td class="num">' + (p.perbaikan ? signed(p.perbaikan) : '0') + '</td>' +
+          '<td class="num">' + (p.lapor ? signed(p.lapor) : '0') + '</td><td class="num">' + (p.perbaikan ? signed(p.perbaikan) : '0') + '</td><td class="num">' + (p.harian ? signed(p.harian) : '0') + '</td>' +
           '<td class="num">' + (p.potongan ? '<span style="color:var(--err-t)">' + num(p.potongan) + '</span>' : '0') + '</td>' +
           '<td class="num">' + p.ditemukan + '</td><td class="num">' + p.diproses + '</td><td class="num">' + p.selesai + (p.telat ? ' <span class="small muted">(' + p.telat + ' telat)</span>' : '') + '</td>' +
           '<td class="num">' + (p.overdue ? '<span class="chip c-err">' + p.overdue + '</span>' : '0') + '</td></tr>'; }).join('') + '</table></div>' +
@@ -1815,6 +1822,120 @@ VIEWS.admin = async function () {
 /* =====================================================================
  *  VIEW: QR AREA
  * ===================================================================== */
+/* =====================================================================
+ *  VIEW: 6S HARIAN — checklist rutin setiap shift (Shift 1 & 2) per area
+ * ===================================================================== */
+const HR_ST = { Selesai: ['Selesai', 'c-ok'], Belum: ['Belum dikerjakan', 'c-warn'], Terlewat: ['Terlewat', 'c-err'], Nanti: ['Belum mulai', 'c-neu'] };
+VIEWS.harian = async function (opt) {
+  const v = $('#view');
+  const st = S.hr || (S.hr = { tanggal: '', saya: true });
+  if (opt && opt.tanggal) st.tanggal = opt.tanggal;
+  v.innerHTML = '<div class="toolbar"><input type="date" class="inp" id="hrTgl" style="max-width:180px" value="' + esc(st.tanggal) + '">' +
+    '<label class="small" style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="hrSaya"' + (st.saya ? ' checked' : '') + ' style="width:18px;height:18px"> Tugas saya dulu</label>' +
+    '<span class="grow"></span><button class="icon-btn" id="hrRe" title="Muat ulang" aria-label="Muat ulang">' + ic('refresh') + '</button></div><div id="hrBody"></div>';
+  const HB = $('#hrBody');
+  let D = null;
+  const me = S.user.nik.toLowerCase();
+  const milikSaya = s => s.pics.some(p => p.nik.toLowerCase() === me);
+  const draw = () => {
+    const sl = D.slots.slice();
+    if (st.saya) sl.sort((a, b) => (b.bisa - a.bisa) || (milikSaya(b) - milikSaya(a)));
+    const n = k => D.slots.filter(s => s.status === k).length;
+    const lewat = D.rekap7.selesai + D.rekap7.terlewat;
+    const shifts = [...new Set(D.slots.map(s => s.shift))];
+    HB.innerHTML =
+      '<div class="note small" style="margin-bottom:12px">Setiap <b>Shift 1 dan Shift 2</b>, PIC area yang bertugas (jadwal HRIS) mengisi checklist 6S area: tiap item <b>OK / Tidak OK</b>, item Tidak OK wajib foto dan bisa langsung dijadikan temuan. ' +
+        (D.poin ? 'Selesai sebelum shift berakhir <b>+' + num(D.poin) + '</b>' : '') + (D.potong ? (D.poin ? ', ' : '') + 'terlewat <b>−' + num(D.potong) + '</b> untuk PIC terjadwal' : '') + '.</div>' +
+      '<div class="kpis" style="margin-bottom:12px">' +
+        '<div class="kpi"><div class="l">Selesai</div><div class="v tnum" style="color:var(--ok-t)">' + n('Selesai') + '<span class="small muted"> / ' + D.slots.length + '</span></div><div class="s">' + fDate(Date.parse(D.tanggal + 'T12:00:00+07:00'), false) + '</div></div>' +
+        '<div class="kpi"><div class="l">Belum dikerjakan</div><div class="v tnum" style="color:var(--warn-t)">' + n('Belum') + '</div><div class="s">shift sedang berjalan</div></div>' +
+        '<div class="kpi"><div class="l">Terlewat</div><div class="v tnum" style="color:' + (n('Terlewat') ? 'var(--err-t)' : 'inherit') + '">' + n('Terlewat') + '</div><div class="s">shift sudah berakhir</div></div>' +
+        '<div class="kpi"><div class="l">Kepatuhan 7 hari</div><div class="v tnum">' + (lewat ? Math.round(D.rekap7.selesai / lewat * 100) + '%' : '-') + '</div><div class="s">' + D.rekap7.selesai + ' dari ' + lewat + ' checklist</div></div></div>' +
+      (sl.length ? '<div class="tbl-wrap"><table class="tbl dt" style="min-width:860px"><thead><tr><th>Shift</th><th>Area</th><th>PIC terjadwal</th><th>Status</th><th>Hasil</th><th></th></tr></thead><tbody>' +
+        sl.map(s => {
+          const r = s.rec, H = HR_ST[s.status] || [s.status, 'c-neu'];
+          return '<tr class="' + (s.bisa ? 'own' : '') + '"><td style="white-space:nowrap"><b>' + esc(s.shiftNama) + '</b><div class="cell-sub">' + esc(s.jam) + '</div></td>' +
+            '<td class="cell-main">' + esc(s.area) + '</td>' +
+            '<td>' + (s.pics.length ? s.pics.map(p => esc(p.nama) + (p.nik.toLowerCase() === me ? ' <span class="chip c-pri">Anda</span>' : '')).join('<br>') : '<span class="muted">Tidak ada PIC area terjadwal</span><div class="cell-sub">Leader / PIC yang bertugas boleh mengerjakan</div>') + '</td>' +
+            '<td><span class="chip ' + H[1] + '">' + H[0] + '</span>' + (s.status === 'Belum' ? '<div class="cell-sub">sebelum ' + fDate(s.selesai) + '</div>' : '') + '</td>' +
+            '<td>' + (r && r.status === 'Selesai' ? '<b>' + num(r.skor) + '%</b> <span class="small muted">' + r.ok + ' OK · ' + r.ng + ' Tidak OK</span><div class="cell-sub">' + esc(r.oleh) + ' · ' + fDate(r.waktu) + '</div>'
+              : r && r.status === 'Terlewat' && r.poin ? '<span class="small" style="color:var(--err-t)">' + signed(r.poin) + ' untuk PIC terjadwal</span>' : '-') + '</td>' +
+            '<td>' + (s.bisa ? '<button class="btn sm primary" data-hr="' + esc(s.id) + '">Kerjakan</button>' : r && r.status === 'Selesai' ? '<button class="btn sm" data-hr="' + esc(s.id) + '">Lihat</button>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : emptyBox('Belum ada area aktif atau shift.')) +
+      (shifts.length ? '' : '');
+    $$('[data-hr]', HB).forEach(b => b.onclick = () => { const s = D.slots.find(x => x.id === b.dataset.hr); if (s) (s.bisa ? harianForm(s) : harianLihat(s)); });
+  };
+  const load = async () => {
+    loading(HB);
+    try { D = await call('apiHarianList', S.token, st.tanggal); st.tanggal = st.tanggal || D.hariIni; $('#hrTgl').value = D.tanggal; draw(); }
+    catch (e) { HB.innerHTML = emptyBox(e.message); }
+  };
+  $('#hrTgl').onchange = e => { st.tanggal = e.target.value; load(); };
+  $('#hrSaya').onchange = e => { st.saya = e.target.checked; if (D) draw(); };
+  $('#hrRe').onclick = load;
+  load();
+};
+function harianLihat(s) {
+  const r = s.rec;
+  const ph = id => id ? '<img src="' + thumbUrl(id, 600) + '" data-fid="' + esc(id) + '" onerror="fotoFallback(this)" onclick="window.open(\'' + viewUrl(id) + '\',\'_blank\')" style="max-width:100%;border-radius:10px;cursor:zoom-in" alt="Foto">' : '';
+  openModal('6S harian · ' + s.area,
+    '<div class="small muted" style="margin-bottom:8px">' + esc(s.shiftNama) + ' ' + esc(s.jam) + ' · ' + esc(s.tanggal) + ' · oleh <b>' + esc(r.oleh) + '</b> ' + fDate(r.waktu) + '</div>' +
+    '<div class="note" style="margin-bottom:10px">Skor <b>' + num(r.skor) + '%</b> · ' + r.ok + ' OK · ' + r.ng + ' Tidak OK' + (r.catatan ? '<div class="small" style="margin-top:4px">' + esc(r.catatan) + '</div>' : '') + '</div>' +
+    (r.fotoArea ? '<div style="margin-bottom:10px">' + ph(r.fotoArea) + '<div class="small muted">Foto kondisi area</div></div>' : '') +
+    '<div class="tbl-wrap"><table class="tbl" style="min-width:0"><tbody>' + r.detail.map(x => '<tr><td style="width:70px">' + (x.ok ? '<span class="chip c-ok">OK</span>' : '<span class="chip c-err">Tidak OK</span>') + '</td>' +
+      '<td>' + rChip(x.r) + ' ' + esc(x.item) + (x.catatan ? '<div class="small muted">' + esc(x.catatan) + '</div>' : '') +
+      (x.temuanId ? '<div class="small"><a href="#" onclick="openDetail(' + esc(JSON.stringify(x.temuanId)) + ');return false">Temuan ' + esc(x.temuanId) + '</a></div>' : '') +
+      (x.foto ? '<div style="margin-top:6px;max-width:220px">' + ph(x.foto) + '</div>' : '') + '</td></tr>').join('') + '</tbody></table></div>');
+}
+async function harianForm(s) {
+  openModal('6S harian · ' + s.area, '<div class="spin"></div>');
+  let items;
+  try { items = await call('apiHarianChecklist', S.token, s.areaId); } catch (e) { $('#sheet').innerHTML = emptyBox(e.message); return; }
+  const F = { fotoArea: '', items: items.map(() => ({ ok: null, foto: '', catatan: '', temuan: false, tingkat: 'Minor' })) };
+  const stamp = () => stampText(s.area + ' · ' + s.shiftNama);
+  $('#sheet').innerHTML =
+    '<div class="small muted" style="margin-bottom:10px">' + esc(s.shiftNama) + ' ' + esc(s.jam) + ' · kirim sebelum <b>' + fDate(s.selesai) + '</b></div>' +
+    (items.length ? '' : '<div class="note warn" style="margin-bottom:10px">Area ini belum punya checklist (atur di Master Data). Cukup kirim foto kondisi area.</div>') +
+    items.map((it, i) => '<div class="card" style="margin-bottom:8px;padding:12px" id="hrI' + i + '">' +
+      '<div style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap"><div style="flex:1;min-width:180px">' + rChip(it.r) + ' <b>' + esc(it.item) + '</b></div>' +
+      '<div class="seg" data-ok="' + i + '"><button type="button" data-v="1">OK</button><button type="button" data-v="0">Tidak OK</button></div></div>' +
+      '<div data-ng="' + i + '" hidden style="margin-top:10px">' + photoPicker('hrF' + i, 'Foto item Tidak OK (wajib)') +
+      '<input class="inp" data-cat="' + i + '" placeholder="Catatan (mis. apa yang tidak sesuai / sudah dibereskan)" style="margin-top:8px">' +
+      '<label class="small" style="display:flex;align-items:center;gap:6px;margin-top:8px;cursor:pointer"><input type="checkbox" data-tm="' + i + '" style="width:18px;height:18px"> Jadikan temuan (perlu perbaikan lanjut)</label>' +
+      '<div class="seg" data-tk="' + i + '" hidden style="margin-top:6px">' + S.boot.tingkat.map(t => '<button type="button" data-v="' + t + '"' + (t === 'Minor' ? ' class="on"' : '') + '>' + t + '</button>').join('') + '</div></div></div>').join('') +
+    '<div class="field" style="margin-top:10px"><label>Foto kondisi area (wajib)</label>' + photoPicker('hrFA', 'Foto kondisi area saat ini') + '</div>' +
+    '<div class="field"><label for="hrCat">Catatan</label><textarea class="inp" id="hrCat" placeholder="Opsional"></textarea></div>' +
+    '<button class="btn primary block" id="hrGo">' + ic('check') + 'Kirim checklist 6S</button>';
+  items.forEach((it, i) => {
+    $$('[data-ok="' + i + '"] button').forEach(b => b.onclick = () => {
+      $$('[data-ok="' + i + '"] button').forEach(x => x.classList.toggle('on', x === b));
+      F.items[i].ok = b.dataset.v === '1';
+      $('[data-ng="' + i + '"]').hidden = F.items[i].ok;
+    });
+    bindPhoto('hrF' + i, stamp, d => { F.items[i].foto = d; });
+    $('[data-cat="' + i + '"]').oninput = e => { F.items[i].catatan = e.target.value; };
+    $('[data-tm="' + i + '"]').onchange = e => { F.items[i].temuan = e.target.checked; $('[data-tk="' + i + '"]').hidden = !e.target.checked; };
+    $$('[data-tk="' + i + '"] button').forEach(b => b.onclick = () => { $$('[data-tk="' + i + '"] button').forEach(x => x.classList.toggle('on', x === b)); F.items[i].tingkat = b.dataset.v; });
+  });
+  bindPhoto('hrFA', stamp, d => { F.fotoArea = d; });
+  $('#hrGo').onclick = async () => {
+    const kosong = F.items.findIndex(x => x.ok === null);
+    if (kosong >= 0) { $('#hrI' + kosong).scrollIntoView({ block: 'center' }); return toast('Isi semua item: OK atau Tidak OK.', true); }
+    const tanpaFoto = F.items.findIndex(x => x.ok === false && !x.foto);
+    if (tanpaFoto >= 0) { $('#hrI' + tanpaFoto).scrollIntoView({ block: 'center' }); return toast('Item Tidak OK wajib difoto.', true); }
+    if (!F.fotoArea) return toast('Foto kondisi area wajib.', true);
+    const b = $('#hrGo'); b.disabled = true; b.innerHTML = '<span class="spin" style="width:16px;height:16px;border-width:2px;margin:0"></span> Mengirim…';
+    try {
+      const r = await call('apiHarianKirim', S.token, { tanggal: s.tanggal, shift: s.shift, areaId: s.areaId, fotoArea: F.fotoArea, catatan: $('#hrCat').value.trim(),
+        items: F.items.map(x => ({ ok: x.ok, foto: x.ok ? '' : x.foto, catatan: x.catatan, temuan: !x.ok && x.temuan, tingkat: x.tingkat })) });
+      closeModal();
+      toast('Checklist 6S terkirim · skor ' + num(r.rec.skor) + '%' + (r.temuan.length ? ' · ' + r.temuan.length + ' temuan dibuat' : ''));
+      if (r.gagal.length) toast('Sebagian temuan gagal dibuat: ' + r.gagal.join('; '), true);
+      refreshBadges();
+      if (S.view === 'harian') VIEWS.harian();
+    } catch (e) { toast(e.message, true); b.disabled = false; b.innerHTML = ic('check') + 'Kirim checklist 6S'; }
+  };
+}
 /* =====================================================================
  *  VIEW: PENGATURAN SUPER ADMIN — approval, aturan nilai, control akses
  * ===================================================================== */
