@@ -41,6 +41,11 @@ Options -Indexes
     # 3. /login -> login.php
     RewriteRule ^login/?$ login.php [L,QSA]
 
+    # 3a. /landing -> landing.php (halaman pembuka sebelum login)
+    RewriteCond %{THE_REQUEST} \s/+(?:[^\s?]*/)?landing\.php[\s?] [NC]
+    RewriteRule ^landing\.php$ %{ENV:BASE}landing [R=302,L,QSA]
+    RewriteRule ^landing/?$ landing.php [L,QSA]
+
     # 3b. Monitoring 6S: alamat lama /5r (termasuk QR yang sudah dicetak) -> /6s,
     #     6s.php dibuka langsung -> /6s, lalu /6s -> 6s.php
     RewriteRule ^5r(\.php)?/?$ %{ENV:BASE}6s [R=301,L,QSA]

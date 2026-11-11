@@ -201,17 +201,19 @@
     async function boot() {
         applyTheme(store.get('hris_theme') || (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'evening' : 'morning'));
         S.token = store.get('hris_token');
+        const adaSesi = !!S.token;
         if (S.token) {
             try { await loadMaster(); enterShell(); return; } catch (e) { S.token = null; store.set('hris_token', null); }
         }
-        showLogin();
+        showLogin(!adaSesi);
     }
-    function showLogin() {
+    // landing = true: pengunjung baru (belum pernah login) melihat halaman pembuka /landing dulu
+    function showLogin(landing) {
         // Buang nama file & garis miring di akhir: "/" -> "", "/solihin_appsrcipt/" -> "/solihin_appsrcipt"
         // (tanpa ini, di root domain hasilnya "//login" yang dibaca browser sebagai host "login")
         const baseDir = location.pathname.replace(/\/(index\.php|Index\.html|login(\.php)?)\/?$/i, '').replace(/\/+$/, '');
         if (!/\/login$/i.test(location.pathname)) {
-            window.location.replace((baseDir || '') + '/login');
+            window.location.replace((baseDir || '') + (landing ? '/landing' : '/login'));
             return;
         }
         $('#shell').classList.add('hidden');
