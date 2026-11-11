@@ -36,6 +36,16 @@ $mtHris          = (string)get_setting('maintenance', '0') === '1';
 $mt5r            = (string)get_setting('maintenance_5r', '0') === '1';
 $maintenance     = $mtHris || $mt5r;
 $mtBypass        = hash_equals($mtToken, (string)($_COOKIE['hris_mt'] ?? ''));
+
+// Wajib lewat landing page dulu: tanpa tanda kunjungan landing (cookie sesi hris_lp) -> /landing,
+// parameter login (app, area, msg) dibawa agar tombol Login di landing kembali ke tujuan yang sama.
+// Pintu maintenance (/maintenance/<kunci>) tetap langsung.
+if (empty($_COOKIE['hris_lp']) && !$mtBypass) {
+    $qs = $_SERVER['QUERY_STRING'] ?? '';
+    header('Cache-Control: no-store');
+    header('Location: ' . $base . 'landing' . ($qs !== '' ? '?' . $qs : ''), true, 302);
+    exit;
+}
 $showMaintenance = $mtHris && $mt5r && !$mtBypass;
 $mtLabel         = $mtHris && $mt5r ? 'HRIS & Monitoring 6S' : ($mtHris ? 'HRIS' : 'Monitoring 6S');
 $mtBlocked       = ['hris' => $mtHris && !$mtBypass, '5r' => $mt5r && !$mtBypass];

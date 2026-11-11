@@ -23,6 +23,18 @@ if ($base === '' || substr($base, -1) !== '/') $base .= '/';
 
 $e = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
 
+// Tanda sudah melihat landing page (dibutuhkan /login); berlaku selama sesi browser
+$https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+setcookie('hris_lp', '1', ['expires' => 0, 'path' => $base, 'secure' => $https, 'httponly' => true, 'samesite' => 'Lax']);
+
+// Parameter tujuan login yang dibawa dari /login (mis. ?app=6s&area=A01&msg=...)
+$lq = [];
+if (in_array($_GET['app'] ?? '', ['hris', '5r', '6s'], true)) $lq['app'] = $_GET['app'];
+$ar = substr(preg_replace('/[^A-Za-z0-9_-]/', '', (string)($_GET['area'] ?? '')), 0, 12);
+if ($ar !== '') $lq['area'] = $ar;
+$mg = mb_substr(trim((string)($_GET['msg'] ?? '')), 0, 200);
+if ($mg !== '') $lq['msg'] = $mg;
+
 /** Operator aktif ber-role Supervisor (Supervisor Inventory didahulukan, yang punya foto didahulukan). */
 function landing_donatur(): array {
     try {
@@ -90,6 +102,11 @@ if ($don) {
             '<div style="font-size: 12.5px; color: #6B7280; margin-top: 2px">Donatur hadiah Program 6S</div></div></div>';
     }
     $html = preg_replace('#<!--DONATUR-->.*?<!--/DONATUR-->#s', $cards, $html, 1);
+}
+// Tombol Login membawa parameter tujuan
+if ($lq) {
+    $html = str_replace('href="login"', 'href="login?' . $e(http_build_query($lq)) . '"', $html);
+    $html = str_replace('href="login?app=6s"', 'href="login?' . $e(http_build_query(['app' => '6s'] + $lq)) . '"', $html);
 }
 $html = preg_replace('/<head>/i', '<head>' . "\n" . '<base href="' . $e($base) . '">', $html, 1);
 echo $html;
