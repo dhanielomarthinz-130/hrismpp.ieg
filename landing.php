@@ -42,6 +42,11 @@ function landing_donatur(): array {
 
 $html = (string)file_get_contents(__DIR__ . '/landingpage.html');
 
+// Periode program = bulan berjalan (poin 6S dihitung per bulan), mis. "1 – 30 November 2026"
+$bln = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+$now = new DateTime('now', new DateTimeZone('Asia/Jakarta'));
+$html = preg_replace('#<!--PERIODE-->.*?<!--/PERIODE-->#s', '1 – ' . $now->format('t') . ' ' . $bln[(int)$now->format('n') - 1] . ' ' . $now->format('Y'), $html, 1);
+
 // Poster program (opsional)
 foreach (['jpg', 'jpeg', 'png', 'webp'] as $ext) {
     $f = 'assets/image/banner-6s.' . $ext;
