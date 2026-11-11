@@ -956,6 +956,7 @@
     }
 
     .side-title {
+        flex: 1;
         min-width: 0;
         color: #FFFFFF;
         font-weight: 700;
@@ -971,12 +972,14 @@
 
     .side-title small {
         display: block;
+        margin-top: 2px;
         font-weight: 500;
         color: var(--side-muted);
-        font-size: 11.5px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        font-size: 11px;
+        line-height: 1.3;
+        /* nama perusahaan boleh turun ke baris kedua agar tidak terpotong */
+        white-space: normal;
+        overflow-wrap: anywhere;
     }
 
     .side-nav {
