@@ -1683,8 +1683,59 @@ VIEWS.poin = async function () {
   $('#view').innerHTML = '<div class="tabs" id="poinTabs" style="max-width:460px"><button data-t="pic"' + (tab === 'pic' ? ' class="on"' : '') + '>Papan Poin PIC</button>' +
     '<button data-t="area"' + (tab === 'area' ? ' class="on"' : '') + '>Papan Poin Area</button></div><div id="poinMain"></div>';
   $$('#poinTabs button').forEach(b => b.onclick = () => { if (b.dataset.t === tab) return; S.poinTab = b.dataset.t; VIEWS.poin(); });
-  return tab === 'area' ? harianRekap($('#poinMain')) : poinPapan($('#poinMain'));
+  return tab === 'area' ? poinArea($('#poinMain')) : poinPapan($('#poinMain'));
 };
+/* Tab Papan Poin Area: skor tim lengkap (temuan, perbaikan, 6S harian, audit) & rincian 6S harian per area */
+async function poinArea(v) {
+  const sub = S.paSub === 'harian' ? 'harian' : 'skor';
+  v.innerHTML = '<div class="seg" id="paSub" style="margin-bottom:12px"><button data-t="skor"' + (sub === 'skor' ? ' class="on"' : '') + '>Skor tim lengkap</button>' +
+    '<button data-t="harian"' + (sub === 'harian' ? ' class="on"' : '') + '>6S harian per area</button></div><div id="paMain"></div>';
+  $$('#paSub button').forEach(b => b.onclick = () => { if (b.dataset.t === sub) return; S.paSub = b.dataset.t; poinArea(v); });
+  const M = $('#paMain');
+  if (sub === 'harian') return harianRekap(M);
+  M.innerHTML = '<div class="toolbar flt">' + monthInput('paBulan', S.bulan) + '<span class="grow"></span><input class="inp" id="paQ" placeholder="Cari tim / area" style="max-width:240px"></div><div id="paBody"></div>' +
+    '<details class="note small" style="margin-top:12px"><summary style="cursor:pointer;font-weight:700">Cara hitung skor tim</summary><div style="margin-top:6px">' +
+    'Setiap tim mulai dari skor awal tiap bulan, lalu ditambah atau dikurangi: <b>Potongan</b> temuan di area tim (dan pembatalan), <b>Perbaikan</b> yang disetujui, <b>Pelapor</b> (temuan valid yang dilaporkan tim), ' +
+    '<b>6S harian</b> (selesai menambah, terlewat memotong), serta potongan berjalan untuk temuan yang lewat target. Audit ditampilkan sebagai nilai rata-rata, tidak mengubah skor.</div></details>';
+  $('#paBulan').addEventListener('change', e => { if (e.target.value) { S.bulan = e.target.value; poinArea(v); } });
+  const PB = $('#paBody');
+  let data = null, q = '';
+  const sg = x => x ? signed(x) : '0';
+  const warna = x => x > 0 ? 'var(--ok-t)' : x < 0 ? 'var(--err-t)' : 'inherit';
+  const draw = () => {
+    const list = data.tims.filter(t => !q || (t.tim + ' ' + t.areas.join(' ')).toLowerCase().indexOf(q) >= 0);
+    if (!list.length) { PB.innerHTML = emptyBox(data.tims.length ? 'Tidak ada tim yang cocok.' : 'Belum ada tim / area.'); return; }
+    const rk = t => { const i = data.tims.indexOf(t); return '<span class="rank ' + (i < 3 ? 'r' + (i + 1) : '') + '">' + (i + 1) + '</span>'; };
+    const ar = t => t.areas.join('') !== t.tim ? esc(t.areas.join(', ')) : '';
+    const audit = t => t.audit == null ? '-' : num(t.audit) + '%';
+    PB.innerHTML =
+      '<div class="tbl-wrap hr-desk"><table class="tbl" style="min-width:1000px"><thead><tr><th>#</th><th>Tim</th><th class="num">Skor</th><th class="num">Potongan</th><th class="num">Perbaikan</th><th class="num">Pelapor</th><th class="num">6S harian</th>' +
+        '<th class="num">Lewat target</th><th class="num">Temuan</th><th class="num">Belum selesai</th><th class="num">Melapor tim lain</th><th class="num">Audit</th></tr></thead><tbody>' +
+        list.map(t => '<tr><td>' + rk(t) + '</td><td class="cell-main" style="white-space:normal">' + esc(t.tim) + (ar(t) ? '<div class="cell-sub" style="white-space:normal">' + ar(t) + '</div>' : '') + '</td>' +
+          '<td class="num" style="font-weight:800;font-size:15px">' + num(t.skor) + '</td>' +
+          '<td class="num" style="color:' + warna(t.potongan) + '">' + sg(t.potongan) + '</td><td class="num" style="color:' + warna(t.perbaikan) + '">' + sg(t.perbaikan) + '</td>' +
+          '<td class="num" style="color:' + warna(t.pelapor) + '">' + sg(t.pelapor) + '</td><td class="num" style="color:' + warna(t.harian) + '">' + sg(t.harian) + '</td>' +
+          '<td class="num" style="color:' + warna(t.telatBerjalan) + '">' + sg(t.telatBerjalan) + '</td>' +
+          '<td class="num">' + t.temuan + (t.berulang ? '<div class="cell-sub" style="color:var(--err-t);max-width:none">' + t.berulang + ' berulang</div>' : '') + '</td>' +
+          '<td class="num">' + (t.aktif ? '<span class="chip c-warn">' + t.aktif + '</span>' : '0') + '</td><td class="num">' + t.dilaporkan + '</td>' +
+          '<td class="num">' + audit(t) + (t.auditN ? '<div class="cell-sub" style="max-width:none">' + t.auditN + 'x audit</div>' : '') + '</td></tr>').join('') + '</tbody></table></div>' +
+      '<div class="hr-cards">' + list.map(t => '<div class="hr-card">' +
+          '<div class="hr-c-head"><div style="display:flex;gap:10px;align-items:center;min-width:0">' + rk(t) + '<div style="min-width:0"><div class="hr-c-area">' + esc(t.tim) + '</div>' + (ar(t) ? '<div class="hr-c-sub">' + ar(t) + '</div>' : '') + '</div></div>' +
+            '<div style="text-align:right;flex:none"><div class="hr-c-sub">Skor</div><div class="tnum" style="font-size:22px;font-weight:800">' + num(t.skor) + '</div></div></div>' +
+          '<div class="hr-c-sec"><div class="hr-c-l">Perubahan skor</div><div class="rk-grid">' +
+            '<div><small>Potongan</small><b style="color:' + warna(t.potongan) + '">' + sg(t.potongan) + '</b></div><div><small>Perbaikan</small><b style="color:' + warna(t.perbaikan) + '">' + sg(t.perbaikan) + '</b></div>' +
+            '<div><small>Pelapor</small><b style="color:' + warna(t.pelapor) + '">' + sg(t.pelapor) + '</b></div><div><small>6S harian</small><b style="color:' + warna(t.harian) + '">' + sg(t.harian) + '</b></div>' +
+            '<div><small>Lewat target</small><b style="color:' + warna(t.telatBerjalan) + '">' + sg(t.telatBerjalan) + '</b></div></div></div>' +
+          '<div class="hr-c-sec"><div class="hr-c-l">Aktivitas</div><div class="rk-grid">' +
+            '<div><small>Temuan</small><b>' + t.temuan + (t.berulang ? ' <span class="small" style="color:var(--err-t)">(' + t.berulang + ' berulang)</span>' : '') + '</b></div>' +
+            '<div><small>Belum selesai</small><b style="color:' + (t.aktif ? 'var(--warn-t)' : 'inherit') + '">' + t.aktif + '</b></div><div><small>Melapor tim lain</small><b>' + t.dilaporkan + '</b></div>' +
+            '<div><small>Audit</small><b>' + audit(t) + '</b></div></div></div>' +
+        '</div>').join('') + '</div>';
+  };
+  let tq; $('#paQ').addEventListener('input', e => { clearTimeout(tq); tq = setTimeout(() => { q = e.target.value.toLowerCase(); if (data) draw(); }, 200); });
+  loading(PB);
+  try { data = await call('apiLeaderboard', S.token, S.bulan); draw(); } catch (e) { PB.innerHTML = emptyBox(e.message); }
+}
 /* Tab Papan Poin PIC: peringkat user & riwayat poin (tabel di desktop, kartu di mobile) */
 async function poinPapan(v) {
   const c = S.boot.config;
