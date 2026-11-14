@@ -237,6 +237,13 @@ function r5_init(): void {
         oleh_nik VARCHAR(40) NULL, oleh_nama VARCHAR(120) NULL, waktu $big NULL, skor DOUBLE NULL,
         ok_n INT NOT NULL DEFAULT 0, ng_n INT NOT NULL DEFAULT 0, foto_area VARCHAR(80) NULL, catatan TEXT NULL,
         poin DOUBLE NOT NULL DEFAULT 0, detail TEXT NULL)");
+    // Status laporan 6S harian yang sudah dibagikan (share)
+    $hcols = $isSqlite
+        ? array_column($pdo->query("PRAGMA table_info(r6_harian)")->fetchAll(), 'name')
+        : array_column($pdo->query("SHOW COLUMNS FROM r6_harian")->fetchAll(), 'Field');
+    foreach (['share_n' => 'INT NOT NULL DEFAULT 0', 'share_waktu' => "$big NULL", 'share_oleh' => 'VARCHAR(120) NULL'] as $c => $def) {
+        if (!in_array($c, $hcols, true)) $pdo->exec("ALTER TABLE r6_harian ADD COLUMN $c $def");
+    }
     $pdo->exec("CREATE TABLE IF NOT EXISTS r6_area_pic (
         area_id VARCHAR(12) NOT NULL, nik VARCHAR(40) NOT NULL, PRIMARY KEY (area_id, nik))");
     $pdo->exec("CREATE TABLE IF NOT EXISTS r5_poin (
@@ -2142,7 +2149,19 @@ function r6_harian_out(?array $r): ?array {
     return ['id' => $r['id'], 'status' => $r['status'], 'oleh' => r5_str($r['oleh_nama']), 'olehNik' => r5_str($r['oleh_nik']),
             'waktu' => r5_ms($r['waktu']), 'isi' => count(array_filter($det, fn($x) => $x['foto'] !== '')), 'total' => count(R5_LIST),
             'catatan' => r5_str($r['catatan']), 'poin' => (float)$r['poin'],
-            'pics' => json_decode((string)$r['pics'], true) ?: [], 'detail' => $det];
+            'pics' => json_decode((string)$r['pics'], true) ?: [], 'detail' => $det,
+            'share' => (int)($r['share_n'] ?? 0) > 0 ? ['n' => (int)$r['share_n'], 'waktu' => r5_ms($r['share_waktu'] ?? null), 'oleh' => r5_str($r['share_oleh'] ?? '')] : null];
+}
+
+/** Catat bahwa laporan 6S harian (slot selesai) sudah dibagikan. */
+function apiHarianShare($token, $id): array {
+    $u = r5_auth($token, 'harian');
+    $id = r5_str($id);
+    $r = db_row("SELECT * FROM r6_harian WHERE id = ?", [$id]);
+    if (!$r) throw new RuntimeException('Data 6S harian tidak ditemukan.');
+    if ($r['status'] !== 'Selesai') throw new RuntimeException('Hanya 6S harian yang sudah selesai yang bisa dibagikan.');
+    db_query("UPDATE r6_harian SET share_n = COALESCE(share_n, 0) + 1, share_waktu = ?, share_oleh = ? WHERE id = ?", [r5_now(), $u['nama'], $id]);
+    return r6_harian_out(db_row("SELECT * FROM r6_harian WHERE id = ?", [$id]));
 }
 
 /** Boleh mengerjakan slot: PIC terjadwal; tanpa PIC terjadwal = Leader / PIC mana pun; Admin & super admin selalu. */
@@ -2355,5 +2374,5 @@ const R5_API = [
     'apiSaveAudit', 'apiListAudit', 'apiAdminData', 'apiSaveUser', 'apiSaveArea', 'apiSaveChecklist',
     'apiImportUsers', 'apiSaveConfig', 'apiKeberatan', 'apiPutusKeberatan', 'apiKpiPic',
     'apiPicBertugas', 'apiTerimaTugas', 'apiAlihkan', 'apiRiwayatPoinPic', 'apiLepasTugas',
-    'apiAturData', 'apiAturSimpan', 'apiAksesSimpan', 'apiHarianList', 'apiHarianChecklist', 'apiHarianSimpan',
+    'apiAturData', 'apiAturSimpan', 'apiAksesSimpan', 'apiHarianList', 'apiHarianChecklist', 'apiHarianSimpan', 'apiHarianShare',
 ];
