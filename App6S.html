@@ -267,6 +267,27 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .rk-grid div{display:grid;gap:2px}.rk-grid small{font-size:11px;color:var(--muted);font-weight:600}.rk-grid b{font-size:15px;font-variant-numeric:tabular-nums}
 .hr-ket{display:grid;gap:1px;font-size:11.5px;color:var(--muted);margin-top:3px}
 .hr-cards{display:none}
+.kp-cards{display:none}
+@media(max-width:760px){
+  .kp-desk{display:none}
+  .kp-cards{display:grid;gap:10px}
+  .kp-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:12px 14px;display:grid;gap:10px;box-shadow:var(--shadow)}
+  .kp-head{display:flex;align-items:center;gap:10px;min-width:0}
+  .kp-head .rank{flex:none}
+  .kp-who{flex:1;min-width:0}
+  .kp-who .pic-name{max-width:100%;font-size:15px}
+  .kp-who .small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kp-head .chip{flex:none;font-size:14px}
+  .kp-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 10px;border-top:1px solid var(--line);padding-top:10px}
+  .kp-grid div{display:grid;gap:1px;min-width:0}
+  .kp-grid small{font-size:11px;color:var(--muted);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kp-grid b{font-size:14px;font-variant-numeric:tabular-nums;color:var(--text)}
+  .kp-grid b.err{color:var(--err-t)}
+  .kp-bar{display:grid;grid-template-columns:1fr;gap:8px}
+  .kp-bar #kQ{max-width:none!important;width:100%}
+  .kp-bar input[type=month]{max-width:none!important;width:100%}
+  .kp-bar .grow{display:none}
+}
 @media(max-width:760px){
   .hr-desk{display:none}
   .hr-cards{display:grid;gap:12px}
@@ -1268,7 +1289,7 @@ function kpiStrip(r, target) {
 }
 VIEWS.kpi = async function () {
   const v = $('#view');
-  v.innerHTML = '<div class="toolbar">' + monthInput('kBulan', S.bulan) + '<span class="grow"></span><input class="inp" id="kQ" placeholder="Cari nama / username" style="max-width:240px"></div><div id="kBody"></div>';
+  v.innerHTML = '<div class="toolbar kp-bar">' + monthInput('kBulan', S.bulan) + '<span class="grow"></span><input class="inp" id="kQ" placeholder="Cari nama / username" style="max-width:240px"></div><div id="kBody"></div>';
   $('#kBulan').addEventListener('change', e => { if (e.target.value) { S.bulan = e.target.value; VIEWS.kpi(); } });
   const KB = $('#kBody');
   loading(KB);
@@ -1286,7 +1307,17 @@ VIEWS.kpi = async function () {
       '<div class="kpi"><div class="l">Temuan ' + lTugas.toLowerCase() + '</div><div class="v tnum">' + rows.reduce((n, r) => n + r.ditugaskan, 0) + '</div><div class="s">bulan ini</div></div>' +
       '<div class="kpi"><div class="l">Lewat target</div><div class="v tnum' + (rows.some(r => r.overdue) ? ' err' : '') + '">' + rows.reduce((n, r) => n + r.overdue, 0) + '</div><div class="s">belum diperbaiki</div></div>' +
       '<div class="kpi"><div class="l">Revisi</div><div class="v tnum">' + rows.reduce((n, r) => n + r.revisi, 0) + '</div><div class="s">perbaikan ditolak</div></div></div>';
-    h += rows.length ? '<div class="tbl-wrap"><table class="tbl" id="kTbl" style="min-width:1060px"><tr><th>#</th><th>User</th><th class="num">Skor KPI</th><th class="num">' + lTugas + '</th><th class="num">Selesai</th><th class="num">Tepat waktu</th><th class="num">Tanpa revisi</th><th class="num">Penyelesaian</th><th class="num">Lewat target</th>' + (bebas ? '' : '<th class="num">Respon</th>') + '<th class="num">Rata-rata</th><th class="num">Poin</th></tr>' +
+    const kpName = r => '<button type="button" class="pic-name" title="Riwayat poin ' + esc(r.nama) + '" onclick="openPoinPic(' + esc(JSON.stringify(r.nik)) + ',' + esc(JSON.stringify(d.bulan)) + ')">' + esc(r.nama) + '</button>';
+    const kpIt = (l, v, cls) => '<div><small>' + l + '</small><b' + (cls ? ' class="' + cls + '"' : '') + '>' + v + '</b></div>';
+    const kpCards = '<div class="kp-cards">' + rows.map((r, i) => '<div class="kp-card" data-q="' + esc((r.nama + ' ' + r.nik).toLowerCase()) + '">' +
+      '<div class="kp-head"><span class="rank ' + (i < 3 && r.skor != null ? 'r' + (i + 1) : '') + '">' + (i + 1) + '</span><div class="kp-who">' + kpName(r) +
+        '<div class="small muted">' + esc(r.nik) + (r.bagian ? ' · ' + esc(r.bagian) : '') + '</div></div>' + kpiChip(r, d.target) + '</div>' +
+      '<div class="kp-grid">' +
+        kpIt(lTugas, r.ditugaskan) + kpIt('Selesai', r.selesai + (r.menunggu ? ' <span class="small muted">+' + r.menunggu + '</span>' : '')) + kpIt('Poin', signed(r.poin), r.poin < 0 ? 'err' : '') +
+        kpIt('Tepat waktu', pctTxt(r.pctTepat)) + kpIt('Tanpa revisi', pctTxt(r.pctFtr) + (r.revisi ? ' <span class="small muted">(' + r.revisi + 'x)</span>' : '')) + kpIt('Penyelesaian', pctTxt(r.pctSelesai)) +
+        kpIt('Lewat target', r.overdue, r.overdue ? 'err' : '') + (bebas ? '' : kpIt('Respon', pctTxt(r.pctRespon))) + kpIt('Rata-rata', r.rataJam == null ? '-' : num(r.rataJam) + ' jam') +
+      '</div></div>').join('') + '</div>';
+    h += rows.length ? kpCards + '<div class="tbl-wrap kp-desk"><table class="tbl" id="kTbl" style="min-width:1060px"><tr><th>#</th><th>User</th><th class="num">Skor KPI</th><th class="num">' + lTugas + '</th><th class="num">Selesai</th><th class="num">Tepat waktu</th><th class="num">Tanpa revisi</th><th class="num">Penyelesaian</th><th class="num">Lewat target</th>' + (bebas ? '' : '<th class="num">Respon</th>') + '<th class="num">Rata-rata</th><th class="num">Poin</th></tr>' +
       rows.map((r, i) => '<tr data-q="' + esc((r.nama + ' ' + r.nik).toLowerCase()) + '"><td><span class="rank ' + (i < 3 && r.skor != null ? 'r' + (i + 1) : '') + '">' + (i + 1) + '</span></td>' +
         '<td><button type="button" class="pic-name" title="Riwayat poin ' + esc(r.nama) + '" onclick="openPoinPic(' + esc(JSON.stringify(r.nik)) + ',' + esc(JSON.stringify(d.bulan)) + ')">' + esc(r.nama) + '</button><div class="small muted">' + esc(r.nik) + (r.bagian ? ' · ' + esc(r.bagian) : '') + '</div></td>' +
         '<td class="num">' + kpiChip(r, d.target) + '</td><td class="num">' + r.ditugaskan + '</td><td class="num">' + r.selesai + (r.menunggu ? ' <span class="small muted">+' + r.menunggu + ' verif</span>' : '') + '</td>' +
@@ -1302,7 +1333,7 @@ VIEWS.kpi = async function () {
       'Tepat waktu diukur terhadap <b>target yang ditentukan PIC</b>. ' +
       'Komponen tanpa data tidak ikut dihitung. Temuan dihitung pada bulan dibuat. Bobot & target diatur di Master Data → Aturan poin.</div>';
     KB.innerHTML = h;
-    $('#kQ').oninput = e => { const q = e.target.value.toLowerCase(); $$('#kTbl tr[data-q]').forEach(r => r.hidden = r.dataset.q.indexOf(q) < 0); };
+    $('#kQ').oninput = e => { const q = e.target.value.toLowerCase(); $$('#kBody [data-q]').forEach(r => r.hidden = r.dataset.q.indexOf(q) < 0); };
   } catch (e) { KB.innerHTML = emptyBox(e.message); }
 };
 /* ---------- Verifikasi & keberatan: datatable ---------- */
