@@ -2079,13 +2079,13 @@ async function harianShare(s, rList, onShared) {
   const fname = ('6S-' + s.area + '-' + s.shiftNama + '-' + s.tanggal).replace(/[^\w\-]+/g, '_') + '.jpg';
   const file = blob ? new File([blob], fname, { type: 'image/jpeg' }) : null;
   const url = blob ? URL.createObjectURL(blob) : '';
-  const bisaShare = !!(navigator.share && (!file || (navigator.canShare && navigator.canShare({ files: [file] }))));
+  // Pakai menu share perangkat; gambar ikut bila browser mendukung berbagi file
+  const bisaFile = !!(file && navigator.canShare && navigator.canShare({ files: [file] }));
   $('#sheet').innerHTML =
     (url ? '<img src="' + url + '" alt="Ringkasan 6S" style="width:100%;border-radius:10px;border:1px solid var(--border);margin-bottom:10px">' : '<div class="note small" style="margin-bottom:10px">Gambar ringkasan tidak dapat dibuat, caption tetap bisa dibagikan.</div>') +
     '<label class="small muted">Caption</label><textarea class="inp" id="hsCap" style="min-height:220px;font-family:ui-monospace,monospace;font-size:12.5px;margin:4px 0 12px">' + esc(cap) + '</textarea>' +
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px">' +
-      (bisaShare ? '<button class="btn wa" id="hsGo">' + WA_SVG + 'Bagikan</button>'
-        : '<a class="btn wa" id="hsWa" target="_blank" rel="noopener" href="https://api.whatsapp.com/send?text=' + encodeURIComponent(cap) + '">' + WA_SVG + 'Kirim ke WhatsApp</a>') +
+      '<button class="btn wa" id="hsGo">' + WA_SVG + 'Bagikan</button>' +
       (url ? '<a class="btn" href="' + url + '" download="' + esc(fname) + '">Unduh gambar</a>' : '') +
       '<button class="btn" id="hsCopy">Salin caption</button></div>';
   // Catat status "sudah dibagikan" di server (sekali per buka jendela ini)
@@ -2097,15 +2097,14 @@ async function harianShare(s, rList, onShared) {
   };
   const dl = $('#sheet a[download]');
   if (dl) dl.addEventListener('click', catat);
-  const wa = $('#hsWa');
-  if (wa) wa.addEventListener('click', () => { wa.href = 'https://api.whatsapp.com/send?text=' + encodeURIComponent($('#hsCap').value); catat(); });
   const go = $('#hsGo');
   if (go) go.onclick = async () => {
     const text = $('#hsCap').value;
     try {
       // Sebagian aplikasi mengabaikan teks saat ada file; caption juga disalin ke clipboard
       try { await navigator.clipboard.writeText(text); } catch (e) { }
-      await navigator.share(file ? { files: [file], text, title: '6S Harian ' + s.area } : { text, title: '6S Harian ' + s.area });
+      if (!navigator.share) { toast('Perangkat ini tidak mendukung menu bagikan. Caption sudah disalin' + (url ? ', unduh gambarnya lalu kirim manual.' : '.')); return; }
+      await navigator.share(bisaFile ? { files: [file], text, title: '6S Harian ' + s.area } : { text, title: '6S Harian ' + s.area });
       catat();
     } catch (e) { if (e && e.name !== 'AbortError') toast('Gagal membagikan: ' + e.message, true); }
   };
@@ -2198,8 +2197,13 @@ async function harianRekap(v) {
     if (!D) return;
     const cap = caption();
     openModal('Bagikan laporan per area', '<textarea class="inp" id="rkCap" style="min-height:280px;font-family:ui-monospace,monospace;font-size:12.5px;margin-bottom:12px">' + esc(cap) + '</textarea>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><a class="btn wa" id="rkGo" target="_blank" rel="noopener" href="#">' + WA_SVG + 'Kirim ke WhatsApp</a><button class="btn" id="rkCopy">Salin teks</button></div>');
-    $('#rkGo').onclick = () => { $('#rkGo').href = 'https://api.whatsapp.com/send?text=' + encodeURIComponent($('#rkCap').value); };
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><button class="btn wa" id="rkGo">' + WA_SVG + 'Bagikan</button><button class="btn" id="rkCopy">Salin teks</button></div>');
+    $('#rkGo').onclick = async () => {
+      const text = $('#rkCap').value;
+      if (!navigator.share) { try { await navigator.clipboard.writeText(text); } catch (e) { } return toast('Perangkat ini tidak mendukung menu bagikan. Teks sudah disalin.'); }
+      try { await navigator.share({ text, title: 'Laporan 6S harian per area' }); }
+      catch (e) { if (e && e.name !== 'AbortError') toast('Gagal membagikan: ' + e.message, true); }
+    };
     $('#rkCopy').onclick = async () => { try { await navigator.clipboard.writeText($('#rkCap').value); } catch (e) { $('#rkCap').select(); document.execCommand('copy'); } toast('Teks disalin'); };
   };
   load();
