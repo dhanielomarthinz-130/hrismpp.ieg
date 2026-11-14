@@ -441,7 +441,6 @@ const MENU = [
   { id: 'input', t: 'Input Temuan', i: 'plus', roles: ['Admin', 'Auditor', 'PIC'] },
   { id: 'tugas', t: 'Tugas Saya', i: 'task', roles: ['Admin', 'Auditor', 'PIC'], badge: 'tugas' },
   { id: 'harian', t: '6S Harian', i: 'clip', roles: ['Admin', 'Auditor', 'PIC'], badge: 'harian' },
-  { id: 'harianarea', t: 'Laporan Area 6S', i: 'chart' },
   { id: 'daftar', t: 'Daftar Temuan', i: 'list' },
   { id: 'verif', t: 'Verifikasi', i: 'shield', roles: ['Admin', 'Auditor'], badge: 'verif' },
   { id: 'audit', t: 'Audit 6S', i: 'clip', roles: ['Admin', 'Auditor'] },
@@ -1671,7 +1670,14 @@ VIEWS.audit = function () {
  *  VIEW: PAPAN POIN
  * ===================================================================== */
 VIEWS.poin = async function () {
-  const v = $('#view');
+  const tab = S.poinTab === 'area' ? 'area' : 'papan';
+  $('#view').innerHTML = '<div class="tabs" id="poinTabs" style="max-width:440px"><button data-t="papan"' + (tab === 'papan' ? ' class="on"' : '') + '>Papan Poin</button>' +
+    '<button data-t="area"' + (tab === 'area' ? ' class="on"' : '') + '>Laporan Area 6S</button></div><div id="poinMain"></div>';
+  $$('#poinTabs button').forEach(b => b.onclick = () => { if (b.dataset.t === tab) return; S.poinTab = b.dataset.t; VIEWS.poin(); });
+  return tab === 'area' ? harianRekap($('#poinMain')) : poinPapan($('#poinMain'));
+};
+/* Tab Papan Poin: peringkat user & riwayat poin */
+async function poinPapan(v) {
   const c = S.boot.config;
   v.innerHTML = '<div class="toolbar">' + monthInput('pBulan', S.bulan) + '<span class="grow"></span><input class="inp" id="pQ" placeholder="Cari nama / username" style="max-width:240px"></div>' +
     '<div class="tabs" id="pTabs"><button class="on" data-t="user">Peringkat user</button><button data-t="log">Riwayat poin</button></div><div id="pBody"></div>' +
@@ -1733,7 +1739,7 @@ VIEWS.poin = async function () {
   let tq; $('#pQ').addEventListener('input', e => { clearTimeout(tq); tq = setTimeout(() => { q = e.target.value.toLowerCase(); draw(); }, 200); });
   loading(PB);
   try { data = await call('apiLeaderboard', S.token, S.bulan); draw(); } catch (e) { PB.innerHTML = emptyBox(e.message); }
-};
+}
 
 /* =====================================================================
  *  VIEW: MASTER DATA (Admin)
@@ -2092,8 +2098,6 @@ async function harianShare(s, rList, onShared) {
     catat();
   };
 }
-/* Menu Laporan Area 6S: poin 6S harian terkumpul per area (ikut skor tim di Papan Poin) */
-VIEWS.harianarea = function () { harianRekap($('#view')); };
 /* Laporan 6S harian per area: poin terkumpul per area (masuk penilaian area) */
 async function harianRekap(v) {
   const st = S.hrR || (S.hrR = { dari: '', sampai: '', buka: {} });

@@ -46,7 +46,6 @@ const R5_MENUS = [
     'daftar' => ['Daftar Temuan', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
     'verif'  => ['Verifikasi & Keberatan', ['Admin', 'Auditor'], false],
     'harian' => ['6S Harian (checklist tiap shift)', ['Admin', 'Auditor', 'PIC'], false],
-    'harianarea' => ['Laporan 6S Harian per Area', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
     'audit'  => ['Audit 6S', ['Admin', 'Auditor'], false],
     'poin'   => ['Papan Poin', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
     'kpi'    => ['KPI PIC', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
@@ -2178,7 +2177,7 @@ function r6_harian_out(?array $r): ?array {
  * poin terkumpul (+ selesai, − terlewat), laporan dibagikan & rata-rata durasi. Untuk penilaian per area.
  */
 function apiHarianRekap($token, $dari, $sampai): array {
-    r5_auth($token, 'harianarea');
+    r5_auth($token, 'poin');
     r6_harian_sync();
     $now = r5_now();
     $ok = fn($t) => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$t);
