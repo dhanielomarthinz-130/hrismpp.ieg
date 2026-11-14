@@ -5424,6 +5424,262 @@
         }
     }
 
+    /* ------------------------------------------- Tabel ramah HP (tanpa geser) */
+    @media (max-width: 640px) {
+        /* Tabel umum -> kartu bertumpuk: "Judul kolom ...... nilai" */
+        .table-wrap:has(> table.m-stack) {
+            max-height: none;
+            overflow: visible;
+        }
+
+        table.tbl.m-stack,
+        table.tbl.m-stack tbody,
+        table.tbl.m-stack tfoot,
+        table.tbl.m-stack tr,
+        table.tbl.m-stack td {
+            display: block;
+            width: 100%;
+        }
+
+        table.tbl.m-stack thead {
+            display: none;
+        }
+
+        table.tbl.m-stack tr {
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        table.tbl.m-stack tr:last-child {
+            border-bottom: 0;
+        }
+
+        table.tbl.m-stack tr[hidden],
+        table.tbl.m-stack tr.hidden {
+            display: none;
+        }
+
+        table.tbl.m-stack td {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 3px 0;
+            border: 0;
+            text-align: right;
+            white-space: normal;
+            max-width: none !important;
+            overflow-wrap: anywhere;
+            min-height: 0;
+        }
+
+        table.tbl.m-stack td::before {
+            content: attr(data-label);
+            flex: 0 0 auto;
+            max-width: 45%;
+            text-align: left;
+            color: var(--text-3);
+            font-size: 11.5px;
+            font-weight: 600;
+        }
+
+        table.tbl.m-stack td[data-label=""]::before,
+        table.tbl.m-stack td:not([data-label])::before {
+            display: none;
+        }
+
+        table.tbl.m-stack td[data-label=""] {
+            justify-content: flex-start;
+            text-align: left;
+        }
+
+        table.tbl.m-stack td:first-child {
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        table.tbl.m-stack td:empty {
+            display: none;
+        }
+
+        table.tbl.m-stack td.act {
+            justify-content: flex-end;
+            flex-wrap: wrap;
+            padding-top: 6px;
+        }
+
+        table.tbl.m-stack td.act::before {
+            display: none;
+        }
+
+        table.tbl.m-stack td > input,
+        table.tbl.m-stack td > select {
+            max-width: 60%;
+        }
+
+        /* Grid mingguan (Jadwal & Data Absensi) -> kartu per karyawan, 7 hari dalam satu baris */
+        .wk-wrap {
+            overflow: visible;
+            border: 0;
+            background: transparent;
+            max-height: none;
+        }
+
+        table.wk,
+        table.wk tbody,
+        table.wk tfoot {
+            display: block;
+            width: 100%;
+            min-width: 0;
+        }
+
+        table.wk thead {
+            display: none;
+        }
+
+        table.wk tr {
+            display: grid;
+            grid-template-columns: repeat(7, minmax(0, 1fr));
+            gap: 4px;
+            padding: 10px;
+            margin-bottom: 8px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+        }
+
+        table.wk tr[hidden] {
+            display: none;
+        }
+
+        table.wk td,
+        table.wk tbody td.c-day.today {
+            position: static;
+            display: block;
+            height: auto;
+            min-width: 0 !important;
+            max-width: none !important;
+            width: auto !important;
+            padding: 0;
+            border: 0;
+            box-shadow: none;
+            background: transparent;
+        }
+
+        table.wk td.c-no,
+        table.wk td.wide-only,
+        table.wk td:not(.c-foot)[colspan] {
+            display: none;
+        }
+
+        table.wk td.c-nama,
+        table.wk td.c-bag,
+        table.wk td.c-foot {
+            grid-column: 1 / -1;
+            text-align: left;
+            padding: 0;
+        }
+
+        table.wk td.c-nama b {
+            font-size: 14px;
+            white-space: normal;
+        }
+
+        table.wk td.c-nama small {
+            font-size: 11.5px;
+            white-space: normal;
+        }
+
+        table.wk .wk-nm .op-ava {
+            width: 34px;
+            height: 34px;
+            font-size: 13px;
+        }
+
+        table.wk td.c-bag {
+            margin-bottom: 4px;
+        }
+
+        table.wk td.c-day {
+            text-align: center;
+        }
+
+        table.wk td.c-day::before,
+        table.wk tfoot td:not(.c-foot):not([colspan])::before {
+            content: attr(data-label);
+            display: block;
+            margin-bottom: 2px;
+            font-size: 10px;
+            font-weight: 600;
+            line-height: 1.2;
+            color: var(--text-3);
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        table.wk td.c-day.today::before {
+            color: var(--primary);
+        }
+
+        table.wk .kc {
+            height: 32px;
+            line-height: 32px;
+            border-radius: 6px;
+            border: 1px solid var(--line);
+            font-size: 11.5px;
+        }
+
+        table.wk .da-c {
+            min-width: 0;
+            height: 34px;
+        }
+
+        table.wk td.c-jam,
+        table.wk td.c-hari {
+            grid-column: span 7;
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 2px 0;
+            border-top: 1px solid var(--line);
+            font-size: 12.5px;
+        }
+
+        table.wk td.c-jam + td.c-hari {
+            border-top: 0;
+            padding-top: 2px;
+        }
+
+        table.wk td.c-jam::before,
+        table.wk td.c-hari::before {
+            content: attr(data-label);
+            color: var(--text-3);
+            font-weight: 600;
+        }
+
+        table.wk td.c-jam.bad,
+        table.wk td.c-hari.bad {
+            background: transparent;
+        }
+
+        /* Baris total (tfoot) */
+        table.wk tfoot tr {
+            background: var(--surface-2);
+        }
+
+        table.wk tfoot td {
+            font-size: 12px;
+            text-align: center;
+            background: transparent;
+        }
+
+        table.wk tfoot td.c-foot {
+            font-weight: 700;
+            position: static;
+            box-shadow: none;
+            padding: 0 0 2px;
+        }
+    }
+
     /* ---------------------------------------------------------------- 10 Utilitas */
     .ico-inline {
         font-size: 18px !important;

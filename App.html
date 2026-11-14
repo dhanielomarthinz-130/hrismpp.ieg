@@ -380,6 +380,44 @@
         iconObserver = new MutationObserver(iconizeToolbars);
         iconObserver.observe($('#view'), { childList: true, subtree: true });
         initDatePicker();
+        initMobileTables();
+    }
+
+    /* ===================== TABEL RAMAH HP =====================
+       Setiap sel diberi data-label dari judul kolomnya, sehingga di layar HP
+       tabel (.tbl) tampil sebagai kartu bertumpuk & grid mingguan (.wk) sebagai
+       kartu per karyawan — tanpa geser kiri-kanan. */
+    const M_STACK_SKIP = '.ak-tbl, .db-tbl, .kode-tbl';
+    function labelTables(root) {
+        $$('table.tbl, table.wk', root).forEach(tb => {
+            const head = tb.tHead && tb.tHead.rows[tb.tHead.rows.length - 1];
+            if (!head) return;
+            const labels = [];
+            Array.from(head.cells).forEach(th => {
+                const sp = th.querySelector('span'), b = th.querySelector('b');
+                const t = (tb.classList.contains('wk') && sp && b ? sp.textContent + ' ' + b.textContent : th.textContent).replace(/\s+/g, ' ').trim();
+                for (let k = 0; k < (th.colSpan || 1); k++) labels.push(k ? '' : t);
+            });
+            if (tb.classList.contains('tbl') && !tb.matches(M_STACK_SKIP) && !tb.closest('.only-wide')) tb.classList.add('m-stack');
+            Array.from(tb.tBodies).concat(tb.tFoot ? [tb.tFoot] : []).forEach(sec => Array.from(sec.rows).forEach(tr => {
+                let ci = 0;
+                Array.from(tr.cells).forEach(td => {
+                    const span = td.colSpan || 1;
+                    const lb = span > 1 ? '' : (labels[ci] || '');
+                    if (td.getAttribute('data-label') !== lb) td.setAttribute('data-label', lb);
+                    ci += span;
+                });
+            }));
+        });
+    }
+    let mtObserver = null;
+    function initMobileTables() {
+        if (mtObserver) return;
+        let raf = 0;
+        const run = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; labelTables(document.body); }); };
+        mtObserver = new MutationObserver(run);
+        mtObserver.observe(document.body, { childList: true, subtree: true });
+        run();
     }
 
     /* =========================== DATE PICKER PREMIUM ===========================
