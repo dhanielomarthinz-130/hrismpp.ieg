@@ -257,6 +257,8 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
   .flt>.btn,.flt>.icon-btn{width:100%}
   .hr-card .pic-name{max-width:100%;font-size:15px}
 }
+.super-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px;padding:10px 12px;border:1px dashed var(--err-t);border-radius:10px}
+.super-bar .small{margin-right:auto;font-weight:700}
 .rk-bar{flex:1;height:8px;border-radius:4px;background:var(--line);overflow:hidden;min-width:60px}.rk-bar i{display:block;height:100%;border-radius:4px}
 .rk-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .rk-grid div{display:grid;gap:2px}.rk-grid small{font-size:11px;color:var(--muted);font-weight:600}.rk-grid b{font-size:15px;font-variant-numeric:tabular-nums}
@@ -1478,10 +1480,13 @@ function renderDetail(t) {
   h += '<div class="grid g2" style="margin-top:12px"><button class="btn" id="dWa">' + ic('wa') + 'Bagikan ke WA</button>' +
     (bisaLepas ? '<button class="btn" id="dLepas">Batalkan proses</button>' : '') +
     (bisaAlih ? '<button class="btn" id="dAlih">Alihkan ke PIC lain</button>' : '') +
-    (canEdit('admin') && t.status !== 'Batal' ? '<button class="btn danger" id="dCancel">Batalkan temuan</button>' : '') + '</div>';
+    (canEdit('admin') && t.status !== 'Batal' ? '<button class="btn danger" id="dCancel">Batalkan temuan</button>' : '') + '</div>' +
+    (isSuper() ? superBar('dSEdit', 'dSDel', 'temuan') : '');
   $('#sheet').innerHTML = '<div class="sheet-h"><h2>' + esc(t.id) + '</h2><button class="icon-btn" onclick="closeModal()" aria-label="Tutup">' + ic('x') + '</button></div>' + h;
 
   $('#dWa').onclick = () => shareWA(waTemuan(t));
+  if ($('#dSEdit')) $('#dSEdit').onclick = () => superTemuanEdit(t);
+  if ($('#dSDel')) $('#dSDel').onclick = () => superTemuanHapus(t);
   if ($('#tGo')) {
     const std = t.deadlineStandar || t.deadline;
     const cek = () => { const v = fromWib($('#tTarget').value); $('#tAlasanBox').hidden = !(v > std + 6e4); };
@@ -1603,13 +1608,17 @@ async function openPoinPic(nik, bulan) {
       '<div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:12px">' +
       box('Bertambah', '+' + num(d.plus)) + box('Berkurang', num(d.minus), d.minus < 0 ? 'err' : '') + box('Total', signed(d.total), d.total < 0 ? 'err' : '') + '</div>' +
       (d.telatBerjalan ? '<div class="note warn" style="margin-bottom:10px">Total termasuk ' + signed(d.telatBerjalan) + ' potongan berjalan dari temuan yang lewat target dan belum diperbaiki.</div>' : '');
-    h += d.rows.length ? '<div class="tbl-wrap"><table class="tbl" style="min-width:0"><tr><th>Waktu</th><th>Kejadian</th><th class="num">Poin</th><th class="num">Saldo</th></tr>' +
+    h += d.rows.length ? '<div class="tbl-wrap"><table class="tbl" style="min-width:0"><tr><th>Waktu</th><th>Kejadian</th><th class="num">Poin</th><th class="num">Saldo</th>' + (isSuper() ? '<th></th>' : '') + '</tr>' +
       d.rows.map(r => '<tr><td class="small" style="white-space:nowrap">' + fDate(r.ts) + '</td><td>' + esc(r.ket) +
         (r.temuanId ? '<div class="small"><a href="#" onclick="openDetail(' + esc(JSON.stringify(r.temuanId)) + ');return false">' + esc(r.temuanId) + '</a>' + (r.area ? ' · ' + esc(r.area) : '') + '</div>' : '') + '</td>' +
-        '<td class="num"><span class="chip nodot ' + (r.poin < 0 ? 'c-err' : 'c-ok') + '">' + signed(r.poin) + '</span></td><td class="num tnum">' + signed(r.saldo) + '</td></tr>').join('') + '</table></div>'
+        '<td class="num"><span class="chip nodot ' + (r.poin < 0 ? 'c-err' : 'c-ok') + '">' + signed(r.poin) + '</span></td><td class="num tnum">' + signed(r.saldo) + '</td>' + (isSuper() ? '<td style="white-space:nowrap"><button class="btn sm" data-ope="' + r.id + '">Edit</button> <button class="btn sm danger" data-opd="' + r.id + '">Hapus</button></td>' : '') + '</tr>').join('') + '</table></div>'
       : emptyBox('Belum ada poin bulan ini');
     h += '<div class="grid g2" style="margin-top:12px"><button class="btn" onclick="closeModal();go(\'daftar\',{q:' + esc(JSON.stringify(d.nama)) + ',bulan:\'\'})">' + ic('list') + 'Temuan PIC ini</button><button class="btn primary" onclick="closeModal()">Tutup</button></div>';
     $('#sheet').innerHTML = '<div class="sheet-h"><h2>' + esc(d.nama) + '</h2><button class="icon-btn" onclick="closeModal()" aria-label="Tutup">' + ic('x') + '</button></div>' + h;
+    const ulang = () => { openPoinPic(nik, bulan); if (S.view === 'poin') VIEWS.poin(); };
+    const cari = id => Object.assign({ nama: d.nama }, d.rows.find(x => String(x.id) === id));
+    $$('[data-ope]').forEach(b => b.onclick = () => superPoinEdit(cari(b.dataset.ope), ulang));
+    $$('[data-opd]').forEach(b => b.onclick = () => superPoinHapus(cari(b.dataset.opd), ulang));
   } catch (e) { $('#sheet').innerHTML = emptyBox(e.message); }
 }
 function afterChange() {
@@ -1635,8 +1644,11 @@ VIEWS.audit = function () {
     loading(AH);
     try {
       const rows = await call('apiListAudit', S.token, S.bulan);
-      AH.innerHTML = rows.length ? '<div class="tbl-wrap"><table class="tbl"><tr><th>Tanggal</th><th>Area</th>' + B.rList.map(r => '<th class="num">' + r + '</th>').join('') + '<th class="num">Total</th><th>Auditor</th></tr>' +
-        rows.map(a => '<tr><td>' + fDate(a.tanggal, false) + '</td><td>' + esc(a.area) + '</td>' + B.rList.map(r => '<td class="num">' + (a[r] == null ? '-' : num(a[r], 0) + '%') + '</td>').join('') + '<td class="num"><b>' + num(a.total) + '%</b></td><td>' + esc(a.auditor) + '</td></tr>').join('') + '</table></div>' : emptyBox('Belum ada audit bulan ini');
+      AH.innerHTML = rows.length ? '<div class="tbl-wrap"><table class="tbl"><tr><th>Tanggal</th><th>Area</th>' + B.rList.map(r => '<th class="num">' + r + '</th>').join('') + '<th class="num">Total</th><th>Auditor</th>' + (isSuper() ? '<th></th>' : '') + '</tr>' +
+        rows.map(a => '<tr><td>' + fDate(a.tanggal, false) + '</td><td>' + esc(a.area) + '</td>' + B.rList.map(r => '<td class="num">' + (a[r] == null ? '-' : num(a[r], 0) + '%') + '</td>').join('') + '<td class="num"><b>' + num(a.total) + '%</b></td><td>' + esc(a.auditor) + (a.catatan ? '<div class="cell-sub">' + esc(a.catatan) + '</div>' : '') + '</td>' +
+          (isSuper() ? '<td style="white-space:nowrap"><button class="btn sm" data-ae="' + esc(a.id) + '">Edit</button> <button class="btn sm danger" data-ad="' + esc(a.id) + '">Hapus</button></td>' : '') + '</tr>').join('') + '</table></div>' : emptyBox('Belum ada audit bulan ini');
+      $$('[data-ae]', AH).forEach(b => b.onclick = () => { const a = rows.find(x => x.id === b.dataset.ae); if (a) superAuditEdit(a, hist); });
+      $$('[data-ad]', AH).forEach(b => b.onclick = () => { const a = rows.find(x => x.id === b.dataset.ad); if (a) superAuditHapus(a, hist); });
     } catch (e) { AH.innerHTML = emptyBox(e.message); }
   };
   const summary = () => {
@@ -1736,6 +1748,105 @@ async function poinArea(v) {
   loading(PB);
   try { data = await call('apiLeaderboard', S.token, S.bulan); draw(); } catch (e) { PB.innerHTML = emptyBox(e.message); }
 }
+/* =====================================================================
+ *  KOREKSI DATA — tombol Edit & Hapus khusus Super Admin
+ * ===================================================================== */
+const isSuper = () => !!(S.user && S.user.super);
+const superBar = (editId, hapusId, label) => '<div class="super-bar"><span class="small muted">Super Admin</span>' +
+  (editId ? '<button class="btn sm" id="' + editId + '">Edit' + (label ? ' ' + label : '') + '</button>' : '') +
+  (hapusId ? '<button class="btn sm danger" id="' + hapusId + '">Hapus' + (label ? ' ' + label : '') + '</button>' : '') + '</div>';
+/* Konfirmasi hapus: ketik HAPUS supaya tidak terhapus tanpa sengaja */
+function superKonfirmasi(judul, pesan, onYes, onBack) {
+  openModal(judul, '<div class="note warn" style="margin-bottom:12px">' + pesan + '</div>' +
+    '<div class="field"><label for="sxOk">Ketik <b>HAPUS</b> untuk melanjutkan</label><input class="inp" id="sxOk" autocomplete="off"></div>' +
+    '<div class="grid g2"><button class="btn" id="sxBack">Kembali</button><button class="btn danger" id="sxGo" disabled>Hapus permanen</button></div>');
+  $('#sxOk').oninput = e => { $('#sxGo').disabled = e.target.value.trim().toUpperCase() !== 'HAPUS'; };
+  $('#sxBack').onclick = () => (onBack ? onBack() : closeModal());
+  $('#sxGo').onclick = async () => {
+    const b = $('#sxGo'); b.disabled = true; b.textContent = 'Menghapus…';
+    try { await onYes(); } catch (e) { toast(e.message, true); b.disabled = false; b.textContent = 'Hapus permanen'; }
+  };
+}
+/* Temuan */
+function superTemuanEdit(t) {
+  const B = S.boot;
+  openModal('Edit temuan ' + t.id,
+    '<div class="field"><label for="seLok">Lokasi</label><input class="inp" id="seLok" value="' + esc(t.lokasi) + '"></div>' +
+    '<div class="grid g2"><div class="field"><label for="seR">Kategori S</label><select class="inp" id="seR">' + B.rList.map(r => '<option' + (r === t.r ? ' selected' : '') + '>' + esc(r) + '</option>').join('') + '</select></div>' +
+    '<div class="field"><label for="seTk">Tingkat</label><select class="inp" id="seTk">' + B.tingkat.map(x => '<option' + (x === t.tingkat ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></div></div>' +
+    '<div class="field"><label for="seDesk">Deskripsi</label><textarea class="inp" id="seDesk">' + esc(t.deskripsi) + '</textarea></div>' +
+    '<div class="field"><label for="seDl">Batas waktu (WIB)</label><input type="datetime-local" class="inp" id="seDl" value="' + (t.deadline ? toWib(t.deadline) : '') + '"></div>' +
+    '<p class="small muted" style="margin-top:0">Perubahan tercatat di riwayat temuan. Poin yang sudah tercatat tidak dihitung ulang.</p>' +
+    '<div class="grid g2"><button class="btn" id="seBack">Kembali</button><button class="btn primary" id="seGo">Simpan</button></div>');
+  $('#seBack').onclick = () => renderDetailInModal(t);
+  $('#seGo').onclick = async () => {
+    const b = $('#seGo'); b.disabled = true;
+    try {
+      const r = await call('apiSuperTemuanEdit', S.token, t.id, { lokasi: $('#seLok').value, r: $('#seR').value, tingkat: $('#seTk').value, deskripsi: $('#seDesk').value, deadline: fromWib($('#seDl').value) || null });
+      toast('Temuan diperbarui'); renderDetailInModal(r); afterChange();
+    } catch (e) { toast(e.message, true); b.disabled = false; }
+  };
+}
+function superTemuanHapus(t) {
+  superKonfirmasi('Hapus temuan ' + t.id, 'Temuan <b>' + esc(t.id) + '</b> (' + esc(t.area) + ') akan dihapus permanen beserta fotonya dan <b>semua poin terkait</b> (PIC & area). Tidak bisa dibatalkan.',
+    async () => { await call('apiSuperTemuanHapus', S.token, t.id); closeModal(); toast('Temuan dihapus'); afterChange(); if (S.view === 'poin') VIEWS.poin(); },
+    () => renderDetailInModal(t));
+}
+/* Task 6S harian */
+function superHarianEdit(s, rList) {
+  const r = s.rec;
+  const isi = r.detail.map((d, i) => ({ d, i })).filter(x => x.d.foto);
+  openModal('Edit 6S harian · ' + s.area,
+    '<div class="small muted" style="margin-bottom:10px">' + esc(s.shiftNama) + ' · ' + esc(s.tanggal) + '</div>' +
+    (isi.length ? isi.map(x => '<div class="field"><label for="sht' + x.i + '">' + esc(x.d.r) + '</label><textarea class="inp" id="sht' + x.i + '" style="min-height:64px">' + esc(x.d.tindakan) + '</textarea></div>').join('')
+      : '<div class="note">Belum ada S yang diisi.</div>') +
+    '<div class="grid g2"><button class="btn" id="shBack">Kembali</button><button class="btn primary" id="shGo"' + (isi.length ? '' : ' disabled') + '>Simpan</button></div>');
+  $('#shBack').onclick = () => harianTask(s, rList);
+  $('#shGo').onclick = async () => {
+    const t = {}; isi.forEach(x => { t[x.i] = $('#sht' + x.i).value; });
+    try { s.rec = await call('apiSuperHarianEdit', S.token, r.id, t); toast('Tindakan diperbarui'); harianTask(s, rList); if (S.view === 'harian') VIEWS.harian(); }
+    catch (e) { toast(e.message, true); }
+  };
+}
+function superHarianHapus(s, rList) {
+  const jalan = Date.now() < s.selesai;
+  superKonfirmasi('Hapus 6S harian', 'Task <b>' + esc(s.area) + ' · ' + esc(s.shiftNama) + ' ' + esc(s.tanggal) + '</b> akan dihapus beserta fotonya. Poin yang sudah masuk (PIC & area) dibalik. ' +
+    (jalan ? 'Shift masih berjalan, jadi task kembali kosong dan bisa dikerjakan ulang.' : 'Shift sudah berakhir, jadi task ditandai <b>Dibatalkan</b> dan tidak dihitung terlewat.'),
+    async () => { await call('apiSuperHarianHapus', S.token, s.rec.id); closeModal(); toast('Task 6S harian dihapus'); if (S.view === 'harian') VIEWS.harian(); },
+    () => harianTask(s, rList));
+}
+/* Entri poin */
+function superPoinEdit(p, after) {
+  openModal('Edit poin', '<div class="small muted" style="margin-bottom:10px">' + esc(p.nama || '') + ' · ' + fDate(p.ts) + '</div>' +
+    '<div class="field"><label for="spV">Nilai poin (minus untuk potongan)</label><input type="number" step="0.1" class="inp" id="spV" value="' + esc(p.poin) + '"></div>' +
+    '<div class="field"><label for="spK">Keterangan</label><textarea class="inp" id="spK">' + esc(p.ket) + '</textarea></div>' +
+    '<div class="grid g2"><button class="btn" id="spBack">Batal</button><button class="btn primary" id="spGo">Simpan</button></div>');
+  $('#spBack').onclick = closeModal;
+  $('#spGo').onclick = async () => {
+    try { await call('apiSuperPoinEdit', S.token, p.id, $('#spV').value, $('#spK').value); closeModal(); toast('Poin diperbarui'); after && after(); }
+    catch (e) { toast(e.message, true); }
+  };
+}
+function superPoinHapus(p, after) {
+  superKonfirmasi('Hapus entri poin', 'Entri poin <b>' + signed(p.poin) + '</b> milik <b>' + esc(p.nama || '') + '</b> (' + esc(p.ket) + ') akan dihapus. Total poin ikut berubah.',
+    async () => { await call('apiSuperPoinHapus', S.token, p.id); closeModal(); toast('Entri poin dihapus'); after && after(); });
+}
+/* Audit */
+function superAuditEdit(a, after) {
+  openModal('Edit catatan audit', '<div class="small muted" style="margin-bottom:10px">' + esc(a.area) + ' · ' + fDate(a.tanggal, false) + ' · ' + esc(a.auditor) + '</div>' +
+    '<div class="field"><label for="saK">Catatan audit</label><textarea class="inp" id="saK">' + esc(a.catatan) + '</textarea></div>' +
+    '<p class="small muted" style="margin-top:0">Nilai audit tidak bisa diedit; hapus lalu audit ulang bila nilainya salah.</p>' +
+    '<div class="grid g2"><button class="btn" id="saBack">Batal</button><button class="btn primary" id="saGo">Simpan</button></div>');
+  $('#saBack').onclick = closeModal;
+  $('#saGo').onclick = async () => {
+    try { await call('apiSuperAuditEdit', S.token, a.id, $('#saK').value); closeModal(); toast('Catatan audit diperbarui'); after && after(); }
+    catch (e) { toast(e.message, true); }
+  };
+}
+function superAuditHapus(a, after) {
+  superKonfirmasi('Hapus audit', 'Hasil audit <b>' + esc(a.area) + '</b> tanggal ' + fDate(a.tanggal, false) + ' (total ' + num(a.total) + '%) akan dihapus. Nilai rata-rata audit tim ikut berubah.',
+    async () => { await call('apiSuperAuditHapus', S.token, a.id); closeModal(); toast('Audit dihapus'); after && after(); });
+}
 /* Tab Papan Poin PIC: peringkat user & riwayat poin (tabel di desktop, kartu di mobile) */
 async function poinPapan(v) {
   const c = S.boot.config;
@@ -1791,17 +1902,22 @@ async function poinPapan(v) {
         : emptyBox(data.papan.length ? 'Tidak ada user yang cocok.' : 'Belum ada Leader / PIC IEG.');
     } else {
       const list = data.riwayatPic.filter(cocok);
+      const sx = r => '<button class="btn sm" data-pe="' + r.id + '">Edit</button> <button class="btn sm danger" data-pd="' + r.id + '">Hapus</button>';
       const tm = r => r.temuanId ? '<a href="#" onclick="openDetail(' + esc(JSON.stringify(r.temuanId)) + ');return false">' + esc(r.temuanId) + '</a>' : '';
       h = list.length ?
-        '<div class="tbl-wrap hr-desk"><table class="tbl" style="min-width:820px"><thead><tr><th>Waktu</th><th>PIC</th><th class="num">Poin</th><th>Kejadian</th><th>Temuan</th></tr></thead><tbody>' +
+        '<div class="tbl-wrap hr-desk"><table class="tbl" style="min-width:820px"><thead><tr><th>Waktu</th><th>PIC</th><th class="num">Poin</th><th>Kejadian</th><th>Temuan</th>' + (isSuper() ? '<th></th>' : '') + '</tr></thead><tbody>' +
           list.map(r => '<tr><td class="small" style="white-space:nowrap">' + fDate(r.ts) + '</td><td>' + nm(r.nik, r.nama) + '<div class="pic-meta">' + esc(r.nik) + '</div></td>' +
-            '<td class="num"><span class="chip nodot ' + (r.poin < 0 ? 'c-err' : 'c-ok') + '">' + signed(r.poin) + '</span></td><td>' + esc(r.ket) + '</td><td>' + (tm(r) || '-') + '</td></tr>').join('') + '</tbody></table></div>' +
+            '<td class="num"><span class="chip nodot ' + (r.poin < 0 ? 'c-err' : 'c-ok') + '">' + signed(r.poin) + '</span></td><td>' + esc(r.ket) + '</td><td>' + (tm(r) || '-') + '</td>' + (isSuper() ? '<td style="white-space:nowrap">' + sx(r) + '</td>' : '') + '</tr>').join('') + '</tbody></table></div>' +
         '<div class="hr-cards">' + list.map(r => '<div class="hr-card" style="gap:8px">' +
             '<div class="hr-c-head"><div style="min-width:0">' + nm(r.nik, r.nama) + '<div class="hr-c-sub">' + fDate(r.ts) + '</div></div><span class="chip nodot ' + (r.poin < 0 ? 'c-err' : 'c-ok') + '">' + signed(r.poin) + '</span></div>' +
-            '<div class="hr-c-pic">' + esc(r.ket) + (tm(r) ? '<div class="hr-c-sub" style="margin-top:2px">Temuan ' + tm(r) + '</div>' : '') + '</div></div>').join('') + '</div>'
+            '<div class="hr-c-pic">' + esc(r.ket) + (tm(r) ? '<div class="hr-c-sub" style="margin-top:2px">Temuan ' + tm(r) + '</div>' : '') + '</div>' + (isSuper() ? '<div class="hr-c-act">' + sx(r) + '</div>' : '') + '</div>').join('') + '</div>'
         : emptyBox('Belum ada riwayat poin bulan ini');
     }
     PB.innerHTML = h;
+    const cari = id => data.riwayatPic.find(x => String(x.id) === id);
+    const ulang = () => poinPapan(v);
+    $$('[data-pe]', PB).forEach(b => b.onclick = () => { const r = cari(b.dataset.pe); if (r) superPoinEdit(r, ulang); });
+    $$('[data-pd]', PB).forEach(b => b.onclick = () => { const r = cari(b.dataset.pd); if (r) superPoinHapus(r, ulang); });
   };
   $$('#pSub button').forEach(b => b.onclick = () => { $$('#pSub button').forEach(x => x.classList.toggle('on', x === b)); st.sub = b.dataset.t; draw(); });
   let tq; $('#pQ').addEventListener('input', e => { clearTimeout(tq); tq = setTimeout(() => { st.q = e.target.value; draw(); }, 200); });
@@ -1939,7 +2055,7 @@ VIEWS.admin = async function () {
 /* =====================================================================
  *  VIEW: 6S HARIAN — task 6S setiap shift (Shift 1 & 2) per area: foto + tindakan untuk tiap S
  * ===================================================================== */
-const HR_ST = { Selesai: ['Selesai', 'c-ok'], Proses: ['Sedang diisi', 'c-info'], Belum: ['Belum dikerjakan', 'c-warn'], Terlewat: ['Terlewat', 'c-err'], Nanti: ['Belum mulai', 'c-neu'] };
+const HR_ST = { Selesai: ['Selesai', 'c-ok'], Proses: ['Sedang diisi', 'c-info'], Belum: ['Belum dikerjakan', 'c-warn'], Terlewat: ['Terlewat', 'c-err'], Nanti: ['Belum mulai', 'c-neu'], Batal: ['Dibatalkan', 'c-neu'] };
 VIEWS.harian = async function (opt) {
   const st = S.hr || (S.hr = { tanggal: '', saya: true, area: '', pic: '' });
   if (opt && opt.tanggal) st.tanggal = opt.tanggal;
@@ -2280,8 +2396,11 @@ async function harianTask(s, rList) {
       (d.foto ? '<div style="display:grid;grid-template-columns:120px 1fr;gap:10px;margin-top:10px;align-items:start"><div>' + hrFoto(d.foto) + '</div><div><div style="font-weight:600">' + esc(d.tindakan) + '</div>' +
         '<div class="small muted">' + esc(d.oleh) + ' · ' + fDate(d.waktu) + '</div>' +
         (d.temuanId ? '<div class="small"><a href="#" onclick="openDetail(' + esc(JSON.stringify(d.temuanId)) + ');return false">Temuan ' + esc(d.temuanId) + '</a></div>' : '') + '</div></div>' : '') +
-      '</div>').join('');
+      '</div>').join('') +
+    (isSuper() && s.rec && s.rec.status !== 'Batal' ? superBar(s.rec.isi ? 'hsSEdit' : '', 'hsSDel', 'task') : '');
   $$('[data-hs]').forEach(b => b.onclick = () => harianIsiS(s, rList, +b.dataset.hs, panduan));
+  if ($('#hsSEdit')) $('#hsSEdit').onclick = () => superHarianEdit(s, rList);
+  if ($('#hsSDel')) $('#hsSDel').onclick = () => superHarianHapus(s, rList);
 }
 function harianIsiS(s, rList, i, panduan) {
   const d = (s.rec && s.rec.detail[i]) || { r: rList[i], foto: '', tindakan: '' };

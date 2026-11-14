@@ -1044,12 +1044,12 @@ function apiRiwayatPoinPic($token, $nik, $bulan): array {
     if (!$p) throw new RuntimeException('PIC tidak ditemukan.');
     $area = [];
     foreach (db_all("SELECT id, nama_area, lokasi FROM r5_temuan") as $t) $area[$t['id']] = r5_str($t['nama_area']) . (r5_str($t['lokasi']) !== '' ? ' · ' . r5_str($t['lokasi']) : '');
-    $rows = db_all("SELECT ts, poin, ket, temuan_id FROM r5_poin WHERE jenis = 'PIC' AND LOWER(ref_id) = ? AND bulan = ? ORDER BY ts, id", [mb_strtolower($p['nik']), $bulan]);
+    $rows = db_all("SELECT id, ts, poin, ket, temuan_id FROM r5_poin WHERE jenis = 'PIC' AND LOWER(ref_id) = ? AND bulan = ? ORDER BY ts, id", [mb_strtolower($p['nik']), $bulan]);
     $saldo = 0.0; $plus = 0.0; $minus = 0.0; $out = [];
     foreach ($rows as $r) {
         $v = (float)$r['poin'];
         $saldo += $v; if ($v >= 0) $plus += $v; else $minus += $v;
-        $out[] = ['ts' => (int)$r['ts'], 'poin' => $v, 'saldo' => r5_round1($saldo), 'ket' => r5_str($r['ket']),
+        $out[] = ['id' => (int)$r['id'], 'ts' => (int)$r['ts'], 'poin' => $v, 'saldo' => r5_round1($saldo), 'ket' => r5_str($r['ket']),
                   'temuanId' => r5_str($r['temuan_id']), 'area' => $area[$r['temuan_id']] ?? ''];
     }
     // Temuan lewat target yang belum diperbaiki: potongan per hari berjalan (belum tercatat, ikut dihitung di total)
@@ -1767,7 +1767,7 @@ function apiLeaderboard($token, $bulan): array {
     usort($papan, fn($a, $b) => ($b['poin'] <=> $a['poin']) ?: ($b['selesai'] <=> $a['selesai']) ?: ($b['ditemukan'] <=> $a['ditemukan']) ?: strcmp($a['nama'], $b['nama']));
     $riwayatPic = [];
     foreach (db_all("SELECT * FROM r5_poin WHERE bulan = ? AND jenis = 'PIC' ORDER BY ts DESC, id DESC LIMIT 300", [$bulan]) as $p) {
-        $riwayatPic[] = ['ts' => (int)$p['ts'], 'nik' => r5_str($p['ref_id']), 'nama' => r5_str($p['nama']), 'poin' => (float)$p['poin'],
+        $riwayatPic[] = ['id' => (int)$p['id'], 'ts' => (int)$p['ts'], 'nik' => r5_str($p['ref_id']), 'nama' => r5_str($p['nama']), 'poin' => (float)$p['poin'],
                          'temuanId' => r5_str($p['temuan_id']), 'ket' => r5_str($p['ket'])];
     }
     return ['bulan' => $bulan, 'papan' => $papan, 'riwayatPic' => $riwayatPic,
@@ -2192,7 +2192,7 @@ function apiHarianRekap($token, $dari, $sampai): array {
             'task' => 0, 'selesai' => 0, 'terlewat' => 0, 'proses' => 0, 'poinPlus' => 0.0, 'potongan' => 0.0, 'poin' => 0.0,
             'dibagikan' => 0, 'durasiTotal' => 0, 'durasiN' => 0, 'rows' => []];
     }
-    foreach (db_all("SELECT * FROM r6_harian WHERE tanggal BETWEEN ? AND ? ORDER BY tanggal DESC, shift", [$dari, $sampai]) as $r) {
+    foreach (db_all("SELECT * FROM r6_harian WHERE tanggal BETWEEN ? AND ? AND status <> 'Batal' ORDER BY tanggal DESC, shift", [$dari, $sampai]) as $r) {
         $aid = $r['area_id'];
         if (!isset($areas[$aid])) $areas[$aid] = ['areaId' => $aid, 'area' => r5_str($r['nama_area']) ?: $aid, 'tim' => '', 'aktif' => false,
             'task' => 0, 'selesai' => 0, 'terlewat' => 0, 'proses' => 0, 'poinPlus' => 0.0, 'potongan' => 0.0, 'poin' => 0.0,
@@ -2448,8 +2448,150 @@ function apiAksesSimpan($token, $p): array {
     return r5_access_save(is_array($p) ? $p : [], ['username' => $u['nik'], 'super' => true]);
 }
 
+/* =====================================================================
+ *  KOREKSI DATA — khusus Super Admin (edit & hapus permanen)
+ * ===================================================================== */
+
+/** Edit isi temuan: lokasi, kategori S, tingkat, deskripsi, batas waktu. Tercatat di riwayat temuan. */
+function apiSuperTemuanEdit($token, $id, $d): array {
+    $u = r6_super($token);
+    $d = is_array($d) ? $d : [];
+    return db_transaction(function () use ($u, $id, $d) {
+        $t = r5_find_temuan($id);
+        if (!$t) throw new RuntimeException('Temuan tidak ditemukan.');
+        $r = r5_str($d['r'] ?? $t['kategori_r']);
+        $tk = r5_str($d['tingkat'] ?? $t['tingkat']);
+        if (!in_array($r, R5_LIST, true)) throw new RuntimeException('Kategori S tidak valid.');
+        if (!in_array($tk, R5_TINGKAT, true)) throw new RuntimeException('Tingkat tidak valid.');
+        $desk = r5_str($d['deskripsi'] ?? $t['deskripsi']);
+        if ($desk === '') throw new RuntimeException('Deskripsi wajib diisi.');
+        $data = ['lokasi' => r5_str($d['lokasi'] ?? $t['lokasi']), 'kategori_r' => $r, 'tingkat' => $tk, 'deskripsi' => $desk];
+        if (isset($d['deadline']) && (int)$d['deadline'] > 0) $data['deadline'] = (int)$d['deadline'];
+        $ubah = [];
+        foreach (['lokasi' => 'lokasi', 'kategori_r' => 'kategori', 'tingkat' => 'tingkat', 'deskripsi' => 'deskripsi', 'deadline' => 'batas waktu'] as $k => $lbl) {
+            if (array_key_exists($k, $data) && (string)$data[$k] !== (string)$t[$k]) $ubah[] = $lbl;
+        }
+        if ($ubah) {
+            $data['riwayat'] = r6_riwayat($t['riwayat'] ?? null, 'Diedit Super Admin', $u['nama'], 'Diubah: ' . implode(', ', $ubah), r5_now());
+            db_update('r5_temuan', $data, 'id = ?', [$t['id']]);
+            audit_log($u['nik'], 'EDIT_TEMUAN_6S', $t['id'] . ' · ' . implode(', ', $ubah));
+        }
+        return r5_tout(r5_find_temuan($id), r5_timmap());
+    });
+}
+
+/** Hapus temuan permanen beserta semua poinnya (PIC & area) dan fotonya. */
+function apiSuperTemuanHapus($token, $id): bool {
+    $u = r6_super($token);
+    $t = r5_find_temuan($id);
+    if (!$t) throw new RuntimeException('Temuan tidak ditemukan.');
+    db_transaction(function () use ($t) {
+        db_query("DELETE FROM r5_poin WHERE temuan_id = ?", [$t['id']]);
+        db_query("DELETE FROM r5_temuan WHERE id = ?", [$t['id']]);
+    });
+    foreach (['foto_before', 'foto_after'] as $k) foto_delete_file($t[$k] ?? '');
+    audit_log($u['nik'], 'HAPUS_TEMUAN_6S', $t['id'] . ' · ' . r5_str($t['nama_area']) . ' · ' . r5_str($t['deskripsi']));
+    return true;
+}
+
+/** Edit tindakan tiap S pada task 6S harian. $tindakan = [indeks S => teks]. */
+function apiSuperHarianEdit($token, $id, $tindakan): array {
+    $u = r6_super($token);
+    $tindakan = is_array($tindakan) ? $tindakan : [];
+    $r = db_row("SELECT * FROM r6_harian WHERE id = ?", [r5_str($id)]);
+    if (!$r) throw new RuntimeException('Task 6S harian tidak ditemukan.');
+    $det = r6_harian_detail($r['detail']);
+    foreach ($det as $i => &$x) {
+        if ($x['foto'] === '' || !array_key_exists((string)$i, $tindakan) && !array_key_exists($i, $tindakan)) continue;
+        $v = r5_str($tindakan[$i] ?? $tindakan[(string)$i]);
+        if ($v === '') throw new RuntimeException('Tindakan ' . $x['r'] . ' tidak boleh kosong.');
+        $x['tindakan'] = $v;
+    }
+    unset($x);
+    db_update('r6_harian', ['detail' => json_encode(array_values(array_filter($det, fn($x) => $x['foto'] !== '')), JSON_UNESCAPED_UNICODE)], 'id = ?', [$r['id']]);
+    audit_log($u['nik'], 'EDIT_6S_HARIAN', $r['id']);
+    return r6_harian_out(db_row("SELECT * FROM r6_harian WHERE id = ?", [$r['id']]));
+}
+
+/**
+ * Hapus task 6S harian: poinnya dibalik (PIC & area) dan fotonya dihapus.
+ * Shift masih berjalan -> task kosong lagi (bisa dikerjakan ulang).
+ * Shift sudah berakhir -> ditandai Dibatalkan (tidak dihitung terlewat lagi).
+ */
+function apiSuperHarianHapus($token, $id): array {
+    $u = r6_super($token);
+    $r = db_row("SELECT * FROM r6_harian WHERE id = ?", [r5_str($id)]);
+    if (!$r) throw new RuntimeException('Task 6S harian tidak ditemukan.');
+    $now = r5_now();
+    $det = r6_harian_detail($r['detail']);
+    $poin = (float)$r['poin'];
+    db_transaction(function () use ($r, $det, $poin, $now, $u) {
+        if ($poin != 0) {
+            $org = [];
+            if ($r['status'] === 'Selesai') { foreach ($det as $x) if ($x['foto'] !== '' && $x['olehNik'] !== '') $org[mb_strtolower($x['olehNik'])] = [$x['olehNik'], $x['oleh']]; }
+            else foreach (json_decode((string)$r['pics'], true) ?: [] as $p) $org[mb_strtolower($p['nik'])] = [$p['nik'], $p['nama']];
+            $ket = '6S harian dihapus Super Admin · ' . r5_str($r['nama_area']) . ' · ' . $r['shift'] . ' ' . $r['tanggal'];
+            foreach ($org as $o) r5_log_poin('PIC', $o[0], $o[1], -$poin, '', $ket, $now);
+            r5_log_poin('AREA', (string)$r['area_id'], r5_str($r['nama_area']), -$poin, '', '6S harian dihapus · ' . $r['shift'] . ' ' . $r['tanggal'], $now);
+        }
+        if ((int)$r['batas'] > $now) db_query("DELETE FROM r6_harian WHERE id = ?", [$r['id']]);
+        else db_update('r6_harian', ['status' => 'Batal', 'poin' => 0, 'detail' => '[]', 'ok_n' => 0, 'oleh_nik' => null, 'oleh_nama' => null, 'waktu' => null,
+            'catatan' => 'Dihapus Super Admin ' . $u['nama']], 'id = ?', [$r['id']]);
+    });
+    foreach ($det as $x) if ($x['foto'] !== '' && ($x['temuanId'] ?? '') === '') foto_delete_file($x['foto']);
+    audit_log($u['nik'], 'HAPUS_6S_HARIAN', $r['id'] . ' · ' . r5_str($r['nama_area']));
+    return ['dihapus' => true];
+}
+
+/** Edit nilai / keterangan satu entri poin. */
+function apiSuperPoinEdit($token, $id, $poin, $ket): bool {
+    $u = r6_super($token);
+    $p = db_row("SELECT * FROM r5_poin WHERE id = ?", [(int)$id]);
+    if (!$p) throw new RuntimeException('Entri poin tidak ditemukan.');
+    if (!is_numeric($poin)) throw new RuntimeException('Nilai poin harus angka.');
+    $ket = r5_str($ket);
+    if ($ket === '') throw new RuntimeException('Keterangan wajib diisi.');
+    db_update('r5_poin', ['poin' => (float)$poin, 'ket' => $ket], 'id = ?', [(int)$id]);
+    audit_log($u['nik'], 'EDIT_POIN_6S', '#' . (int)$id . ' ' . r5_str($p['nama']) . ': ' . (float)$p['poin'] . ' -> ' . (float)$poin);
+    return true;
+}
+
+/** Hapus satu entri poin. */
+function apiSuperPoinHapus($token, $id): bool {
+    $u = r6_super($token);
+    $p = db_row("SELECT * FROM r5_poin WHERE id = ?", [(int)$id]);
+    if (!$p) throw new RuntimeException('Entri poin tidak ditemukan.');
+    db_query("DELETE FROM r5_poin WHERE id = ?", [(int)$id]);
+    audit_log($u['nik'], 'HAPUS_POIN_6S', '#' . (int)$id . ' ' . r5_str($p['nama']) . ' ' . (float)$p['poin'] . ' · ' . r5_str($p['ket']));
+    return true;
+}
+
+/** Edit catatan audit. */
+function apiSuperAuditEdit($token, $id, $catatan): bool {
+    $u = r6_super($token);
+    if (!db_row("SELECT audit_id FROM r5_audit WHERE audit_id = ?", [r5_str($id)])) throw new RuntimeException('Audit tidak ditemukan.');
+    db_update('r5_audit', ['catatan' => r5_str($catatan)], 'audit_id = ?', [r5_str($id)]);
+    audit_log($u['nik'], 'EDIT_AUDIT_6S', r5_str($id));
+    return true;
+}
+
+/** Hapus hasil audit beserta rinciannya. */
+function apiSuperAuditHapus($token, $id): bool {
+    $u = r6_super($token);
+    $a = db_row("SELECT * FROM r5_audit WHERE audit_id = ?", [r5_str($id)]);
+    if (!$a) throw new RuntimeException('Audit tidak ditemukan.');
+    db_transaction(function () use ($a) {
+        db_query("DELETE FROM r5_audit_detail WHERE audit_id = ?", [$a['audit_id']]);
+        db_query("DELETE FROM r5_audit WHERE audit_id = ?", [$a['audit_id']]);
+    });
+    audit_log($u['nik'], 'HAPUS_AUDIT_6S', $a['audit_id'] . ' · ' . r5_str($a['nama_area']));
+    return true;
+}
+
 /** Daftar fungsi yang boleh dipanggil dari frontend (api6s.php). */
 const R5_API = [
+    'apiSuperTemuanEdit', 'apiSuperTemuanHapus', 'apiSuperHarianEdit', 'apiSuperHarianHapus',
+    'apiSuperPoinEdit', 'apiSuperPoinHapus', 'apiSuperAuditEdit', 'apiSuperAuditHapus',
     'apiBootstrap', 'apiFoto', 'apiCreateTemuan', 'apiListTemuan', 'apiGetTemuan',
     'apiSubmitPerbaikan', 'apiVerifikasi', 'apiBatalkanTemuan', 'apiDashboard', 'apiLeaderboard', 'apiChecklist',
     'apiSaveAudit', 'apiListAudit', 'apiAdminData', 'apiSaveUser', 'apiSaveArea', 'apiSaveChecklist',
