@@ -248,6 +248,9 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .hr-jam{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:4px;font-size:12px;color:var(--text-2)}
 .hr-jam span{display:grid;line-height:1.25}.hr-jam small{font-size:10.5px;color:var(--muted);font-weight:600}
 .hr-c-sec .hr-jam{margin-top:0;font-size:14px;gap:6px 22px}.hr-c-sec .hr-jam small{font-size:11px}
+.rk-bar{flex:1;height:8px;border-radius:4px;background:var(--line);overflow:hidden;min-width:60px}.rk-bar i{display:block;height:100%;border-radius:4px}
+.rk-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.rk-grid div{display:grid;gap:2px}.rk-grid small{font-size:11px;color:var(--muted);font-weight:600}.rk-grid b{font-size:15px;font-variant-numeric:tabular-nums}
 .hr-ket{display:grid;gap:1px;font-size:11.5px;color:var(--muted);margin-top:3px}
 .hr-cards{display:none}
 @media(max-width:760px){
@@ -1863,9 +1866,13 @@ VIEWS.admin = async function () {
  * ===================================================================== */
 const HR_ST = { Selesai: ['Selesai', 'c-ok'], Proses: ['Sedang diisi', 'c-info'], Belum: ['Belum dikerjakan', 'c-warn'], Terlewat: ['Terlewat', 'c-err'], Nanti: ['Belum mulai', 'c-neu'] };
 VIEWS.harian = async function (opt) {
-  const v = $('#view');
   const st = S.hr || (S.hr = { tanggal: '', saya: true, area: '', pic: '' });
-  if (opt && opt.tanggal) st.tanggal = opt.tanggal;
+  if (opt && opt.tanggal) { st.tanggal = opt.tanggal; st.tab = 'harian'; }
+  $('#view').innerHTML = '<div class="tabs" id="hrTabs" style="max-width:420px"><button data-t="harian"' + (st.tab !== 'rekap' ? ' class="on"' : '') + '>Task harian</button>' +
+    '<button data-t="rekap"' + (st.tab === 'rekap' ? ' class="on"' : '') + '>Laporan per area</button></div><div id="hrMain"></div>';
+  $$('#hrTabs button').forEach(b => b.onclick = () => { if ((st.tab || 'harian') === b.dataset.t) return; st.tab = b.dataset.t; VIEWS.harian(); });
+  if (st.tab === 'rekap') return harianRekap($('#hrMain'));
+  const v = $('#hrMain');
   v.innerHTML = '<div class="toolbar"><input type="date" class="inp" id="hrTgl" style="max-width:180px" value="' + esc(st.tanggal) + '">' +
     '<select class="inp" id="hrArea" style="max-width:220px" aria-label="Filter area"><option value="">Semua area</option></select>' +
     '<select class="inp" id="hrPic" style="max-width:220px" aria-label="Filter PIC"><option value="">Semua PIC</option></select>' +
@@ -2087,6 +2094,95 @@ async function harianShare(s, rList, onShared) {
     catch (e) { $('#hsCap').select(); document.execCommand('copy'); toast('Caption disalin'); }
     catat();
   };
+}
+/* Laporan 6S harian per area: poin terkumpul per area (masuk penilaian area) */
+async function harianRekap(v) {
+  const st = S.hrR || (S.hrR = { dari: '', sampai: '', buka: {} });
+  const ymd = d => new Date(d.getTime() + 7 * 36e5).toISOString().slice(0, 10);
+  const today = () => ymd(new Date());
+  const preset = k => {
+    const t = today(), [y, m] = t.split('-').map(Number);
+    if (k === 'bulan') return [t.slice(0, 8) + '01', t];
+    if (k === 'lalu') { const a = new Date(Date.UTC(m === 1 ? y - 1 : y, m === 1 ? 11 : m - 2, 1)), b = new Date(Date.UTC(y, m - 1, 0)); return [a.toISOString().slice(0, 10), b.toISOString().slice(0, 10)]; }
+    return [ymd(new Date(Date.now() - 6 * 864e5)), t];
+  };
+  if (!st.dari) [st.dari, st.sampai] = preset('bulan');
+  v.innerHTML = '<div class="toolbar"><input type="date" class="inp" id="rkDari" style="max-width:165px" aria-label="Dari" value="' + esc(st.dari) + '">' +
+    '<span class="small muted">s/d</span><input type="date" class="inp" id="rkSampai" style="max-width:165px" aria-label="Sampai" value="' + esc(st.sampai) + '">' +
+    '<div class="seg" id="rkPre"><button data-p="bulan">Bulan ini</button><button data-p="lalu">Bulan lalu</button><button data-p="7">7 hari</button></div>' +
+    '<span class="grow"></span><button class="btn sm wa" id="rkWa" disabled>' + WA_SVG + 'Bagikan</button>' +
+    '<button class="icon-btn" id="rkRe" title="Muat ulang" aria-label="Muat ulang">' + ic('refresh') + '</button></div><div id="rkBody"></div>';
+  const RB = $('#rkBody');
+  let D = null;
+  const pn = x => (x > 0 ? '+' : '') + num(x);
+  const pc = x => x == null ? '-' : num(x) + '%';
+  const tglF = t => fDate(Date.parse(t + 'T12:00:00+07:00'), false);
+  const bar = x => '<div class="rk-bar"><i style="width:' + Math.max(0, Math.min(100, x || 0)) + '%;background:' + (x == null ? 'var(--line)' : x >= 90 ? 'var(--ok)' : x >= 70 ? 'var(--warn-t)' : 'var(--err-t)') + '"></i></div>';
+  const rinci = a => a.rows.length ? '<div class="tbl-wrap" style="margin-top:8px"><table class="tbl dt" style="min-width:640px"><thead><tr><th>Tanggal</th><th>Shift</th><th>Status</th><th>Petugas</th><th>Mulai – Selesai</th><th class="num">Poin</th><th>Laporan</th></tr></thead><tbody>' +
+      a.rows.map(r => { const H = HR_ST[r.status] || [r.status, 'c-neu']; return '<tr><td style="white-space:nowrap">' + tglF(r.tanggal) + '</td><td>' + esc(r.shift) + '</td><td><span class="chip ' + H[1] + '">' + H[0] + '</span>' + (r.status !== 'Selesai' && r.isi ? '<div class="cell-sub">' + r.isi + ' / 6 S</div>' : '') + '</td>' +
+        '<td>' + (r.oleh.length ? r.oleh.map(esc).join(', ') : '<span class="muted">-</span>') + '</td><td class="tnum" style="white-space:nowrap">' + (r.mulai ? fJam(r.mulai) + ' – ' + (r.selesai ? fJam(r.selesai) : '-') : '-') + '</td>' +
+        '<td class="num" style="color:' + (r.poin > 0 ? 'var(--ok-t)' : r.poin < 0 ? 'var(--err-t)' : 'inherit') + ';font-weight:700">' + (r.poin ? pn(r.poin) : '0') + '</td>' +
+        '<td>' + (r.status === 'Selesai' ? '<span class="chip nodot ' + (r.dibagikan ? 'c-ok">Dibagikan' : 'c-warn">Belum') + '</span>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>'
+    : '<div class="small muted" style="margin-top:8px">Belum ada task pada periode ini.</div>';
+  const draw = () => {
+    const A = D.areas, sum = k => A.reduce((t, a) => t + a[k], 0);
+    const sel = sum('selesai'), lew = sum('terlewat'), tot = sum('task'), net = Math.round(sum('poin') * 10) / 10;
+    RB.innerHTML =
+      '<div class="kpis" style="margin-bottom:12px">' +
+        '<div class="kpi"><div class="l">Total poin area</div><div class="v tnum" style="color:' + (net >= 0 ? 'var(--ok-t)' : 'var(--err-t)') + '">' + pn(net) + '</div><div class="s">' + tglF(D.dari) + ' – ' + tglF(D.sampai) + '</div></div>' +
+        '<div class="kpi"><div class="l">Poin selesai</div><div class="v tnum" style="color:var(--ok-t)">' + pn(Math.round(sum('poinPlus') * 10) / 10) + '</div><div class="s">' + sel + ' task × ' + num(D.poinSelesai) + '</div></div>' +
+        '<div class="kpi"><div class="l">Potongan terlewat</div><div class="v tnum" style="color:var(--err-t)">' + num(Math.round(sum('potongan') * 10) / 10) + '</div><div class="s">' + lew + ' task terlewat</div></div>' +
+        '<div class="kpi"><div class="l">Kepatuhan</div><div class="v tnum">' + (sel + lew ? Math.round(sel / (sel + lew) * 100) + '%' : '-') + '</div><div class="s">' + sel + ' dari ' + (sel + lew) + ' task · ' + tot + ' total</div></div></div>' +
+      (A.length ? '<div class="tbl-wrap hr-desk"><table class="tbl dt" style="min-width:980px"><thead><tr><th>#</th><th>Area</th><th class="num">Task</th><th class="num">Selesai</th><th class="num">Terlewat</th><th>Kepatuhan</th><th class="num">Poin +</th><th class="num">Potongan</th><th class="num">Total poin</th><th class="num">Dibagikan</th><th class="num">Rata durasi</th><th></th></tr></thead><tbody>' +
+        A.map((a, i) => '<tr><td class="tnum">' + (i + 1) + '</td><td class="cell-main">' + esc(a.area) + (a.tim && a.tim !== a.area ? '<div class="cell-sub">' + esc(a.tim) + '</div>' : '') + '</td>' +
+          '<td class="num">' + a.task + '</td><td class="num" style="color:var(--ok-t)">' + a.selesai + '</td><td class="num" style="color:' + (a.terlewat ? 'var(--err-t)' : 'inherit') + '">' + a.terlewat + '</td>' +
+          '<td style="min-width:130px"><div style="display:flex;align-items:center;gap:8px">' + bar(a.kepatuhan) + '<span class="tnum small" style="width:44px">' + pc(a.kepatuhan) + '</span></div></td>' +
+          '<td class="num" style="color:var(--ok-t)">' + pn(a.poinPlus) + '</td><td class="num" style="color:var(--err-t)">' + num(a.potongan) + '</td>' +
+          '<td class="num" style="font-weight:800;font-size:15px;color:' + (a.poin > 0 ? 'var(--ok-t)' : a.poin < 0 ? 'var(--err-t)' : 'inherit') + '">' + pn(a.poin) + '</td>' +
+          '<td class="num">' + a.dibagikan + ' / ' + a.selesai + '</td><td class="num">' + (a.durasiRata ? durasi(a.durasiRata) : '-') + '</td>' +
+          '<td><button class="btn sm" data-rk="' + esc(a.areaId) + '">' + (st.buka[a.areaId] ? 'Tutup' : 'Rincian') + '</button></td></tr>' +
+          (st.buka[a.areaId] ? '<tr><td></td><td colspan="11" style="background:var(--surface-2)">' + rinci(a) + '</td></tr>' : '')).join('') + '</tbody></table></div>' +
+        '<div class="hr-cards">' + A.map((a, i) => '<div class="hr-card">' +
+          '<div class="hr-c-head"><div style="min-width:0"><div class="hr-c-sub">Peringkat ' + (i + 1) + '</div><div class="hr-c-area">' + esc(a.area) + '</div></div>' +
+            '<div style="text-align:right;flex:none"><div class="hr-c-sub">Total poin</div><div class="tnum" style="font-size:22px;font-weight:800;color:' + (a.poin > 0 ? 'var(--ok-t)' : a.poin < 0 ? 'var(--err-t)' : 'inherit') + '">' + pn(a.poin) + '</div></div></div>' +
+          '<div class="hr-c-sec"><div class="rk-grid">' +
+            '<div><small>Task</small><b>' + a.task + '</b></div><div><small>Selesai</small><b style="color:var(--ok-t)">' + a.selesai + '</b></div><div><small>Terlewat</small><b style="color:' + (a.terlewat ? 'var(--err-t)' : 'inherit') + '">' + a.terlewat + '</b></div>' +
+            '<div><small>Poin +</small><b style="color:var(--ok-t)">' + pn(a.poinPlus) + '</b></div><div><small>Potongan</small><b style="color:var(--err-t)">' + num(a.potongan) + '</b></div><div><small>Dibagikan</small><b>' + a.dibagikan + ' / ' + a.selesai + '</b></div></div></div>' +
+          '<div class="hr-c-sec"><div class="hr-c-l" style="display:flex;justify-content:space-between"><span>Kepatuhan</span><span class="tnum">' + pc(a.kepatuhan) + '</span></div>' + bar(a.kepatuhan) +
+            '<div class="hr-c-sub" style="margin-top:6px">Rata-rata durasi ' + (a.durasiRata ? durasi(a.durasiRata) : '-') + '</div></div>' +
+          '<div class="hr-c-foot"><button class="btn sm" data-rk="' + esc(a.areaId) + '" style="min-height:38px">' + (st.buka[a.areaId] ? 'Tutup rincian' : 'Lihat rincian') + '</button>' + (st.buka[a.areaId] ? rinci(a) : '') + '</div>' +
+        '</div>').join('') + '</div>' : emptyBox('Belum ada area.'));
+    $$('[data-rk]', RB).forEach(b => b.onclick = () => { st.buka[b.dataset.rk] = !st.buka[b.dataset.rk]; draw(); });
+  };
+  const caption = () => {
+    const A = D.areas, sum = k => A.reduce((t, a) => t + a[k], 0), sel = sum('selesai'), lew = sum('terlewat');
+    const L = ['LAPORAN 6S HARIAN PER AREA', '', 'Periode   : ' + tglF(D.dari) + ' - ' + tglF(D.sampai),
+      'Total poin: ' + pn(Math.round(sum('poin') * 10) / 10) + ' (selesai ' + pn(Math.round(sum('poinPlus') * 10) / 10) + ', potongan ' + num(Math.round(sum('potongan') * 10) / 10) + ')',
+      'Kepatuhan : ' + (sel + lew ? Math.round(sel / (sel + lew) * 100) + '%' : '-') + ' (' + sel + ' dari ' + (sel + lew) + ' task)', ''];
+    A.forEach((a, i) => {
+      L.push((i + 1) + '. ' + a.area);
+      L.push('   Poin ' + pn(a.poin) + ' | Selesai ' + a.selesai + '/' + a.task + ' | Terlewat ' + a.terlewat + ' | Kepatuhan ' + pc(a.kepatuhan));
+    });
+    return L.join('\n');
+  };
+  const load = async () => {
+    loading(RB); $('#rkWa').disabled = true;
+    try { D = await call('apiHarianRekap', S.token, st.dari, st.sampai); st.dari = D.dari; st.sampai = D.sampai; $('#rkDari').value = D.dari; $('#rkSampai').value = D.sampai; draw(); $('#rkWa').disabled = false; }
+    catch (e) { RB.innerHTML = emptyBox(e.message); }
+  };
+  $('#rkDari').onchange = e => { st.dari = e.target.value; load(); };
+  $('#rkSampai').onchange = e => { st.sampai = e.target.value; load(); };
+  $$('#rkPre button').forEach(b => b.onclick = () => { [st.dari, st.sampai] = preset(b.dataset.p); load(); });
+  $('#rkRe').onclick = load;
+  $('#rkWa').onclick = () => {
+    if (!D) return;
+    const cap = caption();
+    openModal('Bagikan laporan per area', '<textarea class="inp" id="rkCap" style="min-height:280px;font-family:ui-monospace,monospace;font-size:12.5px;margin-bottom:12px">' + esc(cap) + '</textarea>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><a class="btn wa" id="rkGo" target="_blank" rel="noopener" href="#">' + WA_SVG + 'Kirim ke WhatsApp</a><button class="btn" id="rkCopy">Salin teks</button></div>');
+    $('#rkGo').onclick = () => { $('#rkGo').href = 'https://api.whatsapp.com/send?text=' + encodeURIComponent($('#rkCap').value); };
+    $('#rkCopy').onclick = async () => { try { await navigator.clipboard.writeText($('#rkCap').value); } catch (e) { $('#rkCap').select(); document.execCommand('copy'); } toast('Teks disalin'); };
+  };
+  load();
 }
 const hrFoto = id => id ? '<img src="' + thumbUrl(id) + '" data-fid="' + esc(id) + '" onerror="fotoFallback(this)" onclick="window.open(\'' + viewUrl(id) + '\',\'_blank\')" style="width:100%;max-height:220px;object-fit:cover;border-radius:10px;cursor:zoom-in" alt="Foto">' : '';
 /* Task 6S harian satu area/shift: daftar 6 S, pilih satu untuk diisi foto + tindakan */

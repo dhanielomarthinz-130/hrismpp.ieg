@@ -2153,6 +2153,67 @@ function r6_harian_out(?array $r): ?array {
             'share' => (int)($r['share_n'] ?? 0) > 0 ? ['n' => (int)$r['share_n'], 'waktu' => r5_ms($r['share_waktu'] ?? null), 'oleh' => r5_str($r['share_oleh'] ?? '')] : null];
 }
 
+/**
+ * Laporan 6S harian per area untuk rentang tanggal: jumlah task, selesai, terlewat, kepatuhan,
+ * poin terkumpul (+ selesai, − terlewat), laporan dibagikan & rata-rata durasi. Untuk penilaian per area.
+ */
+function apiHarianRekap($token, $dari, $sampai): array {
+    r5_auth($token, 'harian');
+    r6_harian_sync();
+    $now = r5_now();
+    $ok = fn($t) => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$t);
+    $sampai = $ok($sampai) ? (string)$sampai : r5_fmt($now, 'Y-m-d');
+    $dari = $ok($dari) ? (string)$dari : substr($sampai, 0, 8) . '01';
+    if ($dari > $sampai) [$dari, $sampai] = [$sampai, $dari];
+    $shNama = [];
+    foreach (db_all("SELECT kode, nama FROM shift") as $s) $shNama[strtoupper((string)$s['kode'])] = r5_str($s['nama']) ?: $s['kode'];
+    $areas = [];
+    foreach (db_all("SELECT area_id, nama, tim, aktif FROM r5_area ORDER BY area_id") as $a) {
+        $areas[$a['area_id']] = ['areaId' => $a['area_id'], 'area' => r5_str($a['nama']), 'tim' => r5_str($a['tim']), 'aktif' => $a['aktif'] !== 'N',
+            'task' => 0, 'selesai' => 0, 'terlewat' => 0, 'proses' => 0, 'poinPlus' => 0.0, 'potongan' => 0.0, 'poin' => 0.0,
+            'dibagikan' => 0, 'durasiTotal' => 0, 'durasiN' => 0, 'rows' => []];
+    }
+    foreach (db_all("SELECT * FROM r6_harian WHERE tanggal BETWEEN ? AND ? ORDER BY tanggal DESC, shift", [$dari, $sampai]) as $r) {
+        $aid = $r['area_id'];
+        if (!isset($areas[$aid])) $areas[$aid] = ['areaId' => $aid, 'area' => r5_str($r['nama_area']) ?: $aid, 'tim' => '', 'aktif' => false,
+            'task' => 0, 'selesai' => 0, 'terlewat' => 0, 'proses' => 0, 'poinPlus' => 0.0, 'potongan' => 0.0, 'poin' => 0.0,
+            'dibagikan' => 0, 'durasiTotal' => 0, 'durasiN' => 0, 'rows' => []];
+        $A = &$areas[$aid];
+        $p = (float)$r['poin'];
+        $A['task']++;
+        if ($r['status'] === 'Selesai') $A['selesai']++;
+        elseif ($r['status'] === 'Terlewat') $A['terlewat']++;
+        else $A['proses']++;
+        if ($p > 0) $A['poinPlus'] += $p; else $A['potongan'] += $p;
+        $A['poin'] += $p;
+        if ((int)($r['share_n'] ?? 0) > 0) $A['dibagikan']++;
+        $det = r6_harian_detail($r['detail']);
+        $t = array_values(array_filter(array_map(fn($x) => $x['foto'] !== '' && $x['waktu'] ? (int)$x['waktu'] : 0, $det)));
+        $mulai = $t ? min($t) : null;
+        $selesai = $r['status'] === 'Selesai' ? (r5_ms($r['waktu']) ?: ($t ? max($t) : null)) : null;
+        if ($mulai && $selesai && $selesai > $mulai) { $A['durasiTotal'] += $selesai - $mulai; $A['durasiN']++; }
+        $org = [];
+        foreach ($det as $x) if ($x['foto'] !== '' && $x['oleh'] !== '') $org[mb_strtolower((string)$x['olehNik'])] = $x['oleh'];
+        $A['rows'][] = ['id' => $r['id'], 'tanggal' => $r['tanggal'], 'shift' => $shNama[$r['shift']] ?? $r['shift'], 'status' => $r['status'],
+            'poin' => $p, 'isi' => count($t), 'oleh' => array_values($org), 'mulai' => $mulai, 'selesai' => $selesai,
+            'dibagikan' => (int)($r['share_n'] ?? 0) > 0];
+        unset($A);
+    }
+    $out = [];
+    foreach ($areas as $A) {
+        if (!$A['aktif'] && !$A['task']) continue;
+        $lewat = $A['selesai'] + $A['terlewat'];
+        $A['kepatuhan'] = $lewat ? round($A['selesai'] / $lewat * 100, 1) : null;
+        $A['durasiRata'] = $A['durasiN'] ? (int)round($A['durasiTotal'] / $A['durasiN']) : null;
+        foreach (['poinPlus', 'potongan', 'poin'] as $k) $A[$k] = r5_round1($A[$k]);
+        unset($A['durasiTotal'], $A['durasiN']);
+        $out[] = $A;
+    }
+    usort($out, fn($a, $b) => ($b['poin'] <=> $a['poin']) ?: (($b['kepatuhan'] ?? -1) <=> ($a['kepatuhan'] ?? -1)) ?: strcmp($a['area'], $b['area']));
+    return ['dari' => $dari, 'sampai' => $sampai, 'areas' => $out,
+            'poinSelesai' => r5_num('POIN_6S_HARIAN', 1), 'potong' => r5_num('POTONG_6S_HARIAN', 1)];
+}
+
 /** Catat bahwa laporan 6S harian (slot selesai) sudah dibagikan. */
 function apiHarianShare($token, $id): array {
     $u = r5_auth($token, 'harian');
@@ -2374,5 +2435,5 @@ const R5_API = [
     'apiSaveAudit', 'apiListAudit', 'apiAdminData', 'apiSaveUser', 'apiSaveArea', 'apiSaveChecklist',
     'apiImportUsers', 'apiSaveConfig', 'apiKeberatan', 'apiPutusKeberatan', 'apiKpiPic',
     'apiPicBertugas', 'apiTerimaTugas', 'apiAlihkan', 'apiRiwayatPoinPic', 'apiLepasTugas',
-    'apiAturData', 'apiAturSimpan', 'apiAksesSimpan', 'apiHarianList', 'apiHarianChecklist', 'apiHarianSimpan', 'apiHarianShare',
+    'apiAturData', 'apiAturSimpan', 'apiAksesSimpan', 'apiHarianList', 'apiHarianChecklist', 'apiHarianSimpan', 'apiHarianShare', 'apiHarianRekap',
 ];
