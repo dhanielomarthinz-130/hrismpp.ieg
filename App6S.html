@@ -1907,17 +1907,20 @@ async function poinPapan(v) {
       const list = data.papan.filter(cocok);
       const mx = Math.max(1, ...data.papan.map(p => Math.abs(p.poin)));
       const nol = data.papan.filter(p => !p.poin && !p.ditemukan && !p.diproses && !p.selesai).length;
+      const rinci = (p, lebar) => '<button class="btn sm' + (p.nik.toLowerCase() === S.user.nik.toLowerCase() ? ' primary' : '') + '"' + (lebar ? ' style="min-height:38px;width:100%"' : '') +
+        ' onclick="openPoinPic(' + esc(JSON.stringify(p.nik)) + ',' + esc(JSON.stringify(data.bulan)) + ')">' + (lebar ? 'Lihat rincian poin' : 'Rincian') + '</button>';
       const rk = (p, i) => '<span class="rank ' + (i < 3 && p.poin > 0 ? 'r' + (i + 1) : '') + '">' + (i + 1) + '</span>';
       h = list.length ?
         '<div class="tbl-wrap hr-desk"><table class="tbl pic-tbl" style="min-width:940px"><thead><tr><th>#</th><th>PIC</th><th class="num">Total poin</th>' +
           '<th class="num">Menemukan</th><th class="num">Perbaikan</th><th class="num">6S harian</th><th class="num">Potongan</th>' +
-          '<th class="num">Temuan</th><th class="num">Diproses</th><th class="num">Selesai</th><th class="num">Lewat target</th></tr></thead><tbody>' +
+          '<th class="num">Temuan</th><th class="num">Diproses</th><th class="num">Selesai</th><th class="num">Lewat target</th><th></th></tr></thead><tbody>' +
           list.map(p => { const i = data.papan.indexOf(p); return '<tr><td>' + rk(p, i) + '</td><td>' + nm(p.nik, p.nama) + '<div class="pic-meta">' + esc(p.nik) + '</div></td>' +
             '<td class="num"><div class="pbar"><b style="color:' + warna(p.poin) + '">' + signed(p.poin) + '</b><i><span class="' + (p.poin < 0 ? 'neg' : '') + '" style="width:' + (Math.abs(p.poin) / mx * 100) + '%"></span></i></div></td>' +
             '<td class="num">' + sg(p.lapor) + '</td><td class="num">' + sg(p.perbaikan) + '</td><td class="num">' + sg(p.harian) + '</td>' +
             '<td class="num" style="color:' + (p.potongan ? 'var(--err-t)' : 'inherit') + '">' + (p.potongan ? num(p.potongan) : '0') + '</td>' +
             '<td class="num">' + p.ditemukan + '</td><td class="num">' + p.diproses + '</td><td class="num">' + p.selesai + (p.telat ? '<div class="cell-sub" style="max-width:none">' + p.telat + ' telat</div>' : '') + '</td>' +
-            '<td class="num">' + (p.overdue ? '<span class="chip c-err">' + p.overdue + '</span>' : '0') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+            '<td class="num">' + (p.overdue ? '<span class="chip c-err">' + p.overdue + '</span>' : '0') + '</td>' +
+            '<td>' + rinci(p) + '</td></tr>'; }).join('') + '</tbody></table></div>' +
         '<div class="hr-cards">' + list.map(p => { const i = data.papan.indexOf(p); return '<div class="hr-card">' +
             '<div class="hr-c-head"><div style="display:flex;gap:10px;align-items:center;min-width:0">' + rk(p, i) + '<div style="min-width:0">' + nm(p.nik, p.nama) + '<div class="hr-c-sub">' + esc(p.nik) + '</div></div></div>' +
               '<div style="text-align:right;flex:none"><div class="hr-c-sub">Total poin</div><div class="tnum" style="font-size:22px;font-weight:800;color:' + warna(p.poin) + '">' + signed(p.poin) + '</div></div></div>' +
@@ -1927,6 +1930,7 @@ async function poinPapan(v) {
               '<div><small>Temuan</small><b>' + p.ditemukan + '</b></div><div><small>Diproses</small><b>' + p.diproses + '</b></div>' +
               '<div><small>Selesai</small><b>' + p.selesai + (p.telat ? ' <span class="small muted">(' + p.telat + ' telat)</span>' : '') + '</b></div>' +
               '<div><small>Lewat target</small><b style="color:' + (p.overdue ? 'var(--err-t)' : 'inherit') + '">' + p.overdue + '</b></div></div></div>' +
+            '<div class="hr-c-foot">' + rinci(p, true) + '</div>' +
           '</div>'; }).join('') + '</div>' +
         (nol ? '<p class="small muted" style="margin:8px 0 0">' + nol + ' user belum melakukan 6S bulan ini (poin, temuan, dan perbaikan masih 0).</p>' : '')
         : emptyBox(data.papan.length ? 'Tidak ada user yang cocok.' : 'Belum ada Leader / PIC IEG.');
