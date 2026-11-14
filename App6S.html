@@ -249,8 +249,8 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
   .hr-tbl tr:hover td{background:transparent}
   .hr-tbl tr.own td{background:transparent}.hr-tbl tr.own{background:var(--surface-2)}
   .hr-tbl td{border:0;padding:5px 0;white-space:normal!important}
-  .hr-tbl td[data-l]{display:grid;grid-template-columns:88px minmax(0,1fr);gap:8px;align-items:start}
-  .hr-tbl td[data-l]::before{content:attr(data-l);font-size:11.5px;font-weight:600;color:var(--muted);padding-top:2px}
+  .hr-tbl td[data-l]{position:relative;padding-left:96px;min-height:24px}
+  .hr-tbl td[data-l]::before{content:attr(data-l);position:absolute;left:0;top:7px;width:88px;font-size:11.5px;font-weight:600;color:var(--muted)}
   .hr-tbl td.hr-area{font-size:15px;white-space:normal;padding-bottom:6px;border-bottom:1px solid var(--line);margin-bottom:4px}
   .hr-tbl .cell-sub{max-width:none;white-space:normal}
   .hr-tbl td.hr-act:empty{display:none}
@@ -1848,9 +1848,10 @@ VIEWS.admin = async function () {
 const HR_ST = { Selesai: ['Selesai', 'c-ok'], Proses: ['Sedang diisi', 'c-info'], Belum: ['Belum dikerjakan', 'c-warn'], Terlewat: ['Terlewat', 'c-err'], Nanti: ['Belum mulai', 'c-neu'] };
 VIEWS.harian = async function (opt) {
   const v = $('#view');
-  const st = S.hr || (S.hr = { tanggal: '', saya: true });
+  const st = S.hr || (S.hr = { tanggal: '', saya: true, area: '' });
   if (opt && opt.tanggal) st.tanggal = opt.tanggal;
   v.innerHTML = '<div class="toolbar"><input type="date" class="inp" id="hrTgl" style="max-width:180px" value="' + esc(st.tanggal) + '">' +
+    '<select class="inp" id="hrArea" style="max-width:220px" aria-label="Filter area"><option value="">Semua area</option></select>' +
     '<label class="small" style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="hrSaya"' + (st.saya ? ' checked' : '') + ' style="width:18px;height:18px"> Tugas saya dulu</label>' +
     '<span class="grow"></span><button class="icon-btn" id="hrRe" title="Muat ulang" aria-label="Muat ulang">' + ic('refresh') + '</button></div><div id="hrBody"></div>';
   const HB = $('#hrBody');
@@ -1858,15 +1859,16 @@ VIEWS.harian = async function (opt) {
   const me = S.user.nik.toLowerCase();
   const milikSaya = s => s.pics.some(p => p.nik.toLowerCase() === me);
   const draw = () => {
-    const sl = D.slots.slice();
+    const all = st.area ? D.slots.filter(s => s.areaId === st.area) : D.slots;
+    const sl = all.slice();
     if (st.saya) sl.sort((a, b) => (b.bisa - a.bisa) || (milikSaya(b) - milikSaya(a)));
-    const n = k => D.slots.filter(s => s.status === k).length;
+    const n = k => all.filter(s => s.status === k).length;
     const lewat = D.rekap7.selesai + D.rekap7.terlewat, tot = D.rList.length;
     HB.innerHTML =
       '<div class="note small" style="margin-bottom:12px">Setiap <b>Shift 1 dan Shift 2</b>, PIC area yang bertugas (jadwal HRIS) mengerjakan task 6S area: pilih <b>' + D.rList.join(', ') + '</b> satu per satu, lalu isi <b>foto (wajib)</b> dan <b>tindakan</b> yang dilakukan. Task selesai bila ke-' + tot + ' S terisi sebelum shift berakhir. ' +
         (D.poin ? 'Selesai <b>+' + num(D.poin) + '</b>' : '') + (D.potong ? (D.poin ? ', ' : '') + 'terlewat / tidak lengkap <b>−' + num(D.potong) + '</b> untuk PIC terjadwal' : '') + '.</div>' +
       '<div class="kpis" style="margin-bottom:12px">' +
-        '<div class="kpi"><div class="l">Selesai</div><div class="v tnum" style="color:var(--ok-t)">' + n('Selesai') + '<span class="small muted"> / ' + D.slots.length + '</span></div><div class="s">' + fDate(Date.parse(D.tanggal + 'T12:00:00+07:00'), false) + '</div></div>' +
+        '<div class="kpi"><div class="l">Selesai</div><div class="v tnum" style="color:var(--ok-t)">' + n('Selesai') + '<span class="small muted"> / ' + all.length + '</span></div><div class="s">' + fDate(Date.parse(D.tanggal + 'T12:00:00+07:00'), false) + '</div></div>' +
         '<div class="kpi"><div class="l">Belum / sedang diisi</div><div class="v tnum" style="color:var(--warn-t)">' + (n('Belum') + n('Proses')) + '</div><div class="s">' + n('Proses') + ' sedang diisi</div></div>' +
         '<div class="kpi"><div class="l">Terlewat</div><div class="v tnum" style="color:' + (n('Terlewat') ? 'var(--err-t)' : 'inherit') + '">' + n('Terlewat') + '</div><div class="s">shift berakhir, belum lengkap</div></div>' +
         '<div class="kpi"><div class="l">Kepatuhan 7 hari</div><div class="v tnum">' + (lewat ? Math.round(D.rekap7.selesai / lewat * 100) + '%' : '-') + '</div><div class="s">' + D.rekap7.selesai + ' dari ' + lewat + ' task</div></div></div>' +
@@ -1888,7 +1890,7 @@ VIEWS.harian = async function (opt) {
             '<td class="cell-main hr-area">' + esc(s.area) + '</td>' +
             '<td data-l="PIC">' + (s.pics.length ? s.pics.map(p => esc(p.nama) + anda(p)).join('<br>')
                 : pekerja.length ? pekerja.map(p => esc(p.nama) + anda(p)).join('<br>') + '<div class="cell-sub">dikerjakan (tanpa jadwal PIC)</div>'
-                : '<span class="muted">Tidak ada PIC area terjadwal</span><div class="cell-sub">Leader / PIC yang bertugas boleh mengerjakan</div>') +
+                : '<span class="muted">Belum ada PIC area di jadwal HRIS</span><div class="cell-sub">Nama pengisi muncul setelah S pertama disimpan · Leader / PIC yang bertugas boleh mengerjakan</div>') +
               (s.pics.length && pekerjaLain.length ? '<div class="cell-sub">dikerjakan: ' + pekerjaLain.map(p => esc(p.nama)).join(', ') + '</div>' : '') + '</td>' +
             '<td data-l="Status"><span class="chip ' + H[1] + '">' + H[0] + '</span>' + (s.bisa ? '<div class="cell-sub">sebelum ' + fDate(s.selesai) + '</div>' : '') +
               (r && r.status === 'Terlewat' && r.poin ? '<div class="cell-sub" style="color:var(--err-t)">' + signed(r.poin) + ' untuk PIC terjadwal</div>' : '') + '</td>' +
@@ -1897,13 +1899,20 @@ VIEWS.harian = async function (opt) {
         }).join('') + '</tbody></table></div>' : emptyBox('Belum ada area aktif atau shift.'));
     $$('[data-hr]', HB).forEach(b => b.onclick = () => { const s = D.slots.find(x => x.id === b.dataset.hr); if (s) harianTask(s, D.rList); });
   };
+  const isiArea = () => {
+    const sel = $('#hrArea'), seen = {};
+    const ar = D.slots.filter(s => !seen[s.areaId] && (seen[s.areaId] = 1)).map(s => [s.areaId, s.area]).sort((a, b) => a[1].localeCompare(b[1]));
+    if (st.area && !seen[st.area]) st.area = '';
+    sel.innerHTML = '<option value="">Semua area</option>' + ar.map(a => '<option value="' + esc(a[0]) + '"' + (a[0] === st.area ? ' selected' : '') + '>' + esc(a[1]) + '</option>').join('');
+  };
   const load = async () => {
     loading(HB);
-    try { D = await call('apiHarianList', S.token, st.tanggal); st.tanggal = st.tanggal || D.hariIni; $('#hrTgl').value = D.tanggal; draw(); }
+    try { D = await call('apiHarianList', S.token, st.tanggal); st.tanggal = st.tanggal || D.hariIni; $('#hrTgl').value = D.tanggal; isiArea(); draw(); }
     catch (e) { HB.innerHTML = emptyBox(e.message); }
   };
   $('#hrTgl').onchange = e => { st.tanggal = e.target.value; load(); };
   $('#hrSaya').onchange = e => { st.saya = e.target.checked; if (D) draw(); };
+  $('#hrArea').onchange = e => { st.area = e.target.value; if (D) draw(); };
   $('#hrRe').onclick = load;
   load();
 };

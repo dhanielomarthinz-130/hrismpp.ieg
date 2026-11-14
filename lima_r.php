@@ -2023,9 +2023,32 @@ function r6_harian_shifts(string $tgl): array {
 /** Konteks PIC per tanggal: shift tiap operator (jadwal kerja, tidak absen S/I/A/C) + peta area PIC. */
 function r6_harian_ctx(string $tgl): array {
     $jad = [];
-    foreach (db_all("SELECT j.operator_id, UPPER(COALESCE(k.shift, '')) AS sh, k.kerja FROM jadwal j LEFT JOIN kode_jadwal k ON UPPER(k.kode) = UPPER(j.shift)
+    $hs = r6_harian_shifts($tgl);
+    // Menit dalam sehari (0–1439) untuk "HH:MM"
+    $mnt = fn($t) => preg_match('/^(\d{1,2}):(\d{2})/', (string)$t, $m) ? ((int)$m[1] * 60 + (int)$m[2]) % 1440 : null;
+    $hsMenit = [];
+    foreach ($hs as $k => $s) { [$a, $b] = explode('–', $s['jam']); $hsMenit[$k] = [$mnt($a), $mnt($b)]; }
+    // Jadwal yang shift-nya bukan S1/S2 (mis. S3 "Shift 1 Pagi" 06:00–14:00, atau kode tanpa shift)
+    // dihitung ke shift 6S harian yang jam kerjanya paling banyak beririsan.
+    $petakan = function (string $sh, $mulai, $selesai) use ($hs, $hsMenit, $mnt): string {
+        if (isset($hs[$sh])) return $sh;
+        $a = $mnt($mulai); $b = $mnt($selesai);
+        if ($a === null || $b === null) return $sh;
+        $rentang = fn($x, $y) => $y > $x ? [[$x, $y]] : [[$x, 1440], [0, $y]];
+        $best = ''; $max = 0;
+        foreach ($hsMenit as $k => [$x, $y]) {
+            if ($x === null || $y === null) continue;
+            $o = 0;
+            foreach ($rentang($a, $b) as [$p, $q]) foreach ($rentang($x, $y) as [$r, $s]) $o += max(0, min($q, $s) - max($p, $r));
+            if ($o > $max) { $max = $o; $best = $k; }
+        }
+        return $best !== '' ? $best : $sh;
+    };
+    foreach (db_all("SELECT j.operator_id, UPPER(COALESCE(k.shift, '')) AS sh, k.kerja, k.mulai, k.selesai FROM jadwal j LEFT JOIN kode_jadwal k ON UPPER(k.kode) = UPPER(j.shift)
                      WHERE j.tanggal = ?", [$tgl]) as $r) {
-        if ((int)$r['kerja'] === 1 && $r['sh'] !== '') $jad[(string)$r['operator_id']] = $r['sh'];
+        if ((int)$r['kerja'] !== 1) continue;
+        $sh = $petakan((string)$r['sh'], $r['mulai'], $r['selesai']);
+        if ($sh !== '') $jad[(string)$r['operator_id']] = $sh;
     }
     foreach (db_all("SELECT operator_id FROM absensi WHERE tanggal = ? AND status IN ('S','I','A','C')", [$tgl]) as $r) unset($jad[(string)$r['operator_id']]);
     $pool = [];
