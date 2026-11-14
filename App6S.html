@@ -1608,18 +1608,20 @@ function renderDetail(t) {
 }
 /* Riwayat poin satu PIC: bertambah / berkurang per kejadian, saldo berjalan */
 async function openPoinPic(nik, bulan) {
-  openModal('Riwayat poin', '<div class="spin"></div>');
+  openModal('Rincian poin PIC', '<div class="spin"></div>');
   try {
     const d = await call('apiRiwayatPoinPic', S.token, nik, bulan || S.bulan);
     const box = (l, v, cls) => '<div class="kpi"><div class="l">' + l + '</div><div class="v tnum' + (cls ? ' ' + cls : '') + '" style="font-size:22px">' + v + '</div></div>';
+    const sx = r => isSuper() ? '<div style="display:flex;gap:6px;margin-top:6px"><button class="btn sm" data-ope="' + r.id + '">Edit</button><button class="btn sm danger" data-opd="' + r.id + '">Hapus</button></div>' : '';
+    const tm = r => r.temuanId ? ' · <a href="#" onclick="openDetail(' + esc(JSON.stringify(r.temuanId)) + ');return false">' + esc(r.temuanId) + '</a>' : '';
     let h = '<div class="small muted" style="margin:-4px 0 12px">' + fBulan(d.bulan) + '</div>' +
-      '<div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:12px">' +
-      box('Bertambah', '+' + num(d.plus)) + box('Berkurang', num(d.minus), d.minus < 0 ? 'err' : '') + box('Total', signed(d.total), d.total < 0 ? 'err' : '') + '</div>' +
-      (d.telatBerjalan ? '<div class="note warn" style="margin-bottom:10px">Total termasuk ' + signed(d.telatBerjalan) + ' potongan berjalan dari temuan yang lewat target dan belum diperbaiki.</div>' : '');
-    h += d.rows.length ? '<div class="tbl-wrap"><table class="tbl" style="min-width:0"><tr><th>Waktu</th><th>Kejadian</th><th class="num">Poin</th><th class="num">Saldo</th>' + (isSuper() ? '<th></th>' : '') + '</tr>' +
-      d.rows.map(r => '<tr><td class="small" style="white-space:nowrap">' + fDate(r.ts) + '</td><td>' + esc(r.ket) +
-        (r.temuanId ? '<div class="small"><a href="#" onclick="openDetail(' + esc(JSON.stringify(r.temuanId)) + ');return false">' + esc(r.temuanId) + '</a>' + (r.area ? ' · ' + esc(r.area) : '') + '</div>' : '') + '</td>' +
-        '<td class="num"><span class="chip nodot ' + (r.poin < 0 ? 'c-err' : 'c-ok') + '">' + signed(r.poin) + '</span></td><td class="num tnum">' + signed(r.saldo) + '</td>' + (isSuper() ? '<td style="white-space:nowrap"><button class="btn sm" data-ope="' + r.id + '">Edit</button> <button class="btn sm danger" data-opd="' + r.id + '">Hapus</button></td>' : '') + '</tr>').join('') + '</table></div>'
+      '<div class="kpis" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:12px">' +
+      box('Bertambah', '+' + num(d.plus)) + box('Berkurang', num(d.minus), d.minus < 0 ? 'err' : '') +
+      box('Total poin', signed(d.total), d.total < 0 ? 'err' : '') + box('Jumlah kejadian', num(d.rows.length)) + '</div>' +
+      (d.telatBerjalan ? '<p class="small muted" style="margin-top:0">Total termasuk ' + signed(d.telatBerjalan) + ' potongan berjalan dari temuan yang lewat target dan belum diperbaiki.</p>' : '');
+    h += d.rows.length ? '<div class="rk-list">' + d.rows.map(r => '<div class="rk-item"><div style="min-width:0;flex:1"><div>' + esc(r.ket) + '</div>' +
+        '<div class="small muted">' + fDate(r.ts) + (r.area ? ' · ' + esc(r.area) : '') + tm(r) + '</div>' + sx(r) + '</div>' +
+        '<div style="text-align:right;flex:none"><span class="chip nodot ' + (r.poin < 0 ? 'c-err' : 'c-ok') + '">' + signed(r.poin) + '</span><div class="small muted tnum" style="margin-top:4px">saldo ' + signed(r.saldo) + '</div></div></div>').join('') + '</div>'
       : emptyBox('Belum ada poin bulan ini');
     h += '<div class="grid g2" style="margin-top:12px"><button class="btn" onclick="closeModal();go(\'daftar\',{q:' + esc(JSON.stringify(d.nama)) + ',bulan:\'\'})">' + ic('list') + 'Temuan PIC ini</button><button class="btn primary" onclick="closeModal()">Tutup</button></div>';
     $('#sheetTitle').textContent = d.nama; $('#sheet').innerHTML = h;
@@ -2222,7 +2224,7 @@ function hrCaption(s, rList) {
     'Area    : ' + s.area,
     'Shift   : ' + s.shiftNama + ' (' + s.jam + ')',
     'Tanggal : ' + tgl,
-    'Petugas : ' + nama,
+    'PIC     : ' + nama,
     'Status  : ' + (r && r.status === 'Selesai' ? 'Selesai' : (HR_ST[s.status] || [s.status])[0]) + ' (' + (r ? r.isi : 0) + '/' + rList.length + ' S)'];
   const J = hrJam(r);
   if (J) L.push('Mulai   : ' + fJam(J.mulai), 'Selesai : ' + (J.selesai ? fJam(J.selesai) : '-') + (J.durasi ? ' (durasi ' + J.durasi + ')' : ''));
@@ -2261,7 +2263,7 @@ async function hrKolase(s, rList) {
   g.fillStyle = '#334155'; g.font = '400 24px ' + font;
   g.fillText(fit(s.shiftNama + '  ·  ' + s.jam + '  ·  ' + fDate(Date.parse(s.tanggal + 'T12:00:00+07:00'), false), W - pad * 2), pad, 150);
   const J = hrJam(r);
-  g.fillText(fit('Petugas: ' + (hrPekerja(r).map(p => p.nama).join(', ') || '-') + (J ? '  ·  Mulai ' + fJam(J.mulai) + '  ·  Selesai ' + (J.selesai ? fJam(J.selesai) : '-') : ''), W - pad * 2), pad, 186);
+  g.fillText(fit('PIC: ' + (hrPekerja(r).map(p => p.nama).join(', ') || '-') + (J ? '  ·  Mulai ' + fJam(J.mulai) + '  ·  Selesai ' + (J.selesai ? fJam(J.selesai) : '-') : ''), W - pad * 2), pad, 186);
   // Grid foto
   rList.forEach((x, i) => {
     const cx = pad + (i % 2) * (cw + gap), cy = head + Math.floor(i / 2) * (ph + txtH + gap), d = r && r.detail[i], im = imgs[i];
@@ -2343,7 +2345,7 @@ async function harianRekap(v) {
   const pc = x => x == null ? '-' : num(x) + '%';
   const tglF = t => fDate(Date.parse(t + 'T12:00:00+07:00'), false);
   const bar = x => '<div class="rk-bar"><i style="width:' + Math.max(0, Math.min(100, x || 0)) + '%;background:' + (x == null ? 'var(--line)' : x >= 90 ? 'var(--ok)' : x >= 70 ? 'var(--warn-t)' : 'var(--err-t)') + '"></i></div>';
-  const rinci = a => a.rows.length ? '<div class="tbl-wrap" style="margin-top:8px"><table class="tbl dt" style="min-width:640px"><thead><tr><th>Tanggal</th><th>Shift</th><th>Status</th><th>Petugas</th><th>Mulai – Selesai</th><th class="num">Poin</th><th>Laporan</th></tr></thead><tbody>' +
+  const rinci = a => a.rows.length ? '<div class="tbl-wrap" style="margin-top:8px"><table class="tbl dt" style="min-width:640px"><thead><tr><th>Tanggal</th><th>Shift</th><th>Status</th><th>PIC</th><th>Mulai – Selesai</th><th class="num">Poin</th><th>Laporan</th></tr></thead><tbody>' +
       a.rows.map(r => { const H = HR_ST[r.status] || [r.status, 'c-neu']; return '<tr><td style="white-space:nowrap">' + tglF(r.tanggal) + '</td><td>' + esc(r.shift) + '</td><td><span class="chip ' + H[1] + '">' + H[0] + '</span>' + (r.status !== 'Selesai' && r.isi ? '<div class="cell-sub">' + r.isi + ' / 6 S</div>' : '') + '</td>' +
         '<td>' + (r.oleh.length ? r.oleh.map(esc).join(', ') : '<span class="muted">-</span>') + '</td><td class="tnum" style="white-space:nowrap">' + (r.mulai ? fJam(r.mulai) + ' – ' + (r.selesai ? fJam(r.selesai) : '-') : '-') + '</td>' +
         '<td class="num" style="color:' + (r.poin > 0 ? 'var(--ok-t)' : r.poin < 0 ? 'var(--err-t)' : 'inherit') + ';font-weight:700">' + (r.poin ? pn(r.poin) : '0') + '</td>' +
