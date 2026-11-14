@@ -239,6 +239,24 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .dt .cell-main{font-weight:700;color:var(--text);white-space:nowrap}
 .dt .cell-sub{font-size:11.5px;color:var(--muted);max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dt tr.own td{background:var(--surface-2)}
+.hr-tbl{min-width:900px}.hr-prog{white-space:nowrap}
+@media(max-width:760px){
+  .hr-wrap{border:0;overflow:visible;border-radius:0}
+  .hr-tbl{min-width:0!important}
+  .hr-tbl thead{display:none}
+  .hr-tbl,.hr-tbl tbody,.hr-tbl tr,.hr-tbl td{display:block;width:100%}
+  .hr-tbl tr{border:1px solid var(--border);border-radius:12px;background:var(--surface);margin-bottom:10px;padding:10px 12px}
+  .hr-tbl tr:hover td{background:transparent}
+  .hr-tbl tr.own td{background:transparent}.hr-tbl tr.own{background:var(--surface-2)}
+  .hr-tbl td{border:0;padding:5px 0;white-space:normal!important}
+  .hr-tbl td[data-l]{display:grid;grid-template-columns:88px minmax(0,1fr);gap:8px;align-items:start}
+  .hr-tbl td[data-l]::before{content:attr(data-l);font-size:11.5px;font-weight:600;color:var(--muted);padding-top:2px}
+  .hr-tbl td.hr-area{font-size:15px;white-space:normal;padding-bottom:6px;border-bottom:1px solid var(--line);margin-bottom:4px}
+  .hr-tbl .cell-sub{max-width:none;white-space:normal}
+  .hr-tbl td.hr-act:empty{display:none}
+  .hr-tbl td.hr-act .btn{width:100%;margin-top:4px}
+  .hr-tbl .hr-prog>div:first-child{grid-template-columns:auto minmax(48px,1fr)!important}
+}
 .dt-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;font-size:12.5px;color:var(--muted);flex-wrap:wrap}
 .dt-foot .pg{display:flex;gap:4px}
 .titem .b{flex:1;min-width:0}
@@ -1852,7 +1870,7 @@ VIEWS.harian = async function (opt) {
         '<div class="kpi"><div class="l">Belum / sedang diisi</div><div class="v tnum" style="color:var(--warn-t)">' + (n('Belum') + n('Proses')) + '</div><div class="s">' + n('Proses') + ' sedang diisi</div></div>' +
         '<div class="kpi"><div class="l">Terlewat</div><div class="v tnum" style="color:' + (n('Terlewat') ? 'var(--err-t)' : 'inherit') + '">' + n('Terlewat') + '</div><div class="s">shift berakhir, belum lengkap</div></div>' +
         '<div class="kpi"><div class="l">Kepatuhan 7 hari</div><div class="v tnum">' + (lewat ? Math.round(D.rekap7.selesai / lewat * 100) + '%' : '-') + '</div><div class="s">' + D.rekap7.selesai + ' dari ' + lewat + ' task</div></div></div>' +
-      (sl.length ? '<div class="tbl-wrap"><table class="tbl dt" style="min-width:900px"><thead><tr><th>Shift</th><th>Area</th><th>PIC terjadwal</th><th>Status</th><th>Progres 6S</th><th></th></tr></thead><tbody>' +
+      (sl.length ? '<div class="tbl-wrap hr-wrap"><table class="tbl dt hr-tbl"><thead><tr><th>Shift</th><th>Area</th><th>PIC terjadwal</th><th>Status</th><th>Progres 6S</th><th></th></tr></thead><tbody>' +
         sl.map(s => {
           const r = s.rec, H = HR_ST[s.status] || [s.status, 'c-neu'];
           const prog = '<div style="display:grid;grid-template-columns:auto 72px;gap:3px 8px;align-items:center;font-size:12px">' + D.rList.map((x, i) => {
@@ -1864,17 +1882,18 @@ VIEWS.harian = async function (opt) {
           const pekerja = [];
           if (r) r.detail.forEach(d => { if (d.foto && d.oleh && !pekerja.some(p => p.nik.toLowerCase() === String(d.olehNik || d.oleh).toLowerCase())) pekerja.push({ nik: String(d.olehNik || d.oleh), nama: d.oleh }); });
           const pekerjaLain = pekerja.filter(p => !s.pics.some(q => q.nik.toLowerCase() === p.nik.toLowerCase()));
+          if (!pekerja.length && r && r.oleh) pekerja.push({ nik: String(r.olehNik || r.oleh), nama: r.oleh });
           const anda = p => p.nik.toLowerCase() === me ? ' <span class="chip c-pri">Anda</span>' : '';
-          return '<tr class="' + (s.bisa ? 'own' : '') + '"><td style="white-space:nowrap"><b>' + esc(s.shiftNama) + '</b><div class="cell-sub">' + esc(s.jam) + '</div></td>' +
-            '<td class="cell-main">' + esc(s.area) + '</td>' +
-            '<td>' + (s.pics.length ? s.pics.map(p => esc(p.nama) + anda(p)).join('<br>')
+          return '<tr class="' + (s.bisa ? 'own' : '') + '"><td data-l="Shift" style="white-space:nowrap"><b>' + esc(s.shiftNama) + '</b><div class="cell-sub">' + esc(s.jam) + '</div></td>' +
+            '<td class="cell-main hr-area">' + esc(s.area) + '</td>' +
+            '<td data-l="PIC">' + (s.pics.length ? s.pics.map(p => esc(p.nama) + anda(p)).join('<br>')
                 : pekerja.length ? pekerja.map(p => esc(p.nama) + anda(p)).join('<br>') + '<div class="cell-sub">dikerjakan (tanpa jadwal PIC)</div>'
                 : '<span class="muted">Tidak ada PIC area terjadwal</span><div class="cell-sub">Leader / PIC yang bertugas boleh mengerjakan</div>') +
               (s.pics.length && pekerjaLain.length ? '<div class="cell-sub">dikerjakan: ' + pekerjaLain.map(p => esc(p.nama)).join(', ') + '</div>' : '') + '</td>' +
-            '<td><span class="chip ' + H[1] + '">' + H[0] + '</span>' + (s.bisa ? '<div class="cell-sub">sebelum ' + fDate(s.selesai) + '</div>' : '') +
+            '<td data-l="Status"><span class="chip ' + H[1] + '">' + H[0] + '</span>' + (s.bisa ? '<div class="cell-sub">sebelum ' + fDate(s.selesai) + '</div>' : '') +
               (r && r.status === 'Terlewat' && r.poin ? '<div class="cell-sub" style="color:var(--err-t)">' + signed(r.poin) + ' untuk PIC terjadwal</div>' : '') + '</td>' +
-            '<td style="white-space:nowrap">' + prog + '<div class="cell-sub">' + (r ? r.isi : 0) + ' / ' + tot + ' S' + (r && r.status === 'Selesai' ? ' · ' + esc(r.oleh) + ' ' + fDate(r.waktu) : '') + '</div></td>' +
-            '<td>' + (s.bisa ? '<button class="btn sm primary" data-hr="' + esc(s.id) + '">' + (r ? 'Lanjutkan' : 'Kerjakan') + '</button>' : r && r.isi ? '<button class="btn sm" data-hr="' + esc(s.id) + '">Lihat</button>' : '') + '</td></tr>';
+            '<td data-l="Progres 6S" class="hr-prog">' + prog + '<div class="cell-sub">' + (r ? r.isi : 0) + ' / ' + tot + ' S' + (r && r.status === 'Selesai' ? ' · ' + esc(r.oleh) + ' ' + fDate(r.waktu) : '') + '</div></td>' +
+            '<td class="hr-act">' + (s.bisa ? '<button class="btn sm primary" data-hr="' + esc(s.id) + '">' + (r ? 'Lanjutkan' : 'Kerjakan') + '</button>' : r && r.isi ? '<button class="btn sm" data-hr="' + esc(s.id) + '">Lihat</button>' : '') + '</td></tr>';
         }).join('') + '</tbody></table></div>' : emptyBox('Belum ada area aktif atau shift.'));
     $$('[data-hr]', HB).forEach(b => b.onclick = () => { const s = D.slots.find(x => x.id === b.dataset.hr); if (s) harianTask(s, D.rList); });
   };
