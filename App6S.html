@@ -1861,10 +1861,11 @@ VIEWS.admin = async function () {
 const HR_ST = { Selesai: ['Selesai', 'c-ok'], Proses: ['Sedang diisi', 'c-info'], Belum: ['Belum dikerjakan', 'c-warn'], Terlewat: ['Terlewat', 'c-err'], Nanti: ['Belum mulai', 'c-neu'] };
 VIEWS.harian = async function (opt) {
   const v = $('#view');
-  const st = S.hr || (S.hr = { tanggal: '', saya: true, area: '' });
+  const st = S.hr || (S.hr = { tanggal: '', saya: true, area: '', pic: '' });
   if (opt && opt.tanggal) st.tanggal = opt.tanggal;
   v.innerHTML = '<div class="toolbar"><input type="date" class="inp" id="hrTgl" style="max-width:180px" value="' + esc(st.tanggal) + '">' +
     '<select class="inp" id="hrArea" style="max-width:220px" aria-label="Filter area"><option value="">Semua area</option></select>' +
+    '<select class="inp" id="hrPic" style="max-width:220px" aria-label="Filter PIC"><option value="">Semua PIC</option></select>' +
     '<label class="small" style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="hrSaya"' + (st.saya ? ' checked' : '') + ' style="width:18px;height:18px"> Tugas saya dulu</label>' +
     '<span class="grow"></span><button class="icon-btn" id="hrRe" title="Muat ulang" aria-label="Muat ulang">' + ic('refresh') + '</button></div><div id="hrBody"></div>';
   const HB = $('#hrBody');
@@ -1872,14 +1873,12 @@ VIEWS.harian = async function (opt) {
   const me = S.user.nik.toLowerCase();
   const milikSaya = s => s.pics.some(p => p.nik.toLowerCase() === me);
   const draw = () => {
-    const all = st.area ? D.slots.filter(s => s.areaId === st.area) : D.slots;
+    const all = D.slots.filter(s => (!st.area || s.areaId === st.area) && (!st.pic || hrOrang(s).some(p => p.nik.toLowerCase() === st.pic)));
     const sl = all.slice();
     if (st.saya) sl.sort((a, b) => (b.bisa - a.bisa) || (milikSaya(b) - milikSaya(a)));
     const n = k => all.filter(s => s.status === k).length;
     const lewat = D.rekap7.selesai + D.rekap7.terlewat, tot = D.rList.length;
     HB.innerHTML =
-      '<div class="note small" style="margin-bottom:12px">Setiap <b>Shift 1 dan Shift 2</b>, PIC area yang bertugas (jadwal HRIS) mengerjakan task 6S area: pilih <b>' + D.rList.join(', ') + '</b> satu per satu, lalu isi <b>foto (wajib)</b> dan <b>tindakan</b> yang dilakukan. Task selesai bila ke-' + tot + ' S terisi sebelum shift berakhir. ' +
-        (D.poin ? 'Selesai <b>+' + num(D.poin) + '</b>' : '') + (D.potong ? (D.poin ? ', ' : '') + 'terlewat / tidak lengkap <b>−' + num(D.potong) + '</b> untuk PIC terjadwal' : '') + '.</div>' +
       '<div class="kpis" style="margin-bottom:12px">' +
         '<div class="kpi"><div class="l">Selesai</div><div class="v tnum" style="color:var(--ok-t)">' + n('Selesai') + '<span class="small muted"> / ' + all.length + '</span></div><div class="s">' + fDate(Date.parse(D.tanggal + 'T12:00:00+07:00'), false) + ' · ' + all.filter(s => s.rec && s.rec.share).length + ' dibagikan</div></div>' +
         '<div class="kpi"><div class="l">Belum / sedang diisi</div><div class="v tnum" style="color:var(--warn-t)">' + (n('Belum') + n('Proses')) + '</div><div class="s">' + n('Proses') + ' sedang diisi</div></div>' +
@@ -1926,6 +1925,15 @@ VIEWS.harian = async function (opt) {
     $$('[data-hr]', HB).forEach(b => b.onclick = () => { const s = D.slots.find(x => x.id === b.dataset.hr); if (s) harianTask(s, D.rList); });
     $$('[data-hshare]', HB).forEach(b => b.onclick = () => { const s = D.slots.find(x => x.id === b.dataset.hshare); if (s) harianShare(s, D.rList, rec => { s.rec = rec; draw(); }); });
   };
+  // Nama PIC di kartu: PIC terjadwal + orang yang mengerjakan
+  const hrOrang = s => s.pics.concat(hrPekerja(s.rec));
+  const isiPic = () => {
+    const m = {};
+    D.slots.forEach(s => hrOrang(s).forEach(p => { const k = p.nik.toLowerCase(); if (!m[k]) m[k] = p.nama; }));
+    if (st.pic && !m[st.pic]) st.pic = '';
+    $('#hrPic').innerHTML = '<option value="">Semua PIC</option>' + Object.keys(m).sort((a, b) => m[a].localeCompare(m[b]))
+      .map(k => '<option value="' + esc(k) + '"' + (k === st.pic ? ' selected' : '') + '>' + esc(m[k]) + (k === me ? ' (Anda)' : '') + '</option>').join('');
+  };
   const isiArea = () => {
     const sel = $('#hrArea'), seen = {};
     const ar = D.slots.filter(s => !seen[s.areaId] && (seen[s.areaId] = 1)).map(s => [s.areaId, s.area]).sort((a, b) => a[1].localeCompare(b[1]));
@@ -1934,12 +1942,13 @@ VIEWS.harian = async function (opt) {
   };
   const load = async () => {
     loading(HB);
-    try { D = await call('apiHarianList', S.token, st.tanggal); st.tanggal = st.tanggal || D.hariIni; $('#hrTgl').value = D.tanggal; isiArea(); draw(); }
+    try { D = await call('apiHarianList', S.token, st.tanggal); st.tanggal = st.tanggal || D.hariIni; $('#hrTgl').value = D.tanggal; isiArea(); isiPic(); draw(); }
     catch (e) { HB.innerHTML = emptyBox(e.message); }
   };
   $('#hrTgl').onchange = e => { st.tanggal = e.target.value; load(); };
   $('#hrSaya').onchange = e => { st.saya = e.target.checked; if (D) draw(); };
   $('#hrArea').onchange = e => { st.area = e.target.value; if (D) draw(); };
+  $('#hrPic').onchange = e => { st.pic = e.target.value; if (D) draw(); };
   $('#hrRe').onclick = load;
   load();
 };
