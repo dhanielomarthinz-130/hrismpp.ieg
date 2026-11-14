@@ -441,6 +441,7 @@ const MENU = [
   { id: 'input', t: 'Input Temuan', i: 'plus', roles: ['Admin', 'Auditor', 'PIC'] },
   { id: 'tugas', t: 'Tugas Saya', i: 'task', roles: ['Admin', 'Auditor', 'PIC'], badge: 'tugas' },
   { id: 'harian', t: '6S Harian', i: 'clip', roles: ['Admin', 'Auditor', 'PIC'], badge: 'harian' },
+  { id: 'harianarea', t: 'Laporan Area 6S', i: 'chart' },
   { id: 'daftar', t: 'Daftar Temuan', i: 'list' },
   { id: 'verif', t: 'Verifikasi', i: 'shield', roles: ['Admin', 'Auditor'], badge: 'verif' },
   { id: 'audit', t: 'Audit 6S', i: 'clip', roles: ['Admin', 'Auditor'] },
@@ -1707,10 +1708,10 @@ VIEWS.poin = async function () {
         : emptyBox(data.papan.length ? 'Tidak ada user yang cocok.' : 'Belum ada Leader / PIC IEG.');
     } else if (tab === 'tim') {
       const showPel = data.tims.some(t => t.pelapor);
-      h = '<div class="tbl-wrap"><table class="tbl"><tr><th>#</th><th>Tim</th><th class="num">Skor</th><th class="num">Potongan</th><th class="num">Perbaikan</th>' + (showPel ? '<th class="num">Pelapor</th>' : '') +
+      h = '<div class="tbl-wrap"><table class="tbl"><tr><th>#</th><th>Tim</th><th class="num">Skor</th><th class="num">Potongan</th><th class="num">Perbaikan</th>' + (showPel ? '<th class="num">Pelapor</th>' : '') + '<th class="num">6S harian</th>' +
         '<th class="num">Temuan diterima</th><th class="num">Belum selesai</th><th class="num">Melapor tim lain</th><th class="num">Audit</th></tr>' +
         data.tims.map((t, i) => '<tr><td>' + rank(i) + '</td><td><b>' + esc(t.tim) + '</b>' + (t.areas.join('') !== t.tim ? '<div class="small muted">' + esc(t.areas.join(', ')) + '</div>' : '') + '</td>' +
-          '<td class="num"><b>' + num(t.skor) + '</b></td><td class="num">' + signed(t.potongan) + '</td><td class="num">' + signed(t.perbaikan) + '</td>' + (showPel ? '<td class="num">' + signed(t.pelapor) + '</td>' : '') +
+          '<td class="num"><b>' + num(t.skor) + '</b></td><td class="num">' + signed(t.potongan) + '</td><td class="num">' + signed(t.perbaikan) + '</td>' + (showPel ? '<td class="num">' + signed(t.pelapor) + '</td>' : '') + '<td class="num">' + signed(t.harian || 0) + '</td>' +
           '<td class="num">' + t.temuan + (t.berulang ? ' <span class="chip nodot c-err">' + t.berulang + ' berulang</span>' : '') + '</td>' +
           '<td class="num">' + (t.aktif ? '<span class="chip c-warn">' + t.aktif + '</span>' : '0') + '</td><td class="num">' + t.dilaporkan + '</td>' +
           '<td class="num">' + (t.audit == null ? '-' : num(t.audit) + '% (' + t.auditN + 'x)') + '</td></tr>').join('') + '</table></div>';
@@ -1867,12 +1868,8 @@ VIEWS.admin = async function () {
 const HR_ST = { Selesai: ['Selesai', 'c-ok'], Proses: ['Sedang diisi', 'c-info'], Belum: ['Belum dikerjakan', 'c-warn'], Terlewat: ['Terlewat', 'c-err'], Nanti: ['Belum mulai', 'c-neu'] };
 VIEWS.harian = async function (opt) {
   const st = S.hr || (S.hr = { tanggal: '', saya: true, area: '', pic: '' });
-  if (opt && opt.tanggal) { st.tanggal = opt.tanggal; st.tab = 'harian'; }
-  $('#view').innerHTML = '<div class="tabs" id="hrTabs" style="max-width:420px"><button data-t="harian"' + (st.tab !== 'rekap' ? ' class="on"' : '') + '>Task harian</button>' +
-    '<button data-t="rekap"' + (st.tab === 'rekap' ? ' class="on"' : '') + '>Laporan per area</button></div><div id="hrMain"></div>';
-  $$('#hrTabs button').forEach(b => b.onclick = () => { if ((st.tab || 'harian') === b.dataset.t) return; st.tab = b.dataset.t; VIEWS.harian(); });
-  if (st.tab === 'rekap') return harianRekap($('#hrMain'));
-  const v = $('#hrMain');
+  if (opt && opt.tanggal) st.tanggal = opt.tanggal;
+  const v = $('#view');
   v.innerHTML = '<div class="toolbar"><input type="date" class="inp" id="hrTgl" style="max-width:180px" value="' + esc(st.tanggal) + '">' +
     '<select class="inp" id="hrArea" style="max-width:220px" aria-label="Filter area"><option value="">Semua area</option></select>' +
     '<select class="inp" id="hrPic" style="max-width:220px" aria-label="Filter PIC"><option value="">Semua PIC</option></select>' +
@@ -2095,6 +2092,8 @@ async function harianShare(s, rList, onShared) {
     catat();
   };
 }
+/* Menu Laporan Area 6S: poin 6S harian terkumpul per area (ikut skor tim di Papan Poin) */
+VIEWS.harianarea = function () { harianRekap($('#view')); };
 /* Laporan 6S harian per area: poin terkumpul per area (masuk penilaian area) */
 async function harianRekap(v) {
   const st = S.hrR || (S.hrR = { dari: '', sampai: '', buka: {} });

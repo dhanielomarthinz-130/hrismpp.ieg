@@ -46,6 +46,7 @@ const R5_MENUS = [
     'daftar' => ['Daftar Temuan', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
     'verif'  => ['Verifikasi & Keberatan', ['Admin', 'Auditor'], false],
     'harian' => ['6S Harian (checklist tiap shift)', ['Admin', 'Auditor', 'PIC'], false],
+    'harianarea' => ['Laporan 6S Harian per Area', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
     'audit'  => ['Audit 6S', ['Admin', 'Auditor'], false],
     'poin'   => ['Papan Poin', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
     'kpi'    => ['KPI PIC', ['Admin', 'Auditor', 'PIC', 'Viewer'], true],
@@ -265,6 +266,22 @@ function r5_init(): void {
         ? array_column($pdo->query("PRAGMA table_info(r5_audit)")->fetchAll(), 'name')
         : array_column($pdo->query("SHOW COLUMNS FROM r5_audit")->fetchAll(), 'Field');
     if (!in_array('aman', $acols, true)) $pdo->exec("ALTER TABLE r5_audit ADD COLUMN aman DOUBLE NULL");
+
+    // Poin 6S harian ikut skor area/tim (sekali: salin poin task lama yang sudah selesai/terlewat)
+    $klaim = false;
+    if (!(int)db_val("SELECT COUNT(*) FROM settings WHERE key_name = 'migr_r6_harian_area'")) {
+        // Tandai dulu agar dua request bersamaan tidak menyalin dua kali
+        try { db_insert('settings', ['key_name' => 'migr_r6_harian_area', 'value' => '1', 'ket' => 'Poin 6S harian masuk skor area']); $klaim = true; }
+        catch (Throwable $e) { $klaim = false; }
+    }
+    if ($klaim) {
+        foreach (db_all("SELECT id, tanggal, shift, area_id, nama_area, status, poin, waktu, batas FROM r6_harian WHERE poin <> 0") as $h) {
+            $ts = (int)($h['status'] === 'Selesai' ? ($h['waktu'] ?: $h['batas']) : $h['batas']);
+            if ($ts <= 0) $ts = (new DateTime($h['tanggal'] . ' 12:00', new DateTimeZone(R6_TZ)))->getTimestamp() * 1000;
+            r5_log_poin('AREA', (string)$h['area_id'], r5_str($h['nama_area']), (float)$h['poin'], '',
+                '6S harian ' . ($h['status'] === 'Selesai' ? 'selesai' : 'terlewat') . ' · ' . $h['shift'] . ' ' . $h['tanggal'], $ts);
+        }
+    }
 
     // Config bawaan (yang belum ada saja)
     $have = array_column(db_all("SELECT key_name FROM r5_config"), 'key_name');
@@ -1429,7 +1446,7 @@ function r5_rekap_tim(string $bulan, array $areas, array $poinRows, array $temua
     $T = [];
     $get = function (string $nama) use (&$T, $awal) {
         if (!isset($T[$nama])) $T[$nama] = ['tim' => $nama, 'areas' => [], 'skor' => $awal, 'potongan' => 0.0, 'perbaikan' => 0.0, 'telatBerjalan' => 0.0,
-            'pelapor' => 0.0, 'temuan' => 0, 'aktif' => 0, 'berulang' => 0, 'mandiri' => 0, 'dilaporkan' => 0, 'auditN' => 0, 'auditSum' => 0.0];
+            'pelapor' => 0.0, 'harian' => 0.0, 'temuan' => 0, 'aktif' => 0, 'berulang' => 0, 'mandiri' => 0, 'dilaporkan' => 0, 'auditN' => 0, 'auditSum' => 0.0];
         return $nama;
     };
     foreach ($areas as $a) if ($a['aktif'] !== 'N') { $k = $get($tm[$a['area_id']]); $T[$k]['areas'][] = $a['nama']; }
@@ -1440,6 +1457,7 @@ function r5_rekap_tim(string $bulan, array $areas, array $poinRows, array $temua
         $T[$k]['skor'] += $v;
         if (preg_match('/^Temuan valid/', $ket)) $T[$k]['pelapor'] += $v;
         elseif (preg_match('/^Perbaikan/', $ket)) $T[$k]['perbaikan'] += $v;
+        elseif (preg_match('/^6S harian/', $ket)) $T[$k]['harian'] += $v;
         else $T[$k]['potongan'] += $v;   // potongan temuan & pembatalan
     }
     foreach ($temuanAll as $t) {
@@ -1464,7 +1482,7 @@ function r5_rekap_tim(string $bulan, array $areas, array $poinRows, array $temua
     $out = [];
     foreach ($T as $r) {
         $r['skor'] = r5_round1($r['skor'] + $r['telatBerjalan']); $r['potongan'] = r5_round1($r['potongan']); $r['telatBerjalan'] = r5_round1($r['telatBerjalan']);
-        $r['perbaikan'] = r5_round1($r['perbaikan']); $r['pelapor'] = r5_round1($r['pelapor']);
+        $r['perbaikan'] = r5_round1($r['perbaikan']); $r['pelapor'] = r5_round1($r['pelapor']); $r['harian'] = r5_round1($r['harian']);
         $r['audit'] = $r['auditN'] ? r5_round1($r['auditSum'] / $r['auditN']) : null;
         unset($r['auditSum']);
         $out[] = $r;
@@ -2097,8 +2115,10 @@ function r6_harian_sync(): void {
     $areas = db_all("SELECT area_id, nama FROM r5_area WHERE aktif <> 'N' ORDER BY area_id");
     if (!$areas) return;
     $pot = r5_num('POTONG_6S_HARIAN', 1);
-    $potong = function (array $pics, string $area, string $shNama, string $tgl, int $ts) use ($pot): void {
+    $potong = function (array $pics, string $area, string $shNama, string $tgl, int $ts, string $areaId = '') use ($pot): void {
         if ($pot > 0) foreach ($pics as $p) r5_log_poin('PIC', $p['nik'], $p['nama'], -$pot, '', '6S harian terlewat · ' . $area . ' · ' . $shNama . ' ' . $tgl, $ts);
+        // Potongan yang sama untuk skor area/tim (hanya bila ada PIC terjadwal, sama seperti kolom poin task)
+        if ($pot > 0 && $pics && $areaId !== '') r5_log_poin('AREA', $areaId, $area, -$pot, '', '6S harian terlewat · ' . $shNama . ' ' . $tgl, $ts);
     };
     // 1) Sudah dimulai tapi belum lengkap 6 S saat shift berakhir -> Terlewat
     foreach (db_all("SELECT * FROM r6_harian WHERE status = 'Proses' AND batas <= ?", [$now]) as $r) {
@@ -2106,7 +2126,7 @@ function r6_harian_sync(): void {
         db_transaction(function () use ($r, $pics, $pot, $potong) {
             if (db_update('r6_harian', ['status' => 'Terlewat', 'poin' => $pics && $pot > 0 ? -$pot : 0], "id = ? AND status = 'Proses'", [$r['id']]) !== 1) return;
             $sh = r6_harian_shifts($r['tanggal'])[$r['shift']] ?? ['nama' => $r['shift']];
-            $potong($pics, r5_str($r['nama_area']), $sh['nama'] . ' (belum lengkap ' . (int)$r['ok_n'] . '/' . count(R5_LIST) . ')', $r['tanggal'], (int)$r['batas']);
+            $potong($pics, r5_str($r['nama_area']), $sh['nama'] . ' (belum lengkap ' . (int)$r['ok_n'] . '/' . count(R5_LIST) . ')', $r['tanggal'], (int)$r['batas'], (string)$r['area_id']);
         });
     }
     // 2) Tidak dikerjakan sama sekali -> Terlewat
@@ -2126,7 +2146,7 @@ function r6_harian_sync(): void {
                 db_transaction(function () use ($id, $tgl, $sh, $a, $pics, $pot, $potong) {
                     db_insert('r6_harian', ['id' => $id, 'tanggal' => $tgl, 'shift' => $sh['kode'], 'area_id' => $a['area_id'], 'nama_area' => $a['nama'],
                         'status' => 'Terlewat', 'pics' => json_encode($pics, JSON_UNESCAPED_UNICODE), 'batas' => $sh['selesai'], 'poin' => $pics && $pot > 0 ? -$pot : 0]);
-                    $potong($pics, $a['nama'], $sh['nama'], $tgl, $sh['selesai']);
+                    $potong($pics, $a['nama'], $sh['nama'], $tgl, $sh['selesai'], (string)$a['area_id']);
                 });
             } catch (Throwable $e) { /* slot sudah dibuat proses lain */ }
         }
@@ -2158,7 +2178,7 @@ function r6_harian_out(?array $r): ?array {
  * poin terkumpul (+ selesai, − terlewat), laporan dibagikan & rata-rata durasi. Untuk penilaian per area.
  */
 function apiHarianRekap($token, $dari, $sampai): array {
-    r5_auth($token, 'harian');
+    r5_auth($token, 'harianarea');
     r6_harian_sync();
     $now = r5_now();
     $ok = fn($t) => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$t);
@@ -2329,6 +2349,7 @@ function apiHarianSimpan($token, $d): array {
                     foreach ($det as $x) $org[mb_strtolower($x['olehNik'])] = [$x['olehNik'], $x['oleh']];
                     foreach ($org as $o) r5_log_poin('PIC', $o[0], $o[1], $poin, '', '6S harian selesai · ' . $area['nama'] . ' · ' . $sh['nama'] . ' ' . $tgl, $now);
                     db_update('r6_harian', ['poin' => $poin], 'id = ?', [$id]);
+                    r5_log_poin('AREA', $area['area_id'], $area['nama'], $poin, '', '6S harian selesai · ' . $sh['nama'] . ' ' . $tgl, $now);
                 }
             }
             return $lengkap;
