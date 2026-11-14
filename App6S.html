@@ -1855,10 +1855,22 @@ VIEWS.harian = async function (opt) {
       (sl.length ? '<div class="tbl-wrap"><table class="tbl dt" style="min-width:900px"><thead><tr><th>Shift</th><th>Area</th><th>PIC terjadwal</th><th>Status</th><th>Progres 6S</th><th></th></tr></thead><tbody>' +
         sl.map(s => {
           const r = s.rec, H = HR_ST[s.status] || [s.status, 'c-neu'];
-          const prog = D.rList.map((x, i) => { const d = r && r.detail[i]; return '<span title="' + esc(x + (d && d.foto ? ' · ' + d.tindakan : ' · belum diisi')) + '" class="chip nodot ' + (d && d.foto ? 'c-ok' : 'c-neu') + '" style="padding:2px 6px">' + esc(x.split(' ').map(w => w[0]).join('')) + '</span>'; }).join(' ');
+          const prog = '<div style="display:grid;grid-template-columns:auto 72px;gap:3px 8px;align-items:center;font-size:12px">' + D.rList.map((x, i) => {
+            const d = r && r.detail[i], ok = !!(d && d.foto);
+            return '<span title="' + esc(x + (ok ? ' · ' + d.tindakan + ' · ' + d.oleh : ' · belum diisi')) + '" style="color:' + (ok ? 'var(--ok-t)' : 'var(--neu-t)') + (ok ? ';font-weight:600' : '') + '">' + esc(x) + '</span>' +
+              '<span style="display:block;height:6px;border-radius:3px;background:' + (ok ? 'var(--ok)' : 'var(--line)') + '"></span>';
+          }).join('') + '</div>';
+          // Orang yang benar-benar mengerjakan (dari isian tiap S)
+          const pekerja = [];
+          if (r) r.detail.forEach(d => { if (d.foto && d.oleh && !pekerja.some(p => p.nik.toLowerCase() === String(d.olehNik || d.oleh).toLowerCase())) pekerja.push({ nik: String(d.olehNik || d.oleh), nama: d.oleh }); });
+          const pekerjaLain = pekerja.filter(p => !s.pics.some(q => q.nik.toLowerCase() === p.nik.toLowerCase()));
+          const anda = p => p.nik.toLowerCase() === me ? ' <span class="chip c-pri">Anda</span>' : '';
           return '<tr class="' + (s.bisa ? 'own' : '') + '"><td style="white-space:nowrap"><b>' + esc(s.shiftNama) + '</b><div class="cell-sub">' + esc(s.jam) + '</div></td>' +
             '<td class="cell-main">' + esc(s.area) + '</td>' +
-            '<td>' + (s.pics.length ? s.pics.map(p => esc(p.nama) + (p.nik.toLowerCase() === me ? ' <span class="chip c-pri">Anda</span>' : '')).join('<br>') : '<span class="muted">Tidak ada PIC area terjadwal</span><div class="cell-sub">Leader / PIC yang bertugas boleh mengerjakan</div>') + '</td>' +
+            '<td>' + (s.pics.length ? s.pics.map(p => esc(p.nama) + anda(p)).join('<br>')
+                : pekerja.length ? pekerja.map(p => esc(p.nama) + anda(p)).join('<br>') + '<div class="cell-sub">dikerjakan (tanpa jadwal PIC)</div>'
+                : '<span class="muted">Tidak ada PIC area terjadwal</span><div class="cell-sub">Leader / PIC yang bertugas boleh mengerjakan</div>') +
+              (s.pics.length && pekerjaLain.length ? '<div class="cell-sub">dikerjakan: ' + pekerjaLain.map(p => esc(p.nama)).join(', ') + '</div>' : '') + '</td>' +
             '<td><span class="chip ' + H[1] + '">' + H[0] + '</span>' + (s.bisa ? '<div class="cell-sub">sebelum ' + fDate(s.selesai) + '</div>' : '') +
               (r && r.status === 'Terlewat' && r.poin ? '<div class="cell-sub" style="color:var(--err-t)">' + signed(r.poin) + ' untuk PIC terjadwal</div>' : '') + '</td>' +
             '<td style="white-space:nowrap">' + prog + '<div class="cell-sub">' + (r ? r.isi : 0) + ' / ' + tot + ' S' + (r && r.status === 'Selesai' ? ' · ' + esc(r.oleh) + ' ' + fDate(r.waktu) : '') + '</div></td>' +
