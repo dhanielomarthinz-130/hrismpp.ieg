@@ -245,6 +245,9 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .hr-bars{display:grid;grid-template-columns:auto 72px;gap:3px 8px;align-items:center;font-size:12px}
 .hr-bl{color:var(--neu-t)}.hr-bl.ok{color:var(--ok-t);font-weight:600}
 .hr-bar{display:block;height:6px;border-radius:3px;background:var(--line)}.hr-bar.ok{background:var(--ok)}
+.hr-jam{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:4px;font-size:12px;color:var(--text-2)}
+.hr-jam span{display:grid;line-height:1.25}.hr-jam small{font-size:10.5px;color:var(--muted);font-weight:600}
+.hr-c-sec .hr-jam{margin-top:0;font-size:14px;gap:6px 22px}.hr-c-sec .hr-jam small{font-size:11px}
 .hr-ket{display:grid;gap:1px;font-size:11.5px;color:var(--muted);margin-top:3px}
 .hr-cards{display:none}
 @media(max-width:760px){
@@ -1896,7 +1899,10 @@ VIEWS.harian = async function (opt) {
               : '<span class="muted">Belum ada PIC area di jadwal HRIS</span><div class="cell-sub">Nama pengisi muncul setelah S pertama disimpan</div>') +
             (s.pics.length && pekerjaLain.length ? '<div class="cell-sub">dikerjakan: ' + pekerjaLain.map(p => esc(p.nama)).join(', ') + '</div>' : '');
           const selesai = !!(r && r.status === 'Selesai'), sh = r && r.share;
-          const ket = (s.bisa ? '<span>Lengkapi sebelum ' + fDate(s.selesai) + '</span>' : selesai ? '<span>Selesai ' + fDate(r.waktu) + '</span>' : '') +
+          const J = hrJam(r);
+          const jam = J ? '<div class="hr-jam"><span><small>Mulai</small><b class="tnum">' + fJam(J.mulai) + '</b></span><span><small>Selesai</small><b class="tnum">' + (J.selesai ? fJam(J.selesai) : '-') + '</b></span>' +
+            (J.durasi ? '<span><small>Durasi</small><b>' + J.durasi + '</b></span>' : !J.selesai ? '<span><small>Terakhir diisi</small><b class="tnum">' + fJam(J.akhir) + '</b></span>' : '') + '</div>' : '';
+          const ket = (s.bisa ? '<span>Lengkapi sebelum ' + fDate(s.selesai) + '</span>' : '') +
             (r && r.status === 'Terlewat' && r.poin ? '<span style="color:var(--err-t)">' + signed(r.poin) + ' untuk PIC terjadwal</span>' : '') +
             (selesai ? (sh ? '<span style="color:var(--ok-t)">Laporan dibagikan ' + esc(sh.oleh) + ', ' + fDate(sh.waktu) + (sh.n > 1 ? ' (' + sh.n + ' kali)' : '') + '</span>'
               : '<span style="color:var(--warn-t)">Laporan belum dibagikan</span>') : '');
@@ -1904,17 +1910,18 @@ VIEWS.harian = async function (opt) {
           const act = (s.bisa ? '<button class="btn sm primary" data-hr="' + esc(s.id) + '">' + (r ? 'Lanjutkan' : 'Kerjakan') + '</button>' : r && r.isi ? '<button class="btn sm" data-hr="' + esc(s.id) + '">Lihat</button>' : '') +
             (selesai ? '<button class="btn sm wa' + (sh ? ' wa-soft' : '') + '" data-hshare="' + esc(s.id) + '">' + WA_SVG + (sh ? 'Bagikan lagi' : 'Bagikan') + '</button>' : '');
           const items = D.rList.map((x, i) => { const d = r && r.detail[i]; return { x, ok: !!(d && d.foto), d }; });
-          return { s, r, H, pic, ket, act, items, shChip, isi: r ? r.isi : 0 };
+          return { s, r, H, pic, ket, act, items, shChip, jam, isi: r ? r.isi : 0 };
         });
         const tbl = '<div class="tbl-wrap hr-desk"><table class="tbl dt" style="min-width:900px"><thead><tr><th>Shift</th><th>Area</th><th>PIC terjadwal</th><th>Status</th><th>Progres 6S</th><th></th></tr></thead><tbody>' +
           V.map(o => '<tr class="' + (o.s.bisa ? 'own' : '') + '"><td style="white-space:nowrap"><b>' + esc(o.s.shiftNama) + '</b><div class="cell-sub">' + esc(o.s.jam) + '</div></td>' +
             '<td class="cell-main">' + esc(o.s.area) + '</td><td>' + o.pic + '</td>' +
-            '<td><span class="chip ' + o.H[1] + '">' + o.H[0] + '</span>' + o.shChip + (o.ket ? '<div class="hr-ket">' + o.ket + '</div>' : '') + '</td>' +
+            '<td><span class="chip ' + o.H[1] + '">' + o.H[0] + '</span>' + o.shChip + o.jam + (o.ket ? '<div class="hr-ket">' + o.ket + '</div>' : '') + '</td>' +
             '<td style="white-space:nowrap"><div class="hr-bars">' + o.items.map(it => '<span class="hr-bl' + (it.ok ? ' ok' : '') + '" title="' + esc(it.x + (it.ok ? ' · ' + it.d.tindakan + ' · ' + it.d.oleh : ' · belum diisi')) + '">' + esc(it.x) + '</span><span class="hr-bar' + (it.ok ? ' ok' : '') + '"></span>').join('') + '</div>' +
               '<div class="cell-sub">' + o.isi + ' / ' + tot + ' S</div></td>' +
             '<td><div style="display:flex;gap:6px;flex-wrap:wrap">' + o.act + '</div></td></tr>').join('') + '</tbody></table></div>';
         const cards = '<div class="hr-cards">' + V.map(o => '<div class="hr-card' + (o.s.bisa ? ' own' : '') + '">' +
             '<div class="hr-c-head"><div style="min-width:0"><div class="hr-c-area">' + esc(o.s.area) + '</div><div class="hr-c-sub">' + esc(o.s.shiftNama) + ' · ' + esc(o.s.jam) + '</div></div><div class="hr-c-chips"><span class="chip ' + o.H[1] + '">' + o.H[0] + '</span>' + o.shChip + '</div></div>' +
+            (o.jam ? '<div class="hr-c-sec"><div class="hr-c-l">Waktu pengerjaan</div>' + o.jam + '</div>' : '') +
             '<div class="hr-c-sec"><div class="hr-c-l">PIC</div><div class="hr-c-pic">' + o.pic + '</div></div>' +
             '<div class="hr-c-sec"><div class="hr-c-l" style="display:flex;justify-content:space-between"><span>Progres 6S</span><span class="tnum">' + o.isi + ' / ' + tot + '</span></div>' +
               '<div class="hr-c-grid">' + o.items.map(it => '<div class="hr-c-it' + (it.ok ? ' ok' : '') + '"><span>' + esc(it.x) + '</span><i></i></div>').join('') + '</div></div>' +
@@ -1953,6 +1960,15 @@ VIEWS.harian = async function (opt) {
   load();
 };
 const WA_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.67-1.62-.92-2.22-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.21 3.08c.15.2 2.1 3.2 5.08 4.49.71.31 1.26.49 1.69.63.71.23 1.36.2 1.87.12.57-.08 1.76-.72 2-1.41.25-.7.25-1.29.17-1.41-.07-.13-.27-.2-.57-.35zM12.05 21.5h-.01a9.4 9.4 0 0 1-4.8-1.32l-.34-.2-3.57.94.95-3.48-.22-.36a9.4 9.4 0 0 1-1.44-5.02c0-5.2 4.23-9.43 9.44-9.43 2.52 0 4.89.98 6.67 2.77a9.37 9.37 0 0 1 2.76 6.67c0 5.2-4.24 9.43-9.44 9.43zm8.03-17.46A11.27 11.27 0 0 0 12.05.72C5.8.72.71 5.8.7 12.06c0 2 .52 3.95 1.52 5.67L.6 23.28l5.68-1.49a11.3 11.3 0 0 0 5.76 1.47h.01c6.25 0 11.34-5.09 11.35-11.34 0-3.03-1.18-5.88-3.32-8.02z"/></svg>';
+/* Jam mulai (S pertama disimpan) & selesai (6 S lengkap) 6S harian */
+const fJam = ms => ms ? new Intl.DateTimeFormat('id-ID', { timeZone: TZ, hour: '2-digit', minute: '2-digit' }).format(new Date(ms)) : '-';
+function hrJam(r) {
+  const t = r ? r.detail.filter(d => d.foto && d.waktu).map(d => +d.waktu) : [];
+  if (!t.length) return null;
+  const mulai = Math.min.apply(null, t), akhir = Math.max.apply(null, t);
+  const selesai = r.status === 'Selesai' ? (r.waktu || akhir) : null;
+  return { mulai, akhir, selesai, durasi: selesai && selesai > mulai ? durasi(selesai - mulai) : '' };
+}
 /* Orang yang benar-benar mengerjakan 6S harian (dari isian tiap S), unik per username */
 function hrPekerja(r) {
   const out = [];
@@ -1974,13 +1990,15 @@ function hrCaption(s, rList) {
     'Shift   : ' + s.shiftNama + ' (' + s.jam + ')',
     'Tanggal : ' + tgl,
     'Petugas : ' + nama,
-    'Status  : ' + (r && r.status === 'Selesai' ? 'Selesai' : (HR_ST[s.status] || [s.status])[0]) + ' (' + (r ? r.isi : 0) + '/' + rList.length + ' S)', ''];
+    'Status  : ' + (r && r.status === 'Selesai' ? 'Selesai' : (HR_ST[s.status] || [s.status])[0]) + ' (' + (r ? r.isi : 0) + '/' + rList.length + ' S)'];
+  const J = hrJam(r);
+  if (J) L.push('Mulai   : ' + fJam(J.mulai), 'Selesai : ' + (J.selesai ? fJam(J.selesai) : '-') + (J.durasi ? ' (durasi ' + J.durasi + ')' : ''));
+  L.push('');
   rList.forEach((x, i) => {
     const d = r && r.detail[i];
     L.push((i + 1) + '. ' + x);
     L.push('   ' + (d && d.foto ? (d.tindakan || '-') : 'Belum diisi'));
   });
-  if (r && r.status === 'Selesai' && r.waktu) L.push('', 'Diselesaikan ' + fDate(r.waktu));
   return L.join('\n');
 }
 /* Gambar ringkasan: header + 6 foto (grid 2 x 3) dengan nama S & tindakan */
@@ -2009,7 +2027,8 @@ async function hrKolase(s, rList) {
   g.fillStyle = '#1D2D3E'; g.font = '700 42px ' + font; g.fillText(fit(s.area, W - pad * 2), pad, 110);
   g.fillStyle = '#334155'; g.font = '400 24px ' + font;
   g.fillText(fit(s.shiftNama + '  ·  ' + s.jam + '  ·  ' + fDate(Date.parse(s.tanggal + 'T12:00:00+07:00'), false), W - pad * 2), pad, 150);
-  g.fillText(fit('Petugas: ' + (hrPekerja(r).map(p => p.nama).join(', ') || '-'), W - pad * 2), pad, 186);
+  const J = hrJam(r);
+  g.fillText(fit('Petugas: ' + (hrPekerja(r).map(p => p.nama).join(', ') || '-') + (J ? '  ·  Mulai ' + fJam(J.mulai) + '  ·  Selesai ' + (J.selesai ? fJam(J.selesai) : '-') : ''), W - pad * 2), pad, 186);
   // Grid foto
   rList.forEach((x, i) => {
     const cx = pad + (i % 2) * (cw + gap), cy = head + Math.floor(i / 2) * (ph + txtH + gap), d = r && r.detail[i], im = imgs[i];
@@ -2021,7 +2040,7 @@ async function hrKolase(s, rList) {
     wrap(d && d.foto ? d.tindakan : '-', cw, 2).forEach((ln, k) => g.fillText(ln, cx, cy + ph + 60 + k * 26));
   });
   g.fillStyle = '#94A3B8'; g.font = '400 18px ' + font;
-  g.fillText((r ? r.isi : 0) + ' / ' + rList.length + ' S terisi' + (r && r.waktu ? '  ·  diselesaikan ' + fDate(r.waktu) : ''), pad, H - 22);
+  g.fillText((r ? r.isi : 0) + ' / ' + rList.length + ' S terisi' + (J && J.durasi ? '  ·  durasi ' + J.durasi : ''), pad, H - 22);
   return new Promise(res => cv.toBlob(b => res(b), 'image/jpeg', 0.9));
 }
 /* Bagikan hasil 6S harian (gambar ringkasan + caption) lewat menu share perangkat; cadangan: unduh & salin */
