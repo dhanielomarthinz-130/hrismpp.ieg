@@ -1065,6 +1065,31 @@ function apiRiwayatPoinPic($token, $nik, $bulan): array {
             'total' => r5_round1($saldo + $berjalan)];
 }
 
+/** Riwayat poin satu tim (semua area milik tim) dalam sebulan: dasar skor tim di Papan Poin Area. */
+function apiRiwayatPoinTim($token, $tim, $bulan): array {
+    $u = r5_auth($token);
+    $acc = r5_access_for($u);
+    if (!array_intersect(['dash', 'poin', 'kpi'], $acc['menus'])) throw new RuntimeException('Anda tidak punya akses melihat poin.');
+    $bulan = r5_valid_bulan($bulan);
+    $tim = r5_str($tim);
+    $tm = r5_timmap();
+    $ids = array_keys(array_filter($tm, fn($n) => $n === $tim));
+    if (!$ids) throw new RuntimeException('Tim tidak ditemukan.');
+    $nama = [];
+    foreach (db_all("SELECT area_id, nama FROM r5_area") as $a) $nama[$a['area_id']] = r5_str($a['nama']);
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+    $rows = db_all("SELECT id, ts, ref_id, poin, ket, temuan_id FROM r5_poin WHERE jenis = 'AREA' AND bulan = ? AND ref_id IN ($ph) ORDER BY ts, id", array_merge([$bulan], $ids));
+    $saldo = 0.0; $plus = 0.0; $minus = 0.0; $out = [];
+    foreach ($rows as $r) {
+        $v = (float)$r['poin'];
+        $saldo += $v; if ($v >= 0) $plus += $v; else $minus += $v;
+        $out[] = ['id' => (int)$r['id'], 'ts' => (int)$r['ts'], 'poin' => $v, 'saldo' => r5_round1($saldo), 'ket' => r5_str($r['ket']),
+                  'temuanId' => r5_str($r['temuan_id']), 'area' => $nama[$r['ref_id']] ?? $r['ref_id']];
+    }
+    return ['tim' => $tim, 'areas' => array_values(array_map(fn($i) => $nama[$i] ?? $i, $ids)), 'bulan' => $bulan, 'rows' => array_reverse($out),
+            'awal' => r5_num('SKOR_AWAL_AREA', 100), 'plus' => r5_round1($plus), 'minus' => r5_round1($minus), 'total' => r5_round1($saldo)];
+}
+
 /** PIC yang akan menerima temuan di area ini (untuk form Input Temuan). */
 function apiPicBertugas($token, $areaId): array {
     r5_auth($token, 'input');
@@ -2596,6 +2621,6 @@ const R5_API = [
     'apiSubmitPerbaikan', 'apiVerifikasi', 'apiBatalkanTemuan', 'apiDashboard', 'apiLeaderboard', 'apiChecklist',
     'apiSaveAudit', 'apiListAudit', 'apiAdminData', 'apiSaveUser', 'apiSaveArea', 'apiSaveChecklist',
     'apiImportUsers', 'apiSaveConfig', 'apiKeberatan', 'apiPutusKeberatan', 'apiKpiPic',
-    'apiPicBertugas', 'apiTerimaTugas', 'apiAlihkan', 'apiRiwayatPoinPic', 'apiLepasTugas',
+    'apiPicBertugas', 'apiTerimaTugas', 'apiAlihkan', 'apiRiwayatPoinPic', 'apiRiwayatPoinTim', 'apiLepasTugas',
     'apiAturData', 'apiAturSimpan', 'apiAksesSimpan', 'apiHarianList', 'apiHarianChecklist', 'apiHarianSimpan', 'apiHarianShare', 'apiHarianRekap',
 ];

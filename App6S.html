@@ -259,6 +259,9 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 }
 .super-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px;padding:10px 12px;border:1px dashed var(--err-t);border-radius:10px}
 .super-bar .small{margin-right:auto;font-weight:700}
+.rk-list{display:grid;gap:0;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.rk-item{display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border-top:1px solid var(--line);font-size:13.5px}
+.rk-item:first-child{border-top:0}
 .rk-bar{flex:1;height:8px;border-radius:4px;background:var(--line);overflow:hidden;min-width:60px}.rk-bar i{display:block;height:100%;border-radius:4px}
 .rk-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .rk-grid div{display:grid;gap:2px}.rk-grid small{font-size:11px;color:var(--muted);font-weight:600}.rk-grid b{font-size:15px;font-variant-numeric:tabular-nums}
@@ -1697,6 +1700,30 @@ VIEWS.poin = async function () {
   $$('#poinTabs button').forEach(b => b.onclick = () => { if (b.dataset.t === tab) return; S.poinTab = b.dataset.t; VIEWS.poin(); });
   return tab === 'area' ? poinArea($('#poinMain')) : poinPapan($('#poinMain'));
 };
+/* Rincian skor satu tim: semua kejadian yang menambah / mengurangi poin area bulan ini */
+async function openPoinTim(tim, bulan, after) {
+  openModal('Rincian poin tim', '<div class="spin"></div>');
+  try {
+    const d = await call('apiRiwayatPoinTim', S.token, tim, bulan);
+    const box = (l, v, cls) => '<div class="kpi"><div class="l">' + l + '</div><div class="v tnum' + (cls ? ' ' + cls : '') + '" style="font-size:22px">' + v + '</div></div>';
+    const sx = r => isSuper() ? '<div style="display:flex;gap:6px;margin-top:6px"><button class="btn sm" data-tpe="' + r.id + '">Edit</button><button class="btn sm danger" data-tpd="' + r.id + '">Hapus</button></div>' : '';
+    const tm = r => r.temuanId ? ' · <a href="#" onclick="openDetail(' + esc(JSON.stringify(r.temuanId)) + ');return false">' + esc(r.temuanId) + '</a>' : '';
+    let h = '<div class="small muted" style="margin:-4px 0 12px">' + fBulan(d.bulan) + (d.areas.join('') !== d.tim ? ' · ' + esc(d.areas.join(', ')) : '') + '</div>' +
+      '<div class="kpis" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:12px">' +
+      box('Skor awal', num(d.awal)) + box('Skor dari kejadian', num(d.awal + d.total), d.awal + d.total < d.awal ? 'err' : '') +
+      box('Bertambah', '+' + num(d.plus)) + box('Berkurang', num(d.minus), d.minus < 0 ? 'err' : '') + '</div>' +
+      '<p class="small muted" style="margin-top:0">Skor di tabel bisa lebih rendah karena ikut potongan berjalan dari temuan yang sedang lewat target (belum tercatat di sini).</p>';
+    h += d.rows.length ? '<div class="rk-list">' + d.rows.map(r => '<div class="rk-item"><div style="min-width:0;flex:1"><div>' + esc(r.ket) + '</div>' +
+        '<div class="small muted">' + fDate(r.ts) + ' · ' + esc(r.area) + tm(r) + '</div>' + sx(r) + '</div>' +
+        '<div style="text-align:right;flex:none"><span class="chip nodot ' + (r.poin < 0 ? 'c-err' : 'c-ok') + '">' + signed(r.poin) + '</span><div class="small muted tnum" style="margin-top:4px">saldo ' + signed(r.saldo) + '</div></div></div>').join('') + '</div>'
+      : emptyBox('Belum ada poin tim bulan ini');
+    $('#sheet').innerHTML = '<div class="sheet-h"><h2>' + esc(d.tim) + '</h2><button class="icon-btn" onclick="closeModal()" aria-label="Tutup">' + ic('x') + '</button></div>' + h;
+    const ulang = () => { openPoinTim(tim, bulan, after); after && after(); };
+    const cari = id => Object.assign({ nama: d.tim }, d.rows.find(x => String(x.id) === id));
+    $$('[data-tpe]').forEach(b => b.onclick = () => superPoinEdit(cari(b.dataset.tpe), ulang));
+    $$('[data-tpd]').forEach(b => b.onclick = () => superPoinHapus(cari(b.dataset.tpd), ulang));
+  } catch (e) { $('#sheet').innerHTML = emptyBox(e.message); }
+}
 /* Tab Papan Poin Area: skor tim lengkap (temuan, perbaikan, 6S harian, audit) & rincian 6S harian per area */
 async function poinArea(v) {
   const sub = S.paSub === 'harian' ? 'harian' : 'skor';
@@ -1722,7 +1749,7 @@ async function poinArea(v) {
     const audit = t => t.audit == null ? '-' : num(t.audit) + '%';
     PB.innerHTML =
       '<div class="tbl-wrap hr-desk"><table class="tbl" style="min-width:1000px"><thead><tr><th>#</th><th>Tim</th><th class="num">Skor</th><th class="num">Potongan</th><th class="num">Perbaikan</th><th class="num">Pelapor</th><th class="num">6S harian</th>' +
-        '<th class="num">Lewat target</th><th class="num">Temuan</th><th class="num">Belum selesai</th><th class="num">Melapor tim lain</th><th class="num">Audit</th></tr></thead><tbody>' +
+        '<th class="num">Lewat target</th><th class="num">Temuan</th><th class="num">Belum selesai</th><th class="num">Melapor tim lain</th><th class="num">Audit</th><th></th></tr></thead><tbody>' +
         list.map(t => '<tr><td>' + rk(t) + '</td><td class="cell-main" style="white-space:normal">' + esc(t.tim) + (ar(t) ? '<div class="cell-sub" style="white-space:normal">' + ar(t) + '</div>' : '') + '</td>' +
           '<td class="num" style="font-weight:800;font-size:15px">' + num(t.skor) + '</td>' +
           '<td class="num" style="color:' + warna(t.potongan) + '">' + sg(t.potongan) + '</td><td class="num" style="color:' + warna(t.perbaikan) + '">' + sg(t.perbaikan) + '</td>' +
@@ -1730,7 +1757,8 @@ async function poinArea(v) {
           '<td class="num" style="color:' + warna(t.telatBerjalan) + '">' + sg(t.telatBerjalan) + '</td>' +
           '<td class="num">' + t.temuan + (t.berulang ? '<div class="cell-sub" style="color:var(--err-t);max-width:none">' + t.berulang + ' berulang</div>' : '') + '</td>' +
           '<td class="num">' + (t.aktif ? '<span class="chip c-warn">' + t.aktif + '</span>' : '0') + '</td><td class="num">' + t.dilaporkan + '</td>' +
-          '<td class="num">' + audit(t) + (t.auditN ? '<div class="cell-sub" style="max-width:none">' + t.auditN + 'x audit</div>' : '') + '</td></tr>').join('') + '</tbody></table></div>' +
+          '<td class="num">' + audit(t) + (t.auditN ? '<div class="cell-sub" style="max-width:none">' + t.auditN + 'x audit</div>' : '') + '</td>' +
+          '<td><button class="btn sm" data-tim="' + esc(t.tim) + '">Rincian</button></td></tr>').join('') + '</tbody></table></div>' +
       '<div class="hr-cards">' + list.map(t => '<div class="hr-card">' +
           '<div class="hr-c-head"><div style="display:flex;gap:10px;align-items:center;min-width:0">' + rk(t) + '<div style="min-width:0"><div class="hr-c-area">' + esc(t.tim) + '</div>' + (ar(t) ? '<div class="hr-c-sub">' + ar(t) + '</div>' : '') + '</div></div>' +
             '<div style="text-align:right;flex:none"><div class="hr-c-sub">Skor</div><div class="tnum" style="font-size:22px;font-weight:800">' + num(t.skor) + '</div></div></div>' +
@@ -1742,7 +1770,9 @@ async function poinArea(v) {
             '<div><small>Temuan</small><b>' + t.temuan + (t.berulang ? ' <span class="small" style="color:var(--err-t)">(' + t.berulang + ' berulang)</span>' : '') + '</b></div>' +
             '<div><small>Belum selesai</small><b style="color:' + (t.aktif ? 'var(--warn-t)' : 'inherit') + '">' + t.aktif + '</b></div><div><small>Melapor tim lain</small><b>' + t.dilaporkan + '</b></div>' +
             '<div><small>Audit</small><b>' + audit(t) + '</b></div></div></div>' +
+          '<div class="hr-c-foot"><button class="btn sm" data-tim="' + esc(t.tim) + '" style="min-height:38px">Lihat rincian poin</button></div>' +
         '</div>').join('') + '</div>';
+    $$('[data-tim]', PB).forEach(b => b.onclick = () => openPoinTim(b.dataset.tim, data.bulan || S.bulan, () => poinArea(v)));
   };
   let tq; $('#paQ').addEventListener('input', e => { clearTimeout(tq); tq = setTimeout(() => { q = e.target.value.toLowerCase(); if (data) draw(); }, 200); });
   loading(PB);
