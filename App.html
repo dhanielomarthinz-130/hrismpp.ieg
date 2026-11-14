@@ -500,7 +500,7 @@
         const cur = VALUE_DESC.get.call(inp), today = dpToday();
         const min = inp.min || '', max = inp.max || '';
         const curMon = cur && week ? monday(cur) : '';
-        let h = '<div class="dp-grab"></div><div class="dp-head">' +
+        let h = '<div class="dp-grab"></div><button type="button" class="dp-x" data-dpx aria-label="Tutup" title="Tutup"><span class="material-symbols-outlined">close</span></button><div class="dp-head">' +
             '<button type="button" class="dp-nav" data-nav="-1" aria-label="Sebelumnya"><span class="material-symbols-outlined">chevron_left</span></button>' +
             '<button type="button" class="dp-title" data-view="' + (st.view === 'day' ? 'month' : 'day') + '">' +
             (st.view === 'day' ? DP_BULAN[st.m] + ' <b>' + st.y + '</b>' : '<b>' + st.y + '</b>') + '<span class="material-symbols-outlined">' + (st.view === 'day' ? 'expand_more' : 'expand_less') + '</span></button>' +
@@ -537,6 +537,7 @@
             (canClear ? '<button type="button" class="dp-quick ghost" data-clear="1">Kosongkan</button>' : '') + '</div>';
         pop.innerHTML = h;
         $('[data-nav="-1"]', pop).onclick = () => { if (st.view === 'day') { st.m--; if (st.m < 0) { st.m = 11; st.y--; } } else st.y--; dpRender(); };
+        $('[data-dpx]', pop).onclick = () => dpClose();
         $('[data-nav="1"]', pop).onclick = () => { if (st.view === 'day') { st.m++; if (st.m > 11) { st.m = 0; st.y++; } } else st.y++; dpRender(); };
         $('.dp-title', pop).onclick = () => { st.view = st.view === 'day' ? 'month' : 'day'; dpRender(); };
         $$('[data-mo]', pop).forEach(b => b.onclick = () => { st.m = +b.dataset.mo; st.view = 'day'; dpRender(); });
@@ -1488,7 +1489,7 @@
         closeCellMenu();
         const m = document.createElement('div');
         m.className = 'cellmenu';
-        m.innerHTML = '<div class="small muted" style="padding:4px 8px">' + esc(r.nama) + ' · ' + J.dates[i].hari + ' ' + J.dates[i].tgl + '</div>' +
+        m.innerHTML = '<div class="cm-head"><div class="small muted">' + esc(r.nama) + ' · ' + J.dates[i].hari + ' ' + J.dates[i].tgl + '</div><button type="button" class="cm-x" aria-label="Tutup" title="Tutup"><span class="material-symbols-outlined">close</span></button></div>' +
             J.kodes.map(k => '<button data-k="' + k.kode + '"><span class="sw" style="background:' + k.warna + '"></span><b>' + esc(k.label) + '</b><small>' + (k.kerja ? k.mulai + '–' + k.selesai : esc(k.nama)) + '</small></button>').join('') +
             '<button data-k=""><span class="sw"></span><b>Kosongkan</b></button>';
         document.body.appendChild(m);
@@ -1496,7 +1497,8 @@
         const top = Math.min(window.innerHeight - m.offsetHeight - 8, rc.bottom + 4);
         m.style.top = Math.max(8, top) + 'px';
         m.style.left = Math.max(8, Math.min(window.innerWidth - m.offsetWidth - 8, rc.left)) + 'px';
-        $$('button', m).forEach(x => x.onclick = () => { setCell(r, i, x.dataset.k); closeCellMenu(); });
+        $$('button[data-k]', m).forEach(x => x.onclick = () => { setCell(r, i, x.dataset.k); closeCellMenu(); });
+        $('.cm-x', m).onclick = closeCellMenu;
         setTimeout(() => document.addEventListener('click', closeCellMenuOut), 0);
     }
     function closeCellMenuOut(e) { if (!e.target.closest('.cellmenu')) closeCellMenu(); }

@@ -349,10 +349,12 @@ table.tbl{border-collapse:collapse;width:100%;min-width:520px}
 
 /* Modal (bottom sheet di HP) */
 .modal{position:fixed;inset:0;z-index:60;background:rgba(15,23,42,.5);display:flex;align-items:flex-end;justify-content:center}
-.sheet{background:var(--surface);width:100%;max-height:92vh;overflow:auto;border-radius:18px 18px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom));box-shadow:var(--shadow-lg);animation:up .22s ease}
-.sheet-h{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.sheet-h h2{font-size:16px;margin:0;flex:1}
-@media(min-width:700px){.modal{align-items:center;padding:24px}.sheet{max-width:760px;max-height:90vh;border-radius:16px;padding:20px 22px}}
+.sheet{background:var(--surface);width:100%;max-height:92vh;max-height:92dvh;display:flex;flex-direction:column;overflow:hidden;border-radius:18px 18px 0 0;box-shadow:var(--shadow-lg);animation:up .22s ease}
+.sheet-h{display:flex;align-items:center;gap:8px;padding:12px 12px 10px 16px;border-bottom:1px solid var(--border);flex:none}
+.sheet-h h2{font-size:16px;margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sheet-x{width:40px;height:40px}
+.sheet-b{overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;flex:1;min-height:0;padding:12px 16px calc(16px + env(safe-area-inset-bottom))}
+@media(min-width:700px){.modal{align-items:center;padding:24px}.sheet{max-width:760px;max-height:90vh;max-height:90dvh;border-radius:16px}.sheet-h{padding:14px 16px 12px 22px}.sheet-b{padding:14px 22px 20px}}
 @keyframes up{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}
 .toast{position:fixed;left:50%;bottom:76px;transform:translateX(-50%);z-index:80;background:#1E1B4B;color:#fff;padding:10px 16px;border-radius:12px;font-weight:600;font-size:13.5px;box-shadow:var(--shadow-lg);max-width:calc(100% - 24px);text-align:center}
 .toast.err{background:#B00020}
@@ -404,7 +406,7 @@ table.tbl{border-collapse:collapse;width:100%;min-width:520px}
   <nav class="bnav" id="bnav"></nav>
 </div>
 
-<div id="modal" class="modal" hidden onclick="if(event.target===this)closeModal()"><div class="sheet" id="sheet"></div></div>
+<div id="modal" class="modal" hidden onclick="if(event.target===this)closeModal()" role="dialog" aria-modal="true" aria-labelledby="sheetTitle"><div class="sheet"><div class="sheet-h"><h2 id="sheetTitle"></h2><button type="button" class="icon-btn sheet-x" onclick="closeModal()" aria-label="Tutup" title="Tutup"></button></div><div class="sheet-b" id="sheet"></div></div></div>
 <div id="toast" class="toast" hidden></div>
 
 <script>
@@ -714,7 +716,10 @@ async function refreshBadges() {
 
 /* ---------- Modal ---------- */
 function openModal(title, body) {
-  $('#sheet').innerHTML = '<div class="sheet-h"><h2>' + esc(title) + '</h2><button class="icon-btn" onclick="closeModal()" aria-label="Tutup">' + ic('x') + '</button></div>' + body;
+  $('#sheetTitle').textContent = title || '';
+  const x = $('#modal .sheet-x'); if (!x.innerHTML) x.innerHTML = ic('x');
+  $('#sheet').innerHTML = body;
+  $('#sheet').scrollTop = 0;
   $('#modal').hidden = false;
   document.body.style.overflow = 'hidden';
 }
@@ -1485,7 +1490,7 @@ function renderDetail(t) {
     (bisaAlih ? '<button class="btn" id="dAlih">Alihkan ke PIC lain</button>' : '') +
     (canEdit('admin') && t.status !== 'Batal' ? '<button class="btn danger" id="dCancel">Batalkan temuan</button>' : '') + '</div>' +
     (isSuper() ? superBar('dSEdit', 'dSDel', 'temuan') : '');
-  $('#sheet').innerHTML = '<div class="sheet-h"><h2>' + esc(t.id) + '</h2><button class="icon-btn" onclick="closeModal()" aria-label="Tutup">' + ic('x') + '</button></div>' + h;
+  $('#sheetTitle').textContent = t.id; $('#sheet').innerHTML = h;
 
   $('#dWa').onclick = () => shareWA(waTemuan(t));
   if ($('#dSEdit')) $('#dSEdit').onclick = () => superTemuanEdit(t);
@@ -1617,7 +1622,7 @@ async function openPoinPic(nik, bulan) {
         '<td class="num"><span class="chip nodot ' + (r.poin < 0 ? 'c-err' : 'c-ok') + '">' + signed(r.poin) + '</span></td><td class="num tnum">' + signed(r.saldo) + '</td>' + (isSuper() ? '<td style="white-space:nowrap"><button class="btn sm" data-ope="' + r.id + '">Edit</button> <button class="btn sm danger" data-opd="' + r.id + '">Hapus</button></td>' : '') + '</tr>').join('') + '</table></div>'
       : emptyBox('Belum ada poin bulan ini');
     h += '<div class="grid g2" style="margin-top:12px"><button class="btn" onclick="closeModal();go(\'daftar\',{q:' + esc(JSON.stringify(d.nama)) + ',bulan:\'\'})">' + ic('list') + 'Temuan PIC ini</button><button class="btn primary" onclick="closeModal()">Tutup</button></div>';
-    $('#sheet').innerHTML = '<div class="sheet-h"><h2>' + esc(d.nama) + '</h2><button class="icon-btn" onclick="closeModal()" aria-label="Tutup">' + ic('x') + '</button></div>' + h;
+    $('#sheetTitle').textContent = d.nama; $('#sheet').innerHTML = h;
     const ulang = () => { openPoinPic(nik, bulan); if (S.view === 'poin') VIEWS.poin(); };
     const cari = id => Object.assign({ nama: d.nama }, d.rows.find(x => String(x.id) === id));
     $$('[data-ope]').forEach(b => b.onclick = () => superPoinEdit(cari(b.dataset.ope), ulang));
@@ -1717,7 +1722,7 @@ async function openPoinTim(tim, bulan, after) {
         '<div class="small muted">' + fDate(r.ts) + ' · ' + esc(r.area) + tm(r) + '</div>' + sx(r) + '</div>' +
         '<div style="text-align:right;flex:none"><span class="chip nodot ' + (r.poin < 0 ? 'c-err' : 'c-ok') + '">' + signed(r.poin) + '</span><div class="small muted tnum" style="margin-top:4px">saldo ' + signed(r.saldo) + '</div></div></div>').join('') + '</div>'
       : emptyBox('Belum ada poin tim bulan ini');
-    $('#sheet').innerHTML = '<div class="sheet-h"><h2>' + esc(d.tim) + '</h2><button class="icon-btn" onclick="closeModal()" aria-label="Tutup">' + ic('x') + '</button></div>' + h;
+    $('#sheetTitle').textContent = d.tim; $('#sheet').innerHTML = h;
     const ulang = () => { openPoinTim(tim, bulan, after); after && after(); };
     const cari = id => Object.assign({ nama: d.tim }, d.rows.find(x => String(x.id) === id));
     $$('[data-tpe]').forEach(b => b.onclick = () => superPoinEdit(cari(b.dataset.tpe), ulang));
